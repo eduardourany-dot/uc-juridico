@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v4.1.1 (Monitor DJEN: seleção individual de OABs + janela até 90 dias)
-const CACHE_NAME = 'uc-juridico-v4-1-1';
+// Service Worker — UC Jurídico v4.2.0 (Integração DataJud do CNJ)
+const CACHE_NAME = 'uc-juridico-v4-2-0';
 const APP_SHELL = [
   './',
   './index.html',

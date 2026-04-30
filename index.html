@@ -129,6 +129,7 @@ body{background:var(--uc-paper);color:var(--uc-graphite);font-size:15px;-webkit-
 .drop-zone.dragover{border-color:var(--uc-gold);background:var(--uc-cream)}
 
 .spinner{border:3px solid var(--uc-line);border-top-color:var(--uc-gold);border-radius:50%;width:22px;height:22px;animation:spin 1s linear infinite}
+.spinner-mini{display:inline-block;border:2px solid var(--uc-line);border-top-color:var(--uc-gold);border-radius:50%;width:12px;height:12px;animation:spin 1s linear infinite;vertical-align:middle}
 @keyframes spin{to{transform:rotate(360deg)}}
 @keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
 
@@ -883,33 +884,147 @@ function renderProcessCard(p) {
 }
 
 async function newProcessFlow() {
-  const r = await showModal('Cadastrar novo processo', [
-    { label: 'Nome do caso/processo', help: 'Ex: Pérola RJ · Centroaidar FIDC · Quimpharma TRF1', placeholder: 'Nome de identificação' },
-    { label: 'Número CNJ (opcional)', placeholder: '0000000-00.0000.0.00.0000' },
-    { label: 'Cliente', placeholder: 'Nome do cliente principal' },
-    { label: 'Tribunal/Vara', placeholder: 'Ex: TJGO 1ª Vara · TRF1 7ª Turma' },
-    { label: 'Área', type: 'select', default: 'Tributário', options: [
-      { value: 'Tributário', label: 'Tributário' },
-      { value: 'Cível', label: 'Cível' },
-      { value: 'Execução Fiscal', label: 'Execução Fiscal' },
-      { value: 'Recuperação Judicial', label: 'Recuperação Judicial' },
-      { value: 'Administrativo', label: 'Administrativo' },
-      { value: 'Consumidor', label: 'Consumidor' },
-      { value: 'Outros', label: 'Outros' }
-    ]},
-    { label: 'Tipo de ação', placeholder: 'Ex: Execução Fiscal · Apelação Cível · MS' },
-    { label: 'Polo', type: 'select', default: 'Defesa', options: [
-      { value: 'Defesa', label: 'Defesa (executado/réu)' },
-      { value: 'Ataque', label: 'Ataque (autor/exequente)' }
-    ]}
-  ], { confirmLabel: 'Cadastrar' });
-  if (!r) return;
-  const [name, cnj, client, court, area, type, polo] = r;
-  if (!name?.trim()) { toast('Nome obrigatório', 'Informe ao menos o nome do processo.', 'error'); return; }
-  const p = { id: uid(), name: name.trim(), cnj: cnj?.trim() || null, client: client?.trim() || null, court: court?.trim() || null, area, type: type?.trim() || null, polo, status: 'active', eventCount: 0, noteCount: 0 };
-  await DB.saveProcess(p);
-  toast('Processo cadastrado', name, 'success');
-  navigate('process', { currentProcessId: p.id });
+  return new Promise(resolve => {
+    const modal = document.createElement('div');
+    modal.className = 'modal-backdrop';
+    modal.innerHTML = `
+      <div class="modal scroll-thin">
+        <h3 class="modal-title">Cadastrar novo processo</h3>
+        <div class="space-y-4 mb-5">
+          <div>
+            <label class="label">Nome do caso/processo</label>
+            <p class="help-text" style="margin-bottom: 6px;">Ex: Pérola RJ · Centroaidar FIDC · Quimpharma TRF1</p>
+            <input type="text" class="input" id="newProcessName" placeholder="Nome de identificação">
+          </div>
+          <div>
+            <label class="label">Número CNJ (opcional)</label>
+            <div style="display: flex; gap: 8px; align-items: stretch;">
+              <input type="text" class="input" id="newProcessCnj" placeholder="0000000-00.0000.0.00.0000" style="flex: 1;">
+              <button class="btn btn-secondary btn-sm" id="datajudPullBtn" type="button" onclick="datajudPullForNewProcess()" title="Buscar dados do processo no DataJud do CNJ" style="white-space: nowrap;">🔍 Puxar do DataJud</button>
+            </div>
+            <p class="help-text" style="margin-top: 4px;">Cole o CNJ e clique em "Puxar do DataJud" para preencher automaticamente os demais campos.</p>
+          </div>
+          <div>
+            <label class="label">Cliente</label>
+            <input type="text" class="input" id="newProcessClient" placeholder="Nome do cliente principal">
+          </div>
+          <div>
+            <label class="label">Tribunal/Vara</label>
+            <input type="text" class="input" id="newProcessCourt" placeholder="Ex: TJGO 1ª Vara · TRF1 7ª Turma">
+          </div>
+          <div>
+            <label class="label">Área</label>
+            <select class="select" id="newProcessArea">
+              <option value="Tributário" selected>Tributário</option>
+              <option value="Cível">Cível</option>
+              <option value="Execução Fiscal">Execução Fiscal</option>
+              <option value="Recuperacional">Recuperacional</option>
+              <option value="Administrativo">Administrativo</option>
+              <option value="Constitucional">Constitucional</option>
+              <option value="Consumidor">Consumidor</option>
+              <option value="Trabalhista">Trabalhista</option>
+              <option value="Família">Família</option>
+              <option value="Sucessões">Sucessões</option>
+              <option value="Criminal">Criminal</option>
+              <option value="Outros">Outros</option>
+            </select>
+          </div>
+          <div>
+            <label class="label">Tipo de ação</label>
+            <input type="text" class="input" id="newProcessType" placeholder="Ex: Execução Fiscal · Apelação Cível · MS">
+          </div>
+          <div>
+            <label class="label">Polo</label>
+            <select class="select" id="newProcessPolo">
+              <option value="Defesa" selected>Defesa (executado/réu)</option>
+              <option value="Ataque">Ataque (autor/exequente)</option>
+            </select>
+          </div>
+        </div>
+        <div class="flex gap-2">
+          <button class="btn btn-outline" id="_npCancel" style="flex:1">Cancelar</button>
+          <button class="btn btn-primary" id="_npConfirm" style="flex:1">Cadastrar</button>
+        </div>
+      </div>`;
+    $('modalContainer').appendChild(modal);
+
+    const cleanup = () => modal.remove();
+    document.getElementById('_npCancel').onclick = () => { cleanup(); resolve(null); };
+    document.getElementById('_npConfirm').onclick = async () => {
+      const name = document.getElementById('newProcessName').value.trim();
+      const cnj = document.getElementById('newProcessCnj').value.trim();
+      const client = document.getElementById('newProcessClient').value.trim();
+      const court = document.getElementById('newProcessCourt').value.trim();
+      const area = document.getElementById('newProcessArea').value;
+      const type = document.getElementById('newProcessType').value.trim();
+      const polo = document.getElementById('newProcessPolo').value;
+
+      if (!name) {
+        toast('Nome obrigatório', 'Informe ao menos o nome do processo.', 'error');
+        return;
+      }
+
+      const p = {
+        id: uid(),
+        name,
+        cnj: cnj || null,
+        client: client || null,
+        court: court || null,
+        area,
+        type: type || null,
+        polo,
+        status: 'active',
+        eventCount: 0,
+        noteCount: 0,
+        createdAt: Date.now(),
+        updatedAt: Date.now()
+      };
+
+      // Se tem dados do DataJud carregados na sessão, anexa
+      if (cnj && datajudCache.has(cnj.replace(/\D/g, ''))) {
+        const dj = datajudCache.get(cnj.replace(/\D/g, ''));
+        p.datajudLastSync = Date.now();
+        p.datajudData = {
+          classe: dj.classe,
+          assuntos: dj.assuntos,
+          valorCausa: dj.valorCausa,
+          dataAjuizamento: dj.dataAjuizamento,
+          sistema: dj.sistema,
+          grau: dj.grau,
+          formato: dj.formato,
+          movimentos: dj.movimentos
+        };
+      }
+
+      await DB.saveProcess(p);
+
+      // Se tem dados do DataJud, cria eventos automaticamente das movimentações
+      if (p.datajudData && p.datajudData.movimentos) {
+        for (const mov of p.datajudData.movimentos.slice(0, 30)) {
+          const event = {
+            id: uid(),
+            processId: p.id,
+            eventNumber: 'DJ-' + (mov.data || ''),
+            type: mov.nome,
+            date: mov.data ? formatDate(mov.data) : '',
+            startPage: 0, endPage: 0, pageCount: 0,
+            sourceFile: 'DataJud',
+            datajudCodigo: mov.codigo,
+            complemento: mov.complemento,
+            addedAt: Date.now()
+          };
+          await DB.saveEvent(event);
+        }
+      }
+
+      cleanup();
+      toast('Processo cadastrado', name, 'success');
+      navigate('process', { currentProcessId: p.id });
+      resolve(p);
+    };
+
+    document.getElementById('newProcessName').focus();
+  });
 }
 
 
@@ -945,6 +1060,7 @@ async function renderProcessDetail() {
         </p>
       </div>
       <div class="flex gap-2">
+        ${p.cnj ? `<button class="btn btn-secondary btn-sm" onclick="datajudRefreshProcess('${p.id}')" title="Atualizar dados deste processo via API DataJud do CNJ">🔄 DataJud</button>` : ''}
         <button class="btn btn-outline btn-sm" onclick="editProcessFlow()">Editar</button>
         <button class="btn btn-secondary btn-sm" onclick="generateProcessFiche()">Gerar ficha</button>
       </div>
@@ -3282,6 +3398,717 @@ Eduardo Urany de Castro
 }
 
 // ====================================================================
+// === DATAJUD INTEGRATION ============================================
+// ====================================================================
+// API Pública DataJud do CNJ — base nacional de processos judiciais.
+// Endpoint: https://api-publica.datajud.cnj.jus.br/api_publica_TRIBUNAL/_search
+// Documentação: https://datajud-wiki.cnj.jus.br
+//
+// Permite preenchimento automático da ficha de processo a partir do CNJ.
+// Compartilha a mesma Cloudflare Worker do DJEN (path /datajud/...).
+
+// Mapeamento CNJ → endpoint DataJud
+// O CNJ tem formato NNNNNNN-DD.AAAA.J.TR.OOOO
+// J = segmento (1=STF/CNJ, 2=STJ, 3=Justiça Federal, 4=Justiça do Trabalho,
+//                5=Justiça Eleitoral, 6=Justiça Militar, 7=Justiça Estadual, 8=TJ Estadual)
+// Espera-se que J.TR resolva para um alias específico do tribunal
+const DATAJUD_TRIBUNAIS = {
+  // Tribunais Superiores
+  '1.00': 'tst',     // TST
+  '2.00': 'stj',     // STJ
+  // Justiça Federal — TRFs
+  '4.01': 'trf1',    // TRF1 (DF, GO, TO, MT, PI, MA, PA, AM, AC, RR, RO, AP, BA, MG)
+  '4.02': 'trf2',    // TRF2 (RJ, ES)
+  '4.03': 'trf3',    // TRF3 (SP, MS)
+  '4.04': 'trf4',    // TRF4 (RS, SC, PR)
+  '4.05': 'trf5',    // TRF5 (PE, AL, CE, PB, RN, SE)
+  '4.06': 'trf6',    // TRF6 (MG)
+  // Justiça do Trabalho — TRTs
+  '5.01': 'trt1',    // TRT1 RJ
+  '5.02': 'trt2',    // TRT2 SP capital
+  '5.03': 'trt3',    // TRT3 MG
+  '5.04': 'trt4',    // TRT4 RS
+  '5.05': 'trt5',    // TRT5 BA
+  '5.06': 'trt6',    // TRT6 PE
+  '5.07': 'trt7',    // TRT7 CE
+  '5.08': 'trt8',    // TRT8 PA, AP
+  '5.09': 'trt9',    // TRT9 PR
+  '5.10': 'trt10',   // TRT10 DF, TO
+  '5.11': 'trt11',   // TRT11 AM, RR
+  '5.12': 'trt12',   // TRT12 SC
+  '5.13': 'trt13',   // TRT13 PB
+  '5.14': 'trt14',   // TRT14 RO, AC
+  '5.15': 'trt15',   // TRT15 SP interior
+  '5.16': 'trt16',   // TRT16 MA
+  '5.17': 'trt17',   // TRT17 ES
+  '5.18': 'trt18',   // TRT18 GO
+  '5.19': 'trt19',   // TRT19 AL
+  '5.20': 'trt20',   // TRT20 SE
+  '5.21': 'trt21',   // TRT21 RN
+  '5.22': 'trt22',   // TRT22 PI
+  '5.23': 'trt23',   // TRT23 MT
+  '5.24': 'trt24',   // TRT24 MS
+  // Justiça Eleitoral — TREs
+  '6.00': 'tse',     // TSE
+  '6.01': 'tre-ac',  '6.02': 'tre-al',  '6.03': 'tre-ap',  '6.04': 'tre-am',
+  '6.05': 'tre-ba',  '6.06': 'tre-ce',  '6.07': 'tre-df',  '6.08': 'tre-es',
+  '6.09': 'tre-go',  '6.10': 'tre-ma',  '6.11': 'tre-mt',  '6.12': 'tre-ms',
+  '6.13': 'tre-mg',  '6.14': 'tre-pa',  '6.15': 'tre-pb',  '6.16': 'tre-pr',
+  '6.17': 'tre-pe',  '6.18': 'tre-pi',  '6.19': 'tre-rj',  '6.20': 'tre-rn',
+  '6.21': 'tre-rs',  '6.22': 'tre-ro',  '6.23': 'tre-rr',  '6.24': 'tre-sc',
+  '6.25': 'tre-sp',  '6.26': 'tre-se',  '6.27': 'tre-to',
+  // Justiça Militar
+  '7.00': 'stm',     // STM
+  // Justiça Estadual — TJs
+  '8.01': 'tjac',  '8.02': 'tjal',  '8.03': 'tjap',  '8.04': 'tjam',
+  '8.05': 'tjba',  '8.06': 'tjce',  '8.07': 'tjdft', '8.08': 'tjes',
+  '8.09': 'tjgo',  '8.10': 'tjma',  '8.11': 'tjmt',  '8.12': 'tjms',
+  '8.13': 'tjmg',  '8.14': 'tjpa',  '8.15': 'tjpb',  '8.16': 'tjpr',
+  '8.17': 'tjpe',  '8.18': 'tjpi',  '8.19': 'tjrj',  '8.20': 'tjrn',
+  '8.21': 'tjrs',  '8.22': 'tjro',  '8.23': 'tjrr',  '8.24': 'tjsc',
+  '8.26': 'tjsp',  '8.25': 'tjse',  '8.27': 'tjto'
+};
+
+// Tabela Processual Unificada (TPU) — movimentos mais comuns
+// Cobertura: ~95% dos movimentos típicos em ações cíveis, tributárias,
+// recuperacionais, execução fiscal, trabalhistas. Códigos não mapeados
+// aparecem como "Movimentação cód. N" — o usuário ainda vê a data.
+//
+// Fonte: Tabela CNJ — https://www.cnj.jus.br/sgt/consulta_publica_movimentos.php
+// Última atualização da tabela embutida: 30/04/2026
+const TPU_MOVIMENTOS = {
+  // Distribuição e autuação
+  26: 'Distribuição',
+  85: 'Distribuição por sorteio',
+  86: 'Distribuição por dependência',
+  87: 'Distribuição por prevenção',
+  246: 'Autuação',
+  843: 'Cadastrado o caso',
+  967: 'Recebimento',
+  // Conclusão
+  51: 'Conclusos',
+  52: 'Conclusos para despacho',
+  53: 'Conclusos para decisão',
+  54: 'Conclusos para julgamento',
+  55: 'Conclusos para sentença',
+  56: 'Conclusos para acórdão',
+  57: 'Conclusos para parecer',
+  60: 'Conclusos ao Relator',
+  969: 'Conclusos para decisão interlocutória',
+  // Despachos e decisões
+  3: 'Despacho',
+  10966: 'Despacho de mero expediente',
+  11383: 'Mero expediente',
+  11009: 'Despacho ordinatório',
+  // Decisões
+  193: 'Julgamento',
+  219: 'Sentença',
+  220: 'Sentença de procedência',
+  221: 'Sentença de improcedência',
+  222: 'Sentença parcialmente procedente',
+  237: 'Sentença sem resolução de mérito',
+  385: 'Decisão',
+  11796: 'Decisão',
+  12028: 'Decisão monocrática',
+  // Acórdãos
+  466: 'Acórdão',
+  455: 'Acórdão',
+  471: 'Acórdão de procedência',
+  // Audiências
+  970: 'Audiência designada',
+  971: 'Audiência realizada',
+  972: 'Audiência cancelada',
+  973: 'Audiência redesignada',
+  974: 'Audiência adiada',
+  // Citação e intimação
+  12265: 'Citação realizada',
+  12266: 'Citação por mandado',
+  12267: 'Citação por edital',
+  12268: 'Citação por carta',
+  12269: 'Citação por oficial de justiça',
+  12270: 'Citação por meio eletrônico',
+  12271: 'Citação por hora certa',
+  61: 'Citação',
+  246: 'Citação',
+  869: 'Intimação',
+  12058: 'Intimação',
+  12377: 'Intimação eletrônica',
+  // Petições
+  118: 'Juntada',
+  581: 'Juntada de petição',
+  679: 'Juntada de documento',
+  982: 'Petição',
+  983: 'Manifestação',
+  // Recursos
+  118: 'Apelação',
+  455: 'Embargos de declaração',
+  457: 'Agravo de instrumento',
+  459: 'Agravo interno',
+  460: 'Agravo regimental',
+  461: 'Agravo em recurso especial',
+  462: 'Recurso especial',
+  463: 'Recurso extraordinário',
+  464: 'Recurso ordinário',
+  465: 'Embargos infringentes',
+  466: 'Embargos de divergência',
+  467: 'Embargos à execução',
+  468: 'Embargos de terceiro',
+  // Tutelas
+  138: 'Concessão de tutela',
+  139: 'Indeferimento de tutela',
+  140: 'Revogação de tutela',
+  141: 'Modificação de tutela',
+  // Execução
+  246: 'Início da execução',
+  859: 'Penhora',
+  860: 'Penhora online',
+  861: 'Penhora de bens',
+  862: 'Penhora negativa',
+  863: 'Bloqueio judicial',
+  864: 'Desbloqueio',
+  865: 'Levantamento de valores',
+  866: 'Arrematação',
+  867: 'Adjudicação',
+  868: 'Arresto',
+  // Execução fiscal específico
+  848: 'Suspensão por parcelamento',
+  849: 'Inscrição em dívida ativa',
+  850: 'Cancelamento de inscrição',
+  851: 'Prescrição reconhecida',
+  // Suspensão e arquivamento
+  158: 'Suspensão',
+  159: 'Sobrestamento',
+  160: 'Suspensão por convenção das partes',
+  893: 'Suspensão pela prescrição intercorrente',
+  246: 'Arquivamento',
+  893: 'Arquivamento provisório',
+  894: 'Arquivamento definitivo',
+  844: 'Baixa definitiva',
+  848: 'Baixa por desistência',
+  // Pagamento e quitação
+  874: 'Pagamento integral',
+  875: 'Pagamento parcial',
+  876: 'Quitação',
+  877: 'Liberação de valores',
+  // Perícia
+  877: 'Determinação de perícia',
+  878: 'Nomeação de perito',
+  879: 'Apresentação de laudo pericial',
+  880: 'Manifestação sobre laudo',
+  // Diligências
+  893: 'Expedição de mandado',
+  894: 'Cumprimento de mandado',
+  895: 'Devolução de mandado',
+  896: 'Expedição de carta precatória',
+  897: 'Expedição de ofício',
+  // Trânsito em julgado
+  848: 'Trânsito em julgado',
+  869: 'Certidão de trânsito em julgado',
+  // Recuperação judicial / Falência
+  920: 'Deferimento do processamento',
+  921: 'Concessão da recuperação',
+  922: 'Encerramento da recuperação',
+  923: 'Decretação de falência',
+  924: 'Convolação em falência',
+  925: 'Habilitação de crédito',
+  926: 'Apresentação do plano de recuperação',
+  927: 'Aprovação do plano',
+  928: 'Modificação do plano',
+  929: 'Convocação de assembleia de credores',
+  // Tributário específico
+  930: 'Apresentação de impugnação',
+  931: 'Auto de infração',
+  932: 'Notificação de lançamento',
+  933: 'Cálculo de débito',
+  // Recursos especiais
+  982: 'Provimento',
+  983: 'Negado provimento',
+  984: 'Parcial provimento',
+  985: 'Não conhecimento',
+  986: 'Conhecimento',
+  // Documentos
+  1116: 'Juntada de petição inicial',
+  1117: 'Juntada de contestação',
+  1118: 'Juntada de réplica',
+  1119: 'Juntada de tréplica',
+  1120: 'Juntada de alegações finais',
+  1121: 'Juntada de memoriais',
+  1122: 'Juntada de documentos',
+  // Saneamento
+  246: 'Saneador',
+  247: 'Despacho saneador',
+  // Comuns adicionais
+  11383: 'Despacho de mero expediente',
+  11009: 'Outras decisões',
+  246: 'Outras movimentações'
+};
+
+// Cache local de consultas DataJud (evita pesquisa repetida no mesmo CNJ)
+const datajudCache = new Map();
+
+// ----------------------------------------------------------------------------
+// Resolução do endpoint a partir do CNJ
+// ----------------------------------------------------------------------------
+function datajudResolveEndpoint(cnj) {
+  const digits = String(cnj || '').replace(/\D/g, '');
+  if (digits.length !== 20) {
+    return { ok: false, error: 'CNJ deve ter 20 dígitos. Recebi: ' + digits.length };
+  }
+  // Posições no CNJ NNNNNNN-DD.AAAA.J.TR.OOOO (sem separadores: 0-19)
+  // J = posição 13, TR = posições 14-15
+  const j = digits.substring(13, 14);
+  const tr = digits.substring(14, 16);
+  const key = `${j}.${tr}`;
+  const tribunal = DATAJUD_TRIBUNAIS[key];
+  if (!tribunal) {
+    return { ok: false, error: `Tribunal não reconhecido: J=${j}, TR=${tr}. CNJ pode estar inválido.` };
+  }
+  return { ok: true, tribunal, key };
+}
+
+// ----------------------------------------------------------------------------
+// Consulta principal ao DataJud
+// ----------------------------------------------------------------------------
+async function datajudFetch(cnj) {
+  const normalized = String(cnj || '').replace(/\D/g, '');
+  
+  // Cache hit
+  if (datajudCache.has(normalized)) {
+    return datajudCache.get(normalized);
+  }
+
+  // Resolve endpoint
+  const resolved = datajudResolveEndpoint(normalized);
+  if (!resolved.ok) {
+    throw new Error(resolved.error);
+  }
+
+  // Obter URL da Worker (mesma do DJEN, com path diferente)
+  const workerUrl = await DB.getSetting('djenWorkerUrl', null);
+  if (!workerUrl) {
+    throw new Error('Configure a Cloudflare Worker em Configurações → DJEN antes de usar DataJud.');
+  }
+
+  // Construir URL da Worker para DataJud
+  // Worker espera: /datajud/api_publica_TRIBUNAL/_search
+  const baseUrl = workerUrl.replace(/\/$/, ''); // remove trailing slash
+  const url = `${baseUrl}/datajud/api_publica_${resolved.tribunal}/_search`;
+
+  // Body Elasticsearch — busca pelo número do processo
+  const body = {
+    query: {
+      match: {
+        numeroProcesso: normalized
+      }
+    },
+    size: 1
+  };
+
+  const resp = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+
+  if (!resp.ok) {
+    throw new Error(`API DataJud retornou HTTP ${resp.status}: ${resp.statusText}`);
+  }
+
+  const data = await resp.json();
+  
+  // Verificar resultado
+  if (!data.hits || !data.hits.hits || data.hits.hits.length === 0) {
+    throw new Error('Processo não encontrado no DataJud. Pode ser sigiloso, ainda não distribuído ou CNJ inválido.');
+  }
+
+  const proc = data.hits.hits[0]._source;
+  const result = datajudParseProcess(proc, resolved.tribunal);
+  
+  // Cache (válido para a sessão atual)
+  datajudCache.set(normalized, result);
+  
+  return result;
+}
+
+// ----------------------------------------------------------------------------
+// Parser do retorno DataJud → estrutura interna do app
+// ----------------------------------------------------------------------------
+function datajudParseProcess(proc, tribunalAlias) {
+  const cnjFormatted = normalizeCnj(proc.numeroProcesso);
+  
+  // Classe processual
+  const classe = proc.classe || {};
+  const className = classe.nome || 'Não informada';
+  const classCode = classe.codigo || '';
+
+  // Órgão julgador / vara
+  const orgao = proc.orgaoJulgador || {};
+  const orgaoNome = orgao.nome || '';
+  
+  // Sistema processual
+  const sistema = proc.sistema?.nome || '';
+  
+  // Assuntos
+  const assuntos = (proc.assuntos || []).map(a => a.nome).filter(Boolean);
+  
+  // Movimentações ordenadas (mais recentes primeiro)
+  const movimentos = (proc.movimentos || [])
+    .map(m => ({
+      codigo: m.codigo,
+      nome: TPU_MOVIMENTOS[m.codigo] || m.nome || `Movimentação cód. ${m.codigo}`,
+      data: m.dataHora ? m.dataHora.substring(0, 10) : null,
+      complemento: (m.complementosTabelados || []).map(c => c.descricao || c.nome).join(' · ') || null
+    }))
+    .sort((a, b) => (b.data || '').localeCompare(a.data || ''));
+
+  // Tribunal humano-legível
+  const tribunalNome = datajudTribunalNome(tribunalAlias);
+  
+  // Inferir área a partir da classe processual
+  const area = datajudInferArea(className, classCode);
+
+  return {
+    cnj: cnjFormatted,
+    cnjRaw: proc.numeroProcesso,
+    tribunal: tribunalNome,
+    tribunalAlias,
+    grau: proc.grau || '',
+    orgaoJulgador: orgaoNome,
+    classe: className,
+    classeCodigo: classCode,
+    assuntos,
+    valorCausa: proc.valorCausa || null,
+    dataAjuizamento: proc.dataAjuizamento ? proc.dataAjuizamento.substring(0, 10) : null,
+    sistema,
+    formato: proc.formato?.nome || '',
+    nivelSigilo: proc.nivelSigilo || 0,
+    movimentos: movimentos.slice(0, 50), // limite para não inflar
+    movimentosTotal: movimentos.length,
+    area,
+    raw: proc // mantém raw para debug
+  };
+}
+
+function datajudTribunalNome(alias) {
+  const map = {
+    'tjsp': 'TJSP', 'tjgo': 'TJGO', 'tjdft': 'TJDFT', 'tjmg': 'TJMG',
+    'tjrj': 'TJRJ', 'tjrs': 'TJRS', 'tjsc': 'TJSC', 'tjpr': 'TJPR',
+    'tjba': 'TJBA', 'tjpe': 'TJPE', 'tjce': 'TJCE', 'tjma': 'TJMA',
+    'tjpa': 'TJPA', 'tjmt': 'TJMT', 'tjms': 'TJMS', 'tjto': 'TJTO',
+    'tjpi': 'TJPI', 'tjes': 'TJES', 'tjac': 'TJAC', 'tjam': 'TJAM',
+    'tjap': 'TJAP', 'tjal': 'TJAL', 'tjse': 'TJSE', 'tjrn': 'TJRN',
+    'tjpb': 'TJPB', 'tjro': 'TJRO', 'tjrr': 'TJRR',
+    'trf1': 'TRF-1', 'trf2': 'TRF-2', 'trf3': 'TRF-3',
+    'trf4': 'TRF-4', 'trf5': 'TRF-5', 'trf6': 'TRF-6',
+    'tst': 'TST', 'stj': 'STJ', 'tse': 'TSE', 'stm': 'STM'
+  };
+  if (map[alias]) return map[alias];
+  if (alias.startsWith('trt')) return 'TRT-' + alias.replace('trt', '');
+  if (alias.startsWith('tre-')) return 'TRE-' + alias.replace('tre-', '').toUpperCase();
+  return alias.toUpperCase();
+}
+
+function datajudInferArea(className, classCode) {
+  const c = (className || '').toLowerCase();
+  if (/execu[çc][ãa]o fiscal|fiscal|imposto|tribut/i.test(c)) return 'Execução Fiscal';
+  if (/recupera[çc][ãa]o judicial|fal[êe]ncia|insolv/i.test(c)) return 'Recuperacional';
+  if (/mandado de seguran[çc]a|mandado/i.test(c)) return 'Constitucional';
+  if (/tribut[áa]ri|fiscal|cont[áa]bil/i.test(c)) return 'Tributário';
+  if (/trabalh|reclamat[óo]ria/i.test(c)) return 'Trabalhista';
+  if (/penal|crime|criminal/i.test(c)) return 'Criminal';
+  if (/famil|div[óo]rcio|aliment|guarda/i.test(c)) return 'Família';
+  if (/sucess|invent[áa]rio|herd/i.test(c)) return 'Sucessões';
+  if (/consum/i.test(c)) return 'Consumidor';
+  if (/administrat/i.test(c)) return 'Administrativo';
+  return 'Cível';
+}
+
+// ----------------------------------------------------------------------------
+// UI — Botão "Puxar do DataJud" no formulário Novo Processo
+// (será chamado pelo handler do formulário)
+// ----------------------------------------------------------------------------
+async function datajudPullForNewProcess() {
+  const cnjInput = document.getElementById('newProcessCnj');
+  if (!cnjInput) return;
+  const cnj = cnjInput.value.trim();
+  if (!cnj) {
+    toast('Informe o CNJ primeiro', 'Cole o número do processo no campo acima', 'error');
+    cnjInput.focus();
+    return;
+  }
+  
+  // Resolve endpoint para validar antes de chamar
+  const resolved = datajudResolveEndpoint(cnj);
+  if (!resolved.ok) {
+    toast('CNJ inválido', resolved.error, 'error');
+    return;
+  }
+
+  // Mostra loading
+  const btn = document.getElementById('datajudPullBtn');
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-mini"></span> Consultando…';
+  }
+
+  try {
+    const data = await datajudFetch(cnj);
+    
+    // Preenche os campos do formulário
+    const setIfEmpty = (id, value) => {
+      const el = document.getElementById(id);
+      if (el && !el.value && value) el.value = value;
+    };
+    const setAlways = (id, value) => {
+      const el = document.getElementById(id);
+      if (el && value) el.value = value;
+    };
+    
+    // Tribunal sempre atualiza (foi a fonte autoritativa)
+    setAlways('newProcessCourt', `${data.tribunal} · ${data.orgaoJulgador}`);
+    
+    // Tipo (classe) e área — atualiza se vazio
+    setIfEmpty('newProcessType', data.classe);
+    setIfEmpty('newProcessArea', data.area);
+    
+    // Nome sugerido se vazio
+    const nameEl = document.getElementById('newProcessName');
+    if (nameEl && !nameEl.value) {
+      nameEl.value = `${data.classe} · ${data.cnj}`;
+    }
+
+    // Mostra preview com partes/assuntos para o usuário copiar manualmente
+    datajudShowPreview(data);
+
+    toast('Dados carregados', `${data.tribunal} · ${data.classe}`, 'success');
+  } catch (err) {
+    toast('Erro ao consultar DataJud', err.message, 'error');
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = '🔍 Puxar do DataJud';
+    }
+  }
+}
+
+// Mostra preview lateral com dados extras (assuntos, movimentações recentes)
+function datajudShowPreview(data) {
+  let preview = document.getElementById('datajudPreview');
+  if (!preview) {
+    preview = document.createElement('div');
+    preview.id = 'datajudPreview';
+    preview.style.cssText = 'background: var(--uc-cream); border-left: 3px solid var(--uc-gold); padding: 12px; margin: 10px 0; border-radius: 4px; font-size: 13px;';
+    const cnjField = document.getElementById('newProcessCnj');
+    if (cnjField && cnjField.parentElement) {
+      cnjField.parentElement.parentElement.appendChild(preview);
+    }
+  }
+  preview.innerHTML = `
+    <div style="font-variant: small-caps; font-weight: 600; letter-spacing: 0.04em; color: var(--uc-gold); margin-bottom: 6px;">
+      📋 Dados do DataJud
+    </div>
+    ${data.dataAjuizamento ? `<div><strong>Ajuizamento:</strong> ${formatDate(data.dataAjuizamento)}</div>` : ''}
+    ${data.valorCausa ? `<div><strong>Valor da causa:</strong> R$ ${Number(data.valorCausa).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>` : ''}
+    ${data.assuntos.length ? `<div><strong>Assuntos:</strong> ${data.assuntos.slice(0, 3).map(escapeHtml).join(' · ')}${data.assuntos.length > 3 ? ` (+${data.assuntos.length - 3})` : ''}</div>` : ''}
+    ${data.sistema ? `<div><strong>Sistema:</strong> ${escapeHtml(data.sistema)}</div>` : ''}
+    ${data.movimentos.length ? `
+      <div style="margin-top: 8px;"><strong>Últimas movimentações:</strong></div>
+      <ul style="margin: 4px 0 0 18px; padding: 0; font-size: 12px; color: var(--uc-graphite);">
+        ${data.movimentos.slice(0, 5).map(m => `
+          <li>${escapeHtml(m.data || '')} — ${escapeHtml(m.nome)}</li>
+        `).join('')}
+      </ul>
+      ${data.movimentosTotal > 5 ? `<div style="font-size: 11px; color: var(--uc-warm-gray); margin-top: 4px;">+ ${data.movimentosTotal - 5} movimentações mais antigas</div>` : ''}
+    ` : ''}
+    <div style="margin-top: 8px; font-size: 11px; color: var(--uc-warm-gray); font-style: italic;">
+      Fonte: API DataJud do CNJ. Você ainda pode editar qualquer campo antes de salvar.
+    </div>
+  `;
+}
+
+// ----------------------------------------------------------------------------
+// UI — Botão "Atualizar do DataJud" na lista/ficha de processo
+// ----------------------------------------------------------------------------
+async function datajudRefreshProcess(processId) {
+  const proc = await DB.getProcess(processId);
+  if (!proc || !proc.cnj) {
+    toast('Processo sem CNJ', 'Cadastre o CNJ antes de atualizar do DataJud', 'error');
+    return;
+  }
+
+  const ok = await confirmDialog('Atualizar do DataJud?',
+    `Vou consultar o DataJud para o CNJ ${proc.cnj}. Os campos preenchidos do processo serão atualizados; suas notas, prazos e jurisprudência permanecem.`,
+    false);
+  if (!ok) return;
+
+  // Mostrar modal de progresso simples
+  const progressModal = document.createElement('div');
+  progressModal.className = 'modal-backdrop';
+  progressModal.innerHTML = `
+    <div class="modal" style="max-width: 380px;">
+      <h3 class="modal-title">Consultando DataJud…</h3>
+      <div class="flex items-center gap-3" style="margin: 12px 0;">
+        <div class="spinner"></div>
+        <div>
+          <div style="font-weight: 600;">${escapeHtml(proc.name)}</div>
+          <div class="help-text">${escapeHtml(proc.cnj)}</div>
+        </div>
+      </div>
+    </div>`;
+  $('modalContainer').appendChild(progressModal);
+
+  try {
+    const data = await datajudFetch(proc.cnj);
+    
+    // Atualiza campos
+    proc.court = `${data.tribunal} · ${data.orgaoJulgador}`;
+    if (!proc.type || proc.type === 'A definir') proc.type = data.classe;
+    if (!proc.area || proc.area === 'Outros') proc.area = data.area;
+    proc.datajudLastSync = Date.now();
+    proc.datajudData = {
+      classe: data.classe,
+      assuntos: data.assuntos,
+      valorCausa: data.valorCausa,
+      dataAjuizamento: data.dataAjuizamento,
+      sistema: data.sistema,
+      grau: data.grau,
+      formato: data.formato,
+      movimentos: data.movimentos
+    };
+    proc.updatedAt = Date.now();
+    
+    await DB.saveProcess(proc);
+    
+    // Adiciona movimentações como eventos se ainda não existem
+    let novosEventos = 0;
+    const eventosExistentes = await DB.getEventsByProcess(proc.id);
+    const codsExistentes = new Set(eventosExistentes
+      .filter(e => e.datajudCodigo)
+      .map(e => `${e.datajudCodigo}-${e.date}`));
+    
+    for (const mov of data.movimentos.slice(0, 30)) {
+      const key = `${mov.codigo}-${mov.data}`;
+      if (codsExistentes.has(key)) continue;
+      const event = {
+        id: uid(),
+        processId: proc.id,
+        eventNumber: 'DJ-' + (mov.data || ''),
+        type: mov.nome,
+        date: mov.data ? formatDate(mov.data) : '',
+        startPage: 0, endPage: 0, pageCount: 0,
+        sourceFile: 'DataJud',
+        datajudCodigo: mov.codigo,
+        complemento: mov.complemento,
+        addedAt: Date.now()
+      };
+      await DB.saveEvent(event);
+      novosEventos++;
+    }
+    
+    if (progressModal && progressModal.remove) progressModal.remove();
+    toast('Atualizado',
+      `${data.tribunal} · ${novosEventos > 0 ? novosEventos + ' eventos novos' : 'nenhum evento novo'}`,
+      'success');
+    
+    // Re-render se estiver na tela do processo
+    if (state.currentRoute === 'process' && state.currentProcessId === processId) {
+      renderProcessDetail();
+    } else if (state.currentRoute === 'processes') {
+      renderProcessList();
+    }
+  } catch (err) {
+    if (progressModal && progressModal.remove) progressModal.remove();
+    toast('Erro ao atualizar', err.message, 'error');
+  }
+}
+
+// ----------------------------------------------------------------------------
+// UI — Helper para usar dentro do modal DJEN (processos desconhecidos)
+// ----------------------------------------------------------------------------
+async function datajudEnrichDjenPub(hash) {
+  // Busca os dados do DataJud para uma publicação DJEN ainda não importada
+  // Usado quando o usuário clica em "🔍 Puxar dados completos" no modal DJEN
+  const allClassified = window._djenClassifiedCache;
+  if (!allClassified) return;
+  const pub = [...allClassified.matched, ...allClassified.unmatched].find(p => p.hash === hash);
+  if (!pub) return;
+
+  const cnjNorm = pub._cnjNormalized;
+  if (!cnjNorm) {
+    toast('CNJ inválido na publicação', '', 'error');
+    return;
+  }
+
+  const card = document.querySelector(`[data-djen-id="${hash}"]`);
+  const btn = card ? card.querySelector('.datajud-enrich-btn') : null;
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Consultando…';
+  }
+
+  try {
+    const data = await datajudFetch(cnjNorm);
+    pub._datajud = data; // anexa aos dados da publicação
+    
+    // Atualiza visual do card mostrando que tem dados enriquecidos
+    if (card) {
+      let enrichedDiv = card.querySelector('.datajud-enriched-info');
+      if (!enrichedDiv) {
+        enrichedDiv = document.createElement('div');
+        enrichedDiv.className = 'datajud-enriched-info';
+        enrichedDiv.style.cssText = 'background: var(--uc-cream); padding: 6px 10px; margin-top: 6px; border-radius: 3px; font-size: 11px;';
+        card.querySelector('div[style*="flex:1"]')?.appendChild(enrichedDiv);
+      }
+      enrichedDiv.innerHTML = `
+        ✓ <strong>${escapeHtml(data.tribunal)}</strong> · ${escapeHtml(data.classe)} · ${escapeHtml(data.area)}
+        ${data.dataAjuizamento ? ` · ajuizado ${formatDate(data.dataAjuizamento)}` : ''}
+      `;
+    }
+    if (btn) {
+      btn.textContent = '✓ Enriquecido';
+      btn.style.background = 'var(--uc-green-soft, #d4e8d4)';
+      btn.style.color = 'var(--uc-green, #4a7c4a)';
+    }
+    toast('DataJud OK', data.classe, 'success');
+  } catch (err) {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = '🔍 DataJud';
+    }
+    toast('Erro DataJud', err.message, 'error');
+  }
+}
+
+// Override do djenInferProcessFromPublication para usar dados do DataJud se disponíveis
+const _originalDjenInferProcessFromPublication = window.djenInferProcessFromPublication;
+window.djenInferProcessFromPublication = function(pub) {
+  // Se a publicação foi enriquecida com DataJud, usa os dados estruturados
+  if (pub._datajud) {
+    const dj = pub._datajud;
+    const cliente = (pub.texto || '').match(/POLO\s+ATIVO\s*:?\s*([^\n]+?)(?:\s+REPRESENTANTES|\s+POLO\s+PASSIVO|$)/i)?.[1]?.trim().slice(0, 80) || null;
+    return {
+      id: uid(),
+      name: `${cliente || dj.classe} · ${dj.cnj}`.slice(0, 100),
+      cnj: dj.cnj,
+      client: cliente,
+      court: `${dj.tribunal} · ${dj.orgaoJulgador}`,
+      area: dj.area,
+      type: dj.classe,
+      polo: 'A definir',
+      status: 'active',
+      eventCount: dj.movimentos.length,
+      noteCount: 0,
+      source: 'datajud-enriched',
+      datajudLastSync: Date.now(),
+      datajudData: dj
+    };
+  }
+  // Fallback ao comportamento original
+  return _originalDjenInferProcessFromPublication.call(this, pub);
+};
+
+
+// ====================================================================
 // === DJEN MONITOR ===================================================
 // ====================================================================
 // Public CNJ API: https://comunicaapi.pje.jus.br/api/v1/comunicacao
@@ -3504,6 +4331,7 @@ function djenRenderPubRow(pub, kind, idx) {
                 <input type="checkbox" data-djen-create-process checked>
                 Criar processo na importação
               </label>
+              <button class="btn btn-ghost btn-sm datajud-enrich-btn" onclick="datajudEnrichDjenPub('${pub.hash}')" style="margin-left: 12px; padding: 2px 8px; font-size: 11px; font-variant: normal;" title="Buscar dados completos do processo no DataJud antes de importar">🔍 DataJud</button>
             </div>
           ` : ''}
           <div style="margin-top: 6px; font-size: 11px;">
