@@ -1,0 +1,3809 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>UC Jurídico · Urany de Castro Advocacia</title>
+
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0a0a0a">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="UC Jurídico">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+<meta name="description" content="Urany de Castro Advocacia · Suite jurídica para gestão e análise de processos. 100% local.">
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/diff@5.2.0/dist/diff.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
+<script src="https://cdn.tailwindcss.com"></script>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+<style>
+:root {
+  --uc-black:#0a0a0a; --uc-graphite:#1f1f1f; --uc-warm-gray:#6b6b68; --uc-soft-gray:#9b9b96;
+  --uc-paper:#fafaf7; --uc-cream:#f4f1e8; --uc-line:#d4cfc0; --uc-line-soft:#e8e3d4;
+  --uc-gold:#8a6f3d; --uc-gold-soft:#c9b687; --uc-gold-pale:#f0e9d6;
+  --uc-red:#a8472d; --uc-red-soft:#f3d8cf; --uc-amber:#b87f1c; --uc-amber-soft:#f5e3c4;
+  --uc-green:#4a7c4a; --uc-green-soft:#d4e8d4;
+  --shadow-sm:0 1px 2px rgba(0,0,0,0.04); --shadow-md:0 4px 12px rgba(0,0,0,0.06); --shadow-lg:0 12px 30px rgba(0,0,0,0.08);
+}
+[data-theme="dark"] {
+  --uc-black:#f5f3ee; --uc-graphite:#d4d0c8; --uc-warm-gray:#a8a39a; --uc-soft-gray:#6b6b66;
+  --uc-paper:#16140f; --uc-cream:#221f18; --uc-line:#3a3528; --uc-line-soft:#2a2620;
+  --uc-gold:#c9b687; --uc-gold-soft:#8a6f3d; --uc-gold-pale:#2a2418;
+  --uc-red-soft:#4a2418; --uc-amber-soft:#3a2c14; --uc-green-soft:#1f3522;
+}
+*{font-family:'Inter',system-ui,-apple-system,sans-serif;box-sizing:border-box}
+html,body{margin:0;padding:0;height:100%}
+body{background:var(--uc-paper);color:var(--uc-graphite);font-size:15px;-webkit-font-smoothing:antialiased}
+.font-serif{font-family:'EB Garamond','Times New Roman',serif}
+.smallcaps{font-variant:small-caps;letter-spacing:0.08em}
+
+.app-shell{display:grid;grid-template-columns:260px 1fr;min-height:100vh}
+@media(max-width:768px){.app-shell{grid-template-columns:1fr;padding-bottom:70px}.sidebar{display:none !important}.mobile-nav{display:flex !important}}
+.sidebar{background:white;border-right:1px solid var(--uc-line);padding:20px 0;position:sticky;top:0;height:100vh;overflow-y:auto;display:flex;flex-direction:column}
+[data-theme="dark"] .sidebar{background:#1c1a14}
+.sidebar-logo{padding:0 20px 20px;border-bottom:1px solid var(--uc-line-soft);margin-bottom:16px}
+.sidebar-logo img{width:100%;max-width:180px}
+[data-theme="dark"] .sidebar-logo img{filter:invert(1) brightness(0.95)}
+.nav-section{padding:8px 12px 4px;font-size:11px;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;color:var(--uc-warm-gray)}
+.nav-item{display:flex;align-items:center;gap:12px;padding:10px 20px;color:var(--uc-graphite);text-decoration:none;border-left:3px solid transparent;transition:all 0.15s;cursor:pointer;font-size:14px}
+.nav-item:hover{background:var(--uc-cream)}
+.nav-item.active{background:var(--uc-cream);border-left-color:var(--uc-gold);color:var(--uc-black);font-weight:600}
+.nav-item svg{width:18px;height:18px;flex-shrink:0}
+.nav-badge{margin-left:auto;background:var(--uc-red);color:white;font-size:10px;padding:2px 6px;border-radius:10px;font-weight:600}
+.nav-badge.amber{background:var(--uc-amber)} .nav-badge.gray{background:var(--uc-warm-gray)}
+
+.mobile-nav{display:none;position:fixed;bottom:0;left:0;right:0;background:white;border-top:1px solid var(--uc-line);padding:8px 4px calc(8px + env(safe-area-inset-bottom));z-index:50;justify-content:space-around;box-shadow:0 -2px 12px rgba(0,0,0,0.05)}
+[data-theme="dark"] .mobile-nav{background:#1c1a14}
+.mobile-nav-item{display:flex;flex-direction:column;align-items:center;gap:2px;color:var(--uc-warm-gray);padding:6px 4px;flex:1;min-width:0;text-align:center;cursor:pointer;border-radius:8px;transition:all 0.15s}
+.mobile-nav-item.active{color:var(--uc-gold);background:var(--uc-cream)}
+.mobile-nav-item svg{width:20px;height:20px}
+.mobile-nav-item span{font-size:10px;font-weight:500}
+
+.main-content{padding:24px 32px 60px;max-width:1400px;margin:0 auto;width:100%}
+@media(max-width:768px){.main-content{padding:16px 16px 30px}}
+
+.page-header{display:flex;align-items:flex-end;justify-content:space-between;flex-wrap:wrap;gap:16px;margin-bottom:24px;padding-bottom:16px;border-bottom:1px solid var(--uc-line)}
+.page-title{font-family:'EB Garamond',serif;font-size:28px;font-weight:600;color:var(--uc-black);margin:0;line-height:1.2}
+.page-title .smallcaps-prefix{font-variant:small-caps;letter-spacing:0.06em;color:var(--uc-gold);margin-right:8px}
+.page-subtitle{font-family:'EB Garamond',serif;font-style:italic;color:var(--uc-warm-gray);font-size:15px;margin:4px 0 0}
+
+.card{background:white;border:1px solid var(--uc-line);border-radius:8px;padding:20px;transition:all 0.2s}
+[data-theme="dark"] .card{background:#1c1a14}
+.card-hover:hover{border-color:var(--uc-gold);box-shadow:var(--shadow-md);transform:translateY(-2px);cursor:pointer}
+.card-elevated{box-shadow:var(--shadow-md)}
+.card-gold-border{border-top:3px solid var(--uc-gold)}
+
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:10px 20px;border-radius:8px;font-weight:500;font-size:14px;cursor:pointer;border:1px solid transparent;transition:all 0.15s;font-variant:small-caps;letter-spacing:0.06em}
+.btn-primary{background:var(--uc-black);color:white;border-color:var(--uc-black)}
+.btn-primary:hover{background:var(--uc-graphite)}
+[data-theme="dark"] .btn-primary{color:#0a0a0a}
+.btn-secondary{background:var(--uc-gold);color:white;border-color:var(--uc-gold)}
+.btn-secondary:hover{background:#6f5930}
+.btn-outline{background:white;color:var(--uc-graphite);border-color:var(--uc-line)}
+.btn-outline:hover{border-color:var(--uc-gold);color:var(--uc-black)}
+[data-theme="dark"] .btn-outline{background:transparent}
+.btn-ghost{background:transparent;color:var(--uc-graphite)}
+.btn-ghost:hover{background:var(--uc-cream)}
+.btn-danger{background:var(--uc-red);color:white;border-color:var(--uc-red)}
+.btn-danger:hover{filter:brightness(0.9)}
+.btn-sm{padding:6px 12px;font-size:13px}
+.btn-icon-only{padding:8px}
+.btn-full{width:100%}
+.btn:disabled{opacity:0.5;cursor:not-allowed}
+
+.input,.select,.textarea{width:100%;padding:10px 12px;border:1px solid var(--uc-line);border-radius:6px;background:white;color:var(--uc-graphite);font-size:14px;font-family:inherit}
+[data-theme="dark"] .input,[data-theme="dark"] .select,[data-theme="dark"] .textarea{background:#221f18}
+.input:focus,.select:focus,.textarea:focus{outline:none;border-color:var(--uc-gold);box-shadow:0 0 0 3px var(--uc-gold-pale)}
+.label{display:block;font-weight:600;font-size:13px;color:var(--uc-black);margin-bottom:6px}
+.help-text{font-size:12px;color:var(--uc-warm-gray);margin-top:4px}
+
+.badge{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600;font-variant:small-caps;letter-spacing:0.06em}
+.badge-gold{background:var(--uc-gold-pale);color:var(--uc-gold);border:1px solid var(--uc-gold-soft)}
+.badge-red{background:var(--uc-red-soft);color:var(--uc-red)}
+.badge-amber{background:var(--uc-amber-soft);color:var(--uc-amber)}
+.badge-green{background:var(--uc-green-soft);color:var(--uc-green)}
+.badge-gray{background:var(--uc-cream);color:var(--uc-warm-gray);border:1px solid var(--uc-line)}
+.badge-flagship{background:var(--uc-black);color:var(--uc-gold-soft)}
+[data-theme="dark"] .badge-flagship{background:var(--uc-gold);color:#0a0a0a}
+
+.stat-card{background:var(--uc-cream);border:1px solid var(--uc-line);border-radius:8px;padding:16px}
+.stat-label{font-size:11px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;color:var(--uc-warm-gray);margin-bottom:4px}
+.stat-value{font-family:'EB Garamond',serif;font-size:28px;font-weight:600;color:var(--uc-black);line-height:1}
+.stat-meta{font-size:12px;color:var(--uc-warm-gray);margin-top:4px}
+
+.gold-divider{height:2px;background:linear-gradient(90deg,transparent,var(--uc-gold),transparent);margin:24px 0}
+
+.drop-zone{border:2px dashed var(--uc-line);background:white;border-radius:8px;padding:32px 16px;text-align:center;cursor:pointer;transition:all 0.2s}
+[data-theme="dark"] .drop-zone{background:#1c1a14}
+.drop-zone.dragover{border-color:var(--uc-gold);background:var(--uc-cream)}
+
+.spinner{border:3px solid var(--uc-line);border-top-color:var(--uc-gold);border-radius:50%;width:22px;height:22px;animation:spin 1s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+
+.modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:100;display:flex;align-items:center;justify-content:center;padding:16px;animation:fadeIn 0.15s}
+.modal{background:var(--uc-paper);border:1px solid var(--uc-line);border-top:3px solid var(--uc-gold);border-radius:8px;padding:24px;max-width:500px;width:100%;max-height:90vh;overflow-y:auto;box-shadow:var(--shadow-lg)}
+[data-theme="dark"] .modal{background:#1c1a14}
+.modal-title{font-family:'EB Garamond',serif;font-size:20px;font-weight:600;color:var(--uc-black);margin:0 0 16px}
+
+.toast-container{position:fixed;top:20px;right:20px;z-index:200;display:flex;flex-direction:column;gap:8px;max-width:calc(100vw - 40px)}
+.toast{background:white;border:1px solid var(--uc-line);border-left:3px solid var(--uc-gold);border-radius:6px;padding:12px 16px;box-shadow:var(--shadow-md);max-width:360px;animation:fadeIn 0.2s}
+[data-theme="dark"] .toast{background:#1c1a14}
+.toast.success{border-left-color:var(--uc-green)}
+.toast.error{border-left-color:var(--uc-red)}
+.toast-title{font-weight:600;font-size:13px;color:var(--uc-black);margin-bottom:2px}
+.toast-msg{font-size:12px;color:var(--uc-warm-gray)}
+
+.tabs{display:flex;gap:4px;padding:4px;background:var(--uc-cream);border-radius:8px;margin-bottom:20px;flex-wrap:wrap}
+.tab{padding:8px 14px;border-radius:6px;font-size:13px;font-weight:500;color:var(--uc-warm-gray);cursor:pointer;border:none;background:transparent;font-variant:small-caps;letter-spacing:0.06em}
+.tab.active{background:white;color:var(--uc-black);box-shadow:var(--shadow-sm)}
+[data-theme="dark"] .tab.active{background:#1c1a14}
+
+.process-card{display:flex;flex-direction:column;gap:8px;cursor:pointer}
+.process-card .process-cnj{font-family:ui-monospace,SFMono-Regular,monospace;font-size:12px;color:var(--uc-warm-gray)}
+.process-card .process-name{font-family:'EB Garamond',serif;font-size:18px;font-weight:600;color:var(--uc-black);line-height:1.3}
+.process-card .process-meta{display:flex;gap:8px;flex-wrap:wrap;align-items:center;font-size:12px;color:var(--uc-warm-gray)}
+
+.timeline{position:relative;padding-left:24px}
+.timeline::before{content:'';position:absolute;left:6px;top:8px;bottom:8px;width:2px;background:var(--uc-line)}
+.timeline-event{position:relative;padding-bottom:16px;padding-left:8px;cursor:pointer}
+.timeline-event::before{content:'';position:absolute;left:-22px;top:6px;width:12px;height:12px;background:var(--uc-gold);border-radius:50%;border:2px solid var(--uc-paper)}
+.timeline-event.has-note::before{background:var(--uc-red)}
+
+.deadline-row{display:flex;justify-content:space-between;align-items:center;padding:12px;border:1px solid var(--uc-line);border-radius:6px;background:white;gap:12px;margin-bottom:8px}
+[data-theme="dark"] .deadline-row{background:#1c1a14}
+.deadline-row.urgent{border-left:4px solid var(--uc-red);background:var(--uc-red-soft)}
+.deadline-row.warning{border-left:4px solid var(--uc-amber);background:var(--uc-amber-soft)}
+.deadline-row.safe{border-left:4px solid var(--uc-green)}
+.deadline-row.expired{border-left:4px solid var(--uc-red);opacity:0.7}
+.deadline-row.done{border-left:4px solid var(--uc-soft-gray);opacity:0.55;text-decoration:line-through}
+
+.tool-card{display:flex;flex-direction:column;gap:8px;padding:16px;cursor:pointer}
+.tool-icon{width:36px;height:36px;background:var(--uc-cream);border:1px solid var(--uc-line);border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:18px;color:var(--uc-graphite)}
+.tool-icon-gold{background:var(--uc-gold);color:white;border-color:var(--uc-gold)}
+.tool-name{font-family:'EB Garamond',serif;font-size:16px;font-weight:600;color:var(--uc-black)}
+.tool-desc{font-size:12px;color:var(--uc-warm-gray);line-height:1.4}
+
+.diff-add{background:var(--uc-green-soft);color:var(--uc-green)}
+.diff-del{background:var(--uc-red-soft);color:var(--uc-red);text-decoration:line-through}
+.diff-line{padding:2px 8px;font-family:ui-monospace,monospace;font-size:12px;white-space:pre-wrap}
+
+.empty-state{text-align:center;padding:48px 24px}
+.empty-state-title{font-family:'EB Garamond',serif;font-size:20px;color:var(--uc-graphite);margin-bottom:8px}
+.empty-state-msg{color:var(--uc-warm-gray);font-size:14px;max-width:400px;margin:0 auto 16px}
+
+.scroll-thin::-webkit-scrollbar{width:6px;height:6px}
+.scroll-thin::-webkit-scrollbar-thumb{background:var(--uc-line);border-radius:3px}
+.scroll-thin::-webkit-scrollbar-track{background:transparent}
+
+.hidden{display:none !important}
+.fade-in{animation:fadeIn 0.3s ease}
+
+.quick-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.quick-action{background:white;border:1px solid var(--uc-line);border-radius:12px;padding:24px 16px;text-align:center;cursor:pointer;transition:all 0.15s;min-height:130px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px}
+[data-theme="dark"] .quick-action{background:#1c1a14}
+.quick-action:hover{border-color:var(--uc-gold)}
+.quick-action:active{transform:scale(0.98)}
+.quick-action .qa-icon{font-size:32px}
+.quick-action .qa-label{font-family:'EB Garamond',serif;font-weight:600;color:var(--uc-black);font-size:15px}
+
+.detail-tabs{display:flex;border-bottom:1px solid var(--uc-line);margin-bottom:20px;overflow-x:auto}
+.detail-tab{padding:10px 16px;border:none;background:transparent;cursor:pointer;color:var(--uc-warm-gray);font-weight:500;border-bottom:2px solid transparent;white-space:nowrap;font-size:14px;font-variant:small-caps;letter-spacing:0.06em}
+.detail-tab.active{color:var(--uc-black);border-bottom-color:var(--uc-gold)}
+
+.backup-banner{background:var(--uc-amber-soft);border:1px solid var(--uc-amber);border-radius:8px;padding:12px 16px;display:flex;gap:12px;align-items:center;margin-bottom:16px}
+
+.note-item{background:var(--uc-cream);border:1px solid var(--uc-line);border-radius:6px;padding:12px;margin-bottom:8px}
+.note-meta{font-size:11px;color:var(--uc-warm-gray);margin-bottom:4px}
+
+.progress-wrap{margin:12px 0}
+.progress-bar-bg{height:6px;background:var(--uc-cream);border-radius:3px;overflow:hidden}
+.progress-bar-fg{height:100%;background:var(--uc-gold);width:0;transition:width 0.3s}
+
+@media(min-width:769px){.show-mobile{display:none !important}}
+@media(max-width:768px){.show-desktop{display:none !important}}
+</style>
+</head>
+<body>
+
+<div class="app-shell">
+
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <img src="logo.png" alt="Urany de Castro Advocacia">
+    </div>
+
+    <div class="nav-section">Carteira</div>
+    <a class="nav-item" data-route="dashboard">
+      <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/></svg>
+      <span>Início</span>
+    </a>
+    <a class="nav-item" data-route="processes">
+      <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+      <span>Processos</span>
+      <span id="navProcessCount" class="nav-badge gray hidden">0</span>
+    </a>
+    <a class="nav-item" data-route="deadlines">
+      <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+      <span>Prazos</span>
+      <span id="navDeadlineCount" class="nav-badge hidden">0</span>
+    </a>
+
+    <div class="nav-section" style="margin-top:16px;">Operacional</div>
+    <a class="nav-item" data-route="tools">
+      <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 4a2 2 0 114 0v1a1 1 0 001 1h3a1 1 0 011 1v3a1 1 0 01-1 1h-1a2 2 0 100 4h1a1 1 0 011 1v3a1 1 0 01-1 1h-3a1 1 0 01-1-1v-1a2 2 0 10-4 0v1a1 1 0 01-1 1H6a1 1 0 01-1-1v-3a1 1 0 00-1-1H3a2 2 0 110-4h1a1 1 0 001-1V7a1 1 0 011-1h3a1 1 0 001-1V4z"/></svg>
+      <span>Ferramentas PDF</span>
+    </a>
+    <a class="nav-item" data-route="diligence">
+      <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+      <span>Diligência rápida</span>
+    </a>
+
+    <div class="nav-section" style="margin-top:16px;">Sistema</div>
+    <a class="nav-item" data-route="settings">
+      <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+      <span>Configurações</span>
+    </a>
+
+    <div style="margin-top:auto;padding:16px 20px;border-top:1px solid var(--uc-line-soft);font-size:11px;color:var(--uc-warm-gray);text-align:center;">
+      <p class="smallcaps font-serif" style="margin:0 0 4px;">Urany de Castro · 30 anos</p>
+      <p style="margin:0;">100% local · v4.0</p>
+    </div>
+  </aside>
+
+  <main class="main-content scroll-thin">
+    <div id="appContent"></div>
+  </main>
+
+</div>
+
+<nav class="mobile-nav">
+  <a class="mobile-nav-item" data-route="dashboard">
+    <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/></svg>
+    <span>Início</span>
+  </a>
+  <a class="mobile-nav-item" data-route="processes">
+    <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+    <span>Processos</span>
+  </a>
+  <a class="mobile-nav-item" data-route="deadlines">
+    <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+    <span>Prazos</span>
+  </a>
+  <a class="mobile-nav-item" data-route="tools">
+    <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 4a2 2 0 114 0v1a1 1 0 001 1h3a1 1 0 011 1v3a1 1 0 01-1 1h-1a2 2 0 100 4h1a1 1 0 011 1v3a1 1 0 01-1 1h-3a1 1 0 01-1-1v-1a2 2 0 10-4 0v1a1 1 0 01-1 1H6a1 1 0 01-1-1v-3a1 1 0 00-1-1H3a2 2 0 110-4h1a1 1 0 001-1V7a1 1 0 011-1h3a1 1 0 001-1V4z"/></svg>
+    <span>PDF</span>
+  </a>
+  <a class="mobile-nav-item" data-route="diligence">
+    <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+    <span>Rápido</span>
+  </a>
+</nav>
+
+<div id="modalContainer"></div>
+<div id="toastContainer" class="toast-container"></div>
+
+<script>
+pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+const { PDFDocument, StandardFonts, rgb } = PDFLib;
+
+// ====================================================================
+// === PART 2: PERSISTENCE LAYER (IndexedDB) ==========================
+// ====================================================================
+
+const DB_NAME = 'uc-juridico';
+const DB_VERSION = 2;
+let db = null;
+
+function openDB() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(DB_NAME, DB_VERSION);
+    req.onerror = () => reject(req.error);
+    req.onsuccess = () => { db = req.result; resolve(db); };
+    req.onupgradeneeded = (e) => {
+      const d = e.target.result;
+      if (!d.objectStoreNames.contains('processes')) {
+        const s = d.createObjectStore('processes', { keyPath: 'id' });
+        s.createIndex('cnj', 'cnj', { unique: false });
+        s.createIndex('updatedAt', 'updatedAt', { unique: false });
+      }
+      if (!d.objectStoreNames.contains('events')) {
+        const s = d.createObjectStore('events', { keyPath: 'id' });
+        s.createIndex('processId', 'processId', { unique: false });
+      }
+      if (!d.objectStoreNames.contains('deadlines')) {
+        const s = d.createObjectStore('deadlines', { keyPath: 'id' });
+        s.createIndex('processId', 'processId', { unique: false });
+        s.createIndex('deadlineDate', 'deadlineDate', { unique: false });
+        s.createIndex('status', 'status', { unique: false });
+      }
+      if (!d.objectStoreNames.contains('notes')) {
+        const s = d.createObjectStore('notes', { keyPath: 'id' });
+        s.createIndex('processId', 'processId', { unique: false });
+      }
+      if (!d.objectStoreNames.contains('jurisprudence')) {
+        const s = d.createObjectStore('jurisprudence', { keyPath: 'id' });
+        s.createIndex('processId', 'processId', { unique: false });
+      }
+      if (!d.objectStoreNames.contains('pdfs')) {
+        d.createObjectStore('pdfs', { keyPath: 'id' });
+      }
+      if (!d.objectStoreNames.contains('prompts')) {
+        d.createObjectStore('prompts', { keyPath: 'id' });
+      }
+      if (!d.objectStoreNames.contains('settings')) {
+        d.createObjectStore('settings', { keyPath: 'key' });
+      }
+      if (!d.objectStoreNames.contains('history')) {
+        const s = d.createObjectStore('history', { keyPath: 'id', autoIncrement: true });
+        s.createIndex('timestamp', 'timestamp', { unique: false });
+      }
+      // DJEN: publications fetched (for dedup) and full data stored locally
+      if (!d.objectStoreNames.contains('djen_publications')) {
+        const s = d.createObjectStore('djen_publications', { keyPath: 'hash' });
+        s.createIndex('cnj', 'cnj', { unique: false });
+        s.createIndex('processId', 'processId', { unique: false });
+        s.createIndex('dataDisponibilizacao', 'dataDisponibilizacao', { unique: false });
+        s.createIndex('importedAt', 'importedAt', { unique: false });
+        s.createIndex('status', 'status', { unique: false });
+      }
+    };
+  });
+}
+
+function dbPromise(storeName, mode, fn) {
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(storeName, mode);
+    const store = tx.objectStore(storeName);
+    let result;
+    try { result = fn(store); } catch(e) { reject(e); return; }
+    tx.oncomplete = () => resolve(result?.result !== undefined ? result.result : result);
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+const DB = {
+  // Processes
+  async getAllProcesses() { return await dbPromise('processes', 'readonly', s => new Promise(res => { const r = s.getAll(); r.onsuccess = () => res(r.result); })); },
+  async getProcess(id) { return await dbPromise('processes', 'readonly', s => new Promise(res => { const r = s.get(id); r.onsuccess = () => res(r.result); })); },
+  async saveProcess(p) {
+    p.updatedAt = Date.now();
+    if (!p.createdAt) p.createdAt = p.updatedAt;
+    await dbPromise('processes', 'readwrite', s => s.put(p));
+    addHistory('process_saved', { processId: p.id, name: p.name });
+    return p;
+  },
+  async deleteProcess(id) {
+    await dbPromise('processes', 'readwrite', s => s.delete(id));
+    // Cascade delete
+    for (const store of ['events', 'deadlines', 'notes', 'jurisprudence']) {
+      const items = await dbPromise(store, 'readonly', s => new Promise(res => { const r = s.index('processId').getAll(id); r.onsuccess = () => res(r.result); }));
+      for (const item of items) await dbPromise(store, 'readwrite', s => s.delete(item.id));
+    }
+  },
+
+  // Events
+  async getEventsByProcess(pid) { return await dbPromise('events', 'readonly', s => new Promise(res => { const r = s.index('processId').getAll(pid); r.onsuccess = () => res(r.result); })); },
+  async saveEvent(e) { await dbPromise('events', 'readwrite', s => s.put(e)); return e; },
+  async deleteEvent(id) { await dbPromise('events', 'readwrite', s => s.delete(id)); },
+
+  // Deadlines
+  async getAllDeadlines() { return await dbPromise('deadlines', 'readonly', s => new Promise(res => { const r = s.getAll(); r.onsuccess = () => res(r.result); })); },
+  async getDeadlinesByProcess(pid) { return await dbPromise('deadlines', 'readonly', s => new Promise(res => { const r = s.index('processId').getAll(pid); r.onsuccess = () => res(r.result); })); },
+  async saveDeadline(d) { await dbPromise('deadlines', 'readwrite', s => s.put(d)); return d; },
+  async deleteDeadline(id) { await dbPromise('deadlines', 'readwrite', s => s.delete(id)); },
+
+  // Notes
+  async getNotesByProcess(pid) { return await dbPromise('notes', 'readonly', s => new Promise(res => { const r = s.index('processId').getAll(pid); r.onsuccess = () => res(r.result); })); },
+  async saveNote(n) { await dbPromise('notes', 'readwrite', s => s.put(n)); return n; },
+  async deleteNote(id) { await dbPromise('notes', 'readwrite', s => s.delete(id)); },
+
+  // Jurisprudence
+  async getJurisprudenceByProcess(pid) { return await dbPromise('jurisprudence', 'readonly', s => new Promise(res => { const r = s.index('processId').getAll(pid); r.onsuccess = () => res(r.result); })); },
+  async saveJurisprudence(j) { await dbPromise('jurisprudence', 'readwrite', s => s.put(j)); return j; },
+
+  // PDFs (Blob storage)
+  async getPdf(id) { return await dbPromise('pdfs', 'readonly', s => new Promise(res => { const r = s.get(id); r.onsuccess = () => res(r.result); })); },
+  async savePdf(pdf) { await dbPromise('pdfs', 'readwrite', s => s.put(pdf)); return pdf; },
+  async deletePdf(id) { await dbPromise('pdfs', 'readwrite', s => s.delete(id)); },
+
+  // Prompts
+  async getAllPrompts() { return await dbPromise('prompts', 'readonly', s => new Promise(res => { const r = s.getAll(); r.onsuccess = () => res(r.result); })); },
+  async savePrompt(p) { await dbPromise('prompts', 'readwrite', s => s.put(p)); return p; },
+  async deletePrompt(id) { await dbPromise('prompts', 'readwrite', s => s.delete(id)); },
+
+  // Settings
+  async getSetting(key, defaultVal = null) {
+    const r = await dbPromise('settings', 'readonly', s => new Promise(res => { const r = s.get(key); r.onsuccess = () => res(r.result); }));
+    return r ? r.value : defaultVal;
+  },
+  async setSetting(key, value) { await dbPromise('settings', 'readwrite', s => s.put({ key, value })); },
+
+  // History
+  async getHistory(limit = 50) {
+    return await dbPromise('history', 'readonly', s => new Promise(res => {
+      const items = []; const r = s.index('timestamp').openCursor(null, 'prev');
+      r.onsuccess = (e) => { const c = e.target.result; if (c && items.length < limit) { items.push(c.value); c.continue(); } else res(items); };
+    }));
+  },
+  async addHistoryEntry(action, data) {
+    await dbPromise('history', 'readwrite', s => s.add({ timestamp: Date.now(), action, data }));
+  },
+
+  // DJEN publications
+  async getAllDjenPublications() {
+    return await dbPromise('djen_publications', 'readonly', s => new Promise(res => { const r = s.getAll(); r.onsuccess = () => res(r.result); }));
+  },
+  async getDjenPublication(hash) {
+    return await dbPromise('djen_publications', 'readonly', s => new Promise(res => { const r = s.get(hash); r.onsuccess = () => res(r.result); }));
+  },
+  async saveDjenPublication(pub) {
+    await dbPromise('djen_publications', 'readwrite', s => s.put(pub));
+    return pub;
+  },
+  async getDjenPublicationsByProcess(processId) {
+    return await dbPromise('djen_publications', 'readonly', s => new Promise(res => { const r = s.index('processId').getAll(processId); r.onsuccess = () => res(r.result); }));
+  },
+  async hasDjenPublication(hash) {
+    const p = await this.getDjenPublication(hash);
+    return !!p;
+  }
+};
+
+async function addHistory(action, data) {
+  try { await DB.addHistoryEntry(action, data); } catch(e) {}
+}
+
+// ====================================================================
+// === STATE & ROUTING ================================================
+// ====================================================================
+
+const state = {
+  currentRoute: 'dashboard',
+  currentProcessId: null,
+  settings: {
+    theme: 'light',
+    backupReminder: true,
+    masterPasswordEnabled: false,
+    defaultPromptId: null,
+    lastBackupAt: null
+  },
+  processes: [],
+  deadlines: [],
+  prompts: [],
+  installPrompt: null
+};
+
+const routes = {
+  dashboard: renderDashboard,
+  processes: renderProcessList,
+  process: renderProcessDetail,
+  deadlines: renderDeadlines,
+  tools: renderTools,
+  diligence: renderDiligence,
+  settings: renderSettings
+};
+
+function navigate(route, params = {}) {
+  state.currentRoute = route;
+  Object.assign(state, params);
+  // Update nav highlighting
+  document.querySelectorAll('[data-route]').forEach(el => {
+    el.classList.toggle('active', el.dataset.route === (route === 'process' ? 'processes' : route));
+  });
+  // Update URL hash
+  const hash = route === 'process' ? `#process/${params.currentProcessId}` : `#${route}`;
+  if (location.hash !== hash) history.pushState(null, '', hash);
+  // Render
+  if (routes[route]) routes[route]();
+  // Scroll to top
+  window.scrollTo(0, 0);
+}
+
+function parseHash() {
+  const h = location.hash.slice(1);
+  if (h.startsWith('process/')) {
+    return { route: 'process', currentProcessId: h.slice(8) };
+  }
+  return { route: h || 'dashboard' };
+}
+
+window.addEventListener('popstate', () => {
+  const { route, ...params } = parseHash();
+  state.currentRoute = route;
+  Object.assign(state, params);
+  if (routes[route]) routes[route]();
+});
+
+// ====================================================================
+// === HELPERS ========================================================
+// ====================================================================
+
+const $ = id => document.getElementById(id);
+
+function escapeHtml(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function formatBytes(b) {
+  if (!b) return '0 B';
+  const k = 1024, sizes = ['B','KB','MB','GB'];
+  const i = Math.floor(Math.log(b) / Math.log(k));
+  return parseFloat((b / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+}
+
+function formatDate(d, opts = {}) {
+  if (!d) return '—';
+  const date = d instanceof Date ? d : new Date(d);
+  if (isNaN(date)) return '—';
+  if (opts.relative) {
+    const diff = Date.now() - date.getTime();
+    const days = Math.floor(diff / 86400000);
+    if (days === 0) return 'hoje';
+    if (days === 1) return 'ontem';
+    if (days < 7) return `há ${days} dias`;
+    if (days < 30) return `há ${Math.floor(days/7)} semanas`;
+    if (days < 365) return `há ${Math.floor(days/30)} meses`;
+    return `há ${Math.floor(days/365)} anos`;
+  }
+  return date.toLocaleDateString('pt-BR');
+}
+
+function formatDateTime(d) {
+  if (!d) return '—';
+  const date = new Date(d);
+  return date.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+
+function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 9); }
+
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click();
+  setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 100);
+}
+
+function toast(title, msg = '', type = 'info') {
+  const c = $('toastContainer');
+  const t = document.createElement('div');
+  t.className = 'toast ' + type;
+  t.innerHTML = `<div class="toast-title">${escapeHtml(title)}</div>${msg ? `<div class="toast-msg">${escapeHtml(msg)}</div>` : ''}`;
+  c.appendChild(t);
+  setTimeout(() => { t.style.opacity = '0'; setTimeout(() => t.remove(), 300); }, 4000);
+}
+
+function showModal(title, fields, options = {}) {
+  return new Promise(resolve => {
+    const modal = document.createElement('div');
+    modal.className = 'modal-backdrop';
+    modal.innerHTML = `
+      <div class="modal scroll-thin">
+        <h3 class="modal-title">${escapeHtml(title)}</h3>
+        ${options.intro ? `<p class="help-text" style="margin-bottom: 16px;">${options.intro}</p>` : ''}
+        <div class="space-y-4 mb-5">
+          ${fields.map((f, i) => renderModalField(f, i)).join('')}
+        </div>
+        <div class="flex gap-2">
+          <button class="btn btn-outline" id="_modalCancel" style="flex:1">Cancelar</button>
+          <button class="btn btn-primary" id="_modalConfirm" style="flex:1">${options.confirmLabel || 'Confirmar'}</button>
+        </div>
+      </div>`;
+    $('modalContainer').appendChild(modal);
+    const cleanup = () => modal.remove();
+    $('_modalCancel').onclick = () => { cleanup(); resolve(null); };
+    $('_modalConfirm').onclick = () => {
+      const values = fields.map((f, i) => {
+        const el = document.getElementById('_mf_' + i);
+        return f.type === 'checkbox' ? el.checked : el.value;
+      });
+      cleanup(); resolve(values);
+    };
+    document.getElementById('_mf_0')?.focus();
+  });
+}
+
+function renderModalField(f, i) {
+  const id = '_mf_' + i;
+  if (f.type === 'select') {
+    return `<div><label class="label">${escapeHtml(f.label)}</label>${f.help ? `<p class="help-text" style="margin-bottom: 6px;">${f.help}</p>` : ''}<select class="select" id="${id}">${f.options.map(o => `<option value="${escapeHtml(o.value)}" ${o.value === f.default ? 'selected' : ''}>${escapeHtml(o.label)}</option>`).join('')}</select></div>`;
+  }
+  if (f.type === 'checkbox') {
+    return `<div style="display: flex; gap: 8px; align-items: flex-start;"><input type="checkbox" id="${id}" ${f.default ? 'checked' : ''} style="margin-top: 3px;"><div><label for="${id}" style="font-weight: 500; cursor: pointer;">${escapeHtml(f.label)}</label>${f.help ? `<p class="help-text">${f.help}</p>` : ''}</div></div>`;
+  }
+  if (f.type === 'textarea') {
+    return `<div><label class="label">${escapeHtml(f.label)}</label>${f.help ? `<p class="help-text" style="margin-bottom: 6px;">${f.help}</p>` : ''}<textarea class="textarea" id="${id}" rows="${f.rows || 4}">${escapeHtml(f.default || '')}</textarea></div>`;
+  }
+  return `<div><label class="label">${escapeHtml(f.label)}</label>${f.help ? `<p class="help-text" style="margin-bottom: 6px;">${f.help}</p>` : ''}<input type="${f.type || 'text'}" class="input" id="${id}" value="${escapeHtml(f.default || '')}" ${f.placeholder ? `placeholder="${escapeHtml(f.placeholder)}"` : ''} ${f.min !== undefined ? `min="${f.min}"` : ''} ${f.max !== undefined ? `max="${f.max}"` : ''} ${f.step !== undefined ? `step="${f.step}"` : ''}></div>`;
+}
+
+function confirmDialog(title, message, danger = false) {
+  return new Promise(resolve => {
+    const modal = document.createElement('div');
+    modal.className = 'modal-backdrop';
+    modal.innerHTML = `
+      <div class="modal">
+        <h3 class="modal-title">${escapeHtml(title)}</h3>
+        <p style="color: var(--uc-graphite); font-size: 14px; margin-bottom: 20px;">${escapeHtml(message)}</p>
+        <div class="flex gap-2">
+          <button class="btn btn-outline" id="_cd_no" style="flex:1">Cancelar</button>
+          <button class="btn ${danger ? 'btn-danger' : 'btn-primary'}" id="_cd_yes" style="flex:1">Confirmar</button>
+        </div>
+      </div>`;
+    $('modalContainer').appendChild(modal);
+    $('_cd_no').onclick = () => { modal.remove(); resolve(false); };
+    $('_cd_yes').onclick = () => { modal.remove(); resolve(true); };
+  });
+}
+
+// ====================================================================
+// === THEME ==========================================================
+// ====================================================================
+
+function applyTheme(theme) {
+  document.documentElement.setAttribute('data-theme', theme);
+  state.settings.theme = theme;
+}
+
+
+// ====================================================================
+// === PAGE: DASHBOARD ================================================
+// ====================================================================
+
+async function renderDashboard() {
+  const processes = await DB.getAllProcesses();
+  const deadlines = await DB.getAllDeadlines();
+  const activeDeadlines = deadlines.filter(d => d.status !== 'done');
+  const today = new Date(); today.setHours(0,0,0,0);
+  const urgentDeadlines = activeDeadlines.filter(d => {
+    const diff = Math.ceil((new Date(d.deadlineDate) - today) / 86400000);
+    return diff <= 5 && diff >= 0;
+  });
+  const expiredDeadlines = activeDeadlines.filter(d => new Date(d.deadlineDate) < today);
+
+  const recentProcesses = [...processes].sort((a,b) => b.updatedAt - a.updatedAt).slice(0, 5);
+  state.processes = processes;
+  state.deadlines = deadlines;
+  updateNavBadges();
+
+  const lastBackup = state.settings.lastBackupAt;
+  const daysSinceBackup = lastBackup ? Math.floor((Date.now() - lastBackup) / 86400000) : 999;
+  const showBackupReminder = state.settings.backupReminder && processes.length > 0 && daysSinceBackup >= 7;
+
+  $('appContent').innerHTML = `
+    <div class="page-header">
+      <div>
+        <h1 class="page-title"><span class="smallcaps-prefix">Início</span></h1>
+        <p class="page-subtitle">Visão geral da carteira · ${new Date().toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</p>
+      </div>
+      <div class="flex gap-2">
+        <button class="btn btn-secondary btn-sm" onclick="djenRunSearch()">🔔 Buscar DJEN</button>
+        <button class="btn btn-outline btn-sm" onclick="navigate('tools')">Ferramentas PDF</button>
+        <button class="btn btn-primary btn-sm" onclick="newProcessFlow()">+ Novo processo</button>
+      </div>
+    </div>
+
+    ${showBackupReminder ? `
+      <div class="backup-banner">
+        <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+        <div style="flex:1;">
+          <strong style="color: var(--uc-amber); font-size: 13px;">Backup recomendado</strong>
+          <p style="font-size: 12px; margin: 2px 0 0; color: var(--uc-graphite);">Faz ${daysSinceBackup === 999 ? 'muito tempo' : daysSinceBackup + ' dias'} desde o último backup. Os dados estão apenas neste dispositivo.</p>
+        </div>
+        <button class="btn btn-secondary btn-sm" onclick="exportBackup()">Fazer backup</button>
+      </div>
+    ` : ''}
+
+    <div class="grid gap-4 mb-6" style="grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));">
+      <div class="stat-card">
+        <div class="stat-label">Processos</div>
+        <div class="stat-value">${processes.length}</div>
+        <div class="stat-meta">${processes.filter(p => p.status === 'active').length} ativos</div>
+      </div>
+      <div class="stat-card" style="${urgentDeadlines.length > 0 ? 'background: var(--uc-red-soft); border-color: var(--uc-red);' : ''}">
+        <div class="stat-label">Prazos urgentes</div>
+        <div class="stat-value" ${urgentDeadlines.length > 0 ? 'style="color: var(--uc-red);"' : ''}>${urgentDeadlines.length}</div>
+        <div class="stat-meta">≤ 5 dias úteis</div>
+      </div>
+      <div class="stat-card" style="${expiredDeadlines.length > 0 ? 'background: var(--uc-amber-soft);' : ''}">
+        <div class="stat-label">Vencidos</div>
+        <div class="stat-value">${expiredDeadlines.length}</div>
+        <div class="stat-meta">${expiredDeadlines.length > 0 ? 'Verifique' : 'Tudo em dia'}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Próximos prazos</div>
+        <div class="stat-value">${activeDeadlines.length}</div>
+        <div class="stat-meta">No total</div>
+      </div>
+    </div>
+
+    <div class="grid gap-6" style="grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));">
+
+      <div class="card">
+        <div class="flex justify-between items-center mb-4">
+          <h2 class="font-serif text-lg font-semibold smallcaps" style="color: var(--uc-black);">Prazos próximos</h2>
+          <a class="text-sm font-medium" style="color: var(--uc-gold); cursor: pointer;" onclick="navigate('deadlines')">Ver todos →</a>
+        </div>
+        ${activeDeadlines.length === 0 ? `
+          <div class="empty-state" style="padding: 24px;">
+            <p class="empty-state-msg">Nenhum prazo cadastrado.</p>
+          </div>
+        ` : activeDeadlines
+            .sort((a,b) => new Date(a.deadlineDate) - new Date(b.deadlineDate))
+            .slice(0, 5)
+            .map(d => renderDeadlineRowMini(d, processes)).join('')}
+      </div>
+
+      <div class="card">
+        <div class="flex justify-between items-center mb-4">
+          <h2 class="font-serif text-lg font-semibold smallcaps" style="color: var(--uc-black);">Processos recentes</h2>
+          <a class="text-sm font-medium" style="color: var(--uc-gold); cursor: pointer;" onclick="navigate('processes')">Ver todos →</a>
+        </div>
+        ${recentProcesses.length === 0 ? `
+          <div class="empty-state" style="padding: 24px;">
+            <p class="empty-state-msg">Nenhum processo cadastrado ainda.</p>
+            <button class="btn btn-secondary btn-sm" onclick="newProcessFlow()">+ Cadastrar primeiro</button>
+          </div>
+        ` : recentProcesses.map(p => `
+          <div class="process-card" style="padding: 12px; border-bottom: 1px solid var(--uc-line-soft);" onclick="navigate('process', { currentProcessId: '${p.id}' })">
+            <div class="process-name">${escapeHtml(p.name)}</div>
+            <div class="process-meta">
+              ${p.cnj ? `<span class="process-cnj">${escapeHtml(p.cnj)}</span>` : ''}
+              ${p.area ? `<span class="badge badge-gray">${escapeHtml(p.area)}</span>` : ''}
+              <span style="margin-left: auto;">${formatDate(p.updatedAt, { relative: true })}</span>
+            </div>
+          </div>
+        `).join('')}
+      </div>
+
+    </div>
+  `;
+}
+
+function renderDeadlineRowMini(d, processes) {
+  const proc = processes.find(p => p.id === d.processId);
+  const today = new Date(); today.setHours(0,0,0,0);
+  const deadlineDate = new Date(d.deadlineDate);
+  const daysLeft = Math.ceil((deadlineDate - today) / 86400000);
+  let cls = 'safe', label = `${daysLeft} dias`;
+  if (daysLeft < 0) { cls = 'expired'; label = `vencido há ${Math.abs(daysLeft)}d`; }
+  else if (daysLeft === 0) { cls = 'urgent'; label = 'HOJE'; }
+  else if (daysLeft <= 3) { cls = 'urgent'; label = `${daysLeft}d`; }
+  else if (daysLeft <= 7) { cls = 'warning'; label = `${daysLeft}d`; }
+  return `
+    <div class="deadline-row ${cls}" style="margin-bottom: 6px; padding: 10px;" onclick="navigate('process', { currentProcessId: '${d.processId}' })">
+      <div style="min-width: 0; flex: 1;">
+        <div style="font-weight: 500; font-size: 13px; color: var(--uc-black); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${escapeHtml(proc?.name || 'Processo')}</div>
+        <div style="font-size: 11px; color: var(--uc-warm-gray);">${escapeHtml(d.description || d.type)} · ${formatDate(deadlineDate)}</div>
+      </div>
+      <span class="badge ${cls === 'urgent' || cls === 'expired' ? 'badge-red' : cls === 'warning' ? 'badge-amber' : 'badge-green'}">${label}</span>
+    </div>
+  `;
+}
+
+function updateNavBadges() {
+  const pCount = state.processes.length;
+  const navP = $('navProcessCount');
+  if (pCount > 0) { navP.textContent = pCount; navP.classList.remove('hidden'); }
+
+  const today = new Date(); today.setHours(0,0,0,0);
+  const urgent = state.deadlines.filter(d => {
+    if (d.status === 'done') return false;
+    const diff = Math.ceil((new Date(d.deadlineDate) - today) / 86400000);
+    return diff <= 5;
+  }).length;
+  const navD = $('navDeadlineCount');
+  if (urgent > 0) {
+    navD.textContent = urgent;
+    navD.classList.remove('hidden');
+    navD.classList.toggle('amber', urgent > 0);
+  } else {
+    navD.classList.add('hidden');
+  }
+}
+
+// ====================================================================
+// === PAGE: PROCESS LIST =============================================
+// ====================================================================
+
+async function renderProcessList() {
+  const processes = await DB.getAllProcesses();
+  state.processes = processes;
+  updateNavBadges();
+  const sorted = [...processes].sort((a,b) => b.updatedAt - a.updatedAt);
+
+  $('appContent').innerHTML = `
+    <div class="page-header">
+      <div>
+        <h1 class="page-title"><span class="smallcaps-prefix">Processos</span></h1>
+        <p class="page-subtitle">${processes.length} processo(s) cadastrado(s)</p>
+      </div>
+      <div class="flex gap-2">
+        <input type="text" class="input" id="processSearch" placeholder="Buscar..." style="max-width: 240px;">
+        <button class="btn btn-primary" onclick="newProcessFlow()">+ Novo</button>
+      </div>
+    </div>
+
+    <div id="processGrid" class="grid gap-4" style="grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));">
+      ${sorted.length === 0 ? `
+        <div class="empty-state" style="grid-column: 1/-1;">
+          <h3 class="empty-state-title">Nenhum processo cadastrado</h3>
+          <p class="empty-state-msg">Cadastre um processo manualmente ou indexe um auto pela aba Ferramentas PDF — os eventos detectados serão associados automaticamente.</p>
+          <button class="btn btn-primary" onclick="newProcessFlow()">+ Cadastrar primeiro processo</button>
+        </div>
+      ` : sorted.map(p => renderProcessCard(p)).join('')}
+    </div>
+  `;
+
+  $('processSearch')?.addEventListener('input', (e) => {
+    const q = e.target.value.toLowerCase();
+    const filtered = sorted.filter(p =>
+      (p.name || '').toLowerCase().includes(q) ||
+      (p.cnj || '').toLowerCase().includes(q) ||
+      (p.client || '').toLowerCase().includes(q) ||
+      (p.area || '').toLowerCase().includes(q)
+    );
+    $('processGrid').innerHTML = filtered.map(p => renderProcessCard(p)).join('') || `<p style="color: var(--uc-warm-gray); grid-column: 1/-1; text-align: center;">Nenhum processo encontrado.</p>`;
+  });
+}
+
+function renderProcessCard(p) {
+  const eventCount = p.eventCount || 0;
+  const noteCount = p.noteCount || 0;
+  return `
+    <div class="card card-hover" onclick="navigate('process', { currentProcessId: '${p.id}' })">
+      <div class="process-card">
+        ${p.cnj ? `<div class="process-cnj">${escapeHtml(p.cnj)}</div>` : ''}
+        <div class="process-name">${escapeHtml(p.name)}</div>
+        <div class="process-meta">
+          ${p.client ? `<span>${escapeHtml(p.client)}</span>` : ''}
+          ${p.area ? `<span class="badge badge-gold">${escapeHtml(p.area)}</span>` : ''}
+          ${p.status === 'archived' ? `<span class="badge badge-gray">arquivado</span>` : ''}
+        </div>
+        <div class="process-meta" style="margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--uc-line-soft);">
+          ${eventCount > 0 ? `<span>📑 ${eventCount} eventos</span>` : ''}
+          ${noteCount > 0 ? `<span>📝 ${noteCount} notas</span>` : ''}
+          <span style="margin-left: auto;">${formatDate(p.updatedAt, { relative: true })}</span>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+async function newProcessFlow() {
+  const r = await showModal('Cadastrar novo processo', [
+    { label: 'Nome do caso/processo', help: 'Ex: Pérola RJ · Centroaidar FIDC · Quimpharma TRF1', placeholder: 'Nome de identificação' },
+    { label: 'Número CNJ (opcional)', placeholder: '0000000-00.0000.0.00.0000' },
+    { label: 'Cliente', placeholder: 'Nome do cliente principal' },
+    { label: 'Tribunal/Vara', placeholder: 'Ex: TJGO 1ª Vara · TRF1 7ª Turma' },
+    { label: 'Área', type: 'select', default: 'Tributário', options: [
+      { value: 'Tributário', label: 'Tributário' },
+      { value: 'Cível', label: 'Cível' },
+      { value: 'Execução Fiscal', label: 'Execução Fiscal' },
+      { value: 'Recuperação Judicial', label: 'Recuperação Judicial' },
+      { value: 'Administrativo', label: 'Administrativo' },
+      { value: 'Consumidor', label: 'Consumidor' },
+      { value: 'Outros', label: 'Outros' }
+    ]},
+    { label: 'Tipo de ação', placeholder: 'Ex: Execução Fiscal · Apelação Cível · MS' },
+    { label: 'Polo', type: 'select', default: 'Defesa', options: [
+      { value: 'Defesa', label: 'Defesa (executado/réu)' },
+      { value: 'Ataque', label: 'Ataque (autor/exequente)' }
+    ]}
+  ], { confirmLabel: 'Cadastrar' });
+  if (!r) return;
+  const [name, cnj, client, court, area, type, polo] = r;
+  if (!name?.trim()) { toast('Nome obrigatório', 'Informe ao menos o nome do processo.', 'error'); return; }
+  const p = { id: uid(), name: name.trim(), cnj: cnj?.trim() || null, client: client?.trim() || null, court: court?.trim() || null, area, type: type?.trim() || null, polo, status: 'active', eventCount: 0, noteCount: 0 };
+  await DB.saveProcess(p);
+  toast('Processo cadastrado', name, 'success');
+  navigate('process', { currentProcessId: p.id });
+}
+
+
+// ====================================================================
+// === PAGE: PROCESS DETAIL ===========================================
+// ====================================================================
+
+async function renderProcessDetail() {
+  const p = await DB.getProcess(state.currentProcessId);
+  if (!p) { toast('Processo não encontrado', '', 'error'); navigate('processes'); return; }
+
+  const events = await DB.getEventsByProcess(p.id);
+  const deadlines = await DB.getDeadlinesByProcess(p.id);
+  const notes = await DB.getNotesByProcess(p.id);
+  const jurisprudence = await DB.getJurisprudenceByProcess(p.id);
+
+  // Update counts
+  p.eventCount = events.length;
+  p.noteCount = notes.length;
+  await DB.saveProcess(p);
+
+  state._processView = { p, events, deadlines, notes, jurisprudence, activeTab: state._processView?.activeTab || 'overview' };
+
+  $('appContent').innerHTML = `
+    <div class="page-header">
+      <div style="min-width: 0; flex: 1;">
+        <button class="btn btn-ghost btn-sm" onclick="navigate('processes')" style="padding: 4px 8px; margin-bottom: 4px; font-variant: normal;">← Processos</button>
+        <h1 class="page-title">${escapeHtml(p.name)}</h1>
+        <p class="page-subtitle">
+          ${p.cnj ? `<span class="process-cnj" style="font-style: normal;">${escapeHtml(p.cnj)}</span> · ` : ''}
+          ${p.area ? escapeHtml(p.area) : ''}${p.type ? ` · ${escapeHtml(p.type)}` : ''}
+          ${p.court ? ` · ${escapeHtml(p.court)}` : ''}
+        </p>
+      </div>
+      <div class="flex gap-2">
+        <button class="btn btn-outline btn-sm" onclick="editProcessFlow()">Editar</button>
+        <button class="btn btn-secondary btn-sm" onclick="generateProcessFiche()">Gerar ficha</button>
+      </div>
+    </div>
+
+    <div class="detail-tabs scroll-thin">
+      <button class="detail-tab ${state._processView.activeTab === 'overview' ? 'active' : ''}" onclick="setProcessTab('overview')">Visão geral</button>
+      <button class="detail-tab ${state._processView.activeTab === 'events' ? 'active' : ''}" onclick="setProcessTab('events')">Eventos · ${events.length}</button>
+      <button class="detail-tab ${state._processView.activeTab === 'deadlines' ? 'active' : ''}" onclick="setProcessTab('deadlines')">Prazos · ${deadlines.filter(d => d.status !== 'done').length}</button>
+      <button class="detail-tab ${state._processView.activeTab === 'jurisprudence' ? 'active' : ''}" onclick="setProcessTab('jurisprudence')">Jurisprudência · ${jurisprudence.length}</button>
+      <button class="detail-tab ${state._processView.activeTab === 'notes' ? 'active' : ''}" onclick="setProcessTab('notes')">Notas · ${notes.length}</button>
+      <button class="detail-tab ${state._processView.activeTab === 'analysis' ? 'active' : ''}" onclick="setProcessTab('analysis')">Análise IA</button>
+    </div>
+
+    <div id="processTabContent"></div>
+  `;
+  renderProcessTabContent();
+}
+
+function setProcessTab(tab) {
+  state._processView.activeTab = tab;
+  document.querySelectorAll('.detail-tab').forEach((el, i) => {
+    el.classList.toggle('active', el.textContent.toLowerCase().includes(tab) ||
+      (tab === 'overview' && i === 0));
+  });
+  renderProcessTabContent();
+}
+
+function renderProcessTabContent() {
+  const { p, events, deadlines, notes, jurisprudence, activeTab } = state._processView;
+  const c = $('processTabContent');
+  if (activeTab === 'overview') c.innerHTML = renderProcessOverview(p, events, deadlines, notes, jurisprudence);
+  else if (activeTab === 'events') c.innerHTML = renderProcessEvents(p, events, notes);
+  else if (activeTab === 'deadlines') c.innerHTML = renderProcessDeadlines(p, deadlines);
+  else if (activeTab === 'jurisprudence') c.innerHTML = renderProcessJurisprudence(p, jurisprudence);
+  else if (activeTab === 'notes') c.innerHTML = renderProcessNotes(p, notes);
+  else if (activeTab === 'analysis') c.innerHTML = renderProcessAnalysis(p, events, deadlines, jurisprudence);
+}
+
+function renderProcessOverview(p, events, deadlines, notes, jurisprudence) {
+  const activeDeadlines = deadlines.filter(d => d.status !== 'done');
+  const today = new Date(); today.setHours(0,0,0,0);
+  const nextDeadline = activeDeadlines
+    .map(d => ({ ...d, days: Math.ceil((new Date(d.deadlineDate) - today) / 86400000) }))
+    .sort((a,b) => a.days - b.days)[0];
+
+  return `
+    <div class="grid gap-4 mb-4" style="grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));">
+      <div class="stat-card"><div class="stat-label">Eventos</div><div class="stat-value">${events.length}</div></div>
+      <div class="stat-card"><div class="stat-label">Prazos ativos</div><div class="stat-value">${activeDeadlines.length}</div></div>
+      <div class="stat-card"><div class="stat-label">Jurisprudência</div><div class="stat-value">${jurisprudence.length}</div></div>
+      <div class="stat-card"><div class="stat-label">Notas</div><div class="stat-value">${notes.length}</div></div>
+    </div>
+
+    ${nextDeadline ? `
+      <div class="card card-gold-border mb-4">
+        <div class="flex justify-between items-start">
+          <div>
+            <p class="smallcaps text-xs" style="color: var(--uc-gold); font-weight: 600;">Próximo prazo</p>
+            <p class="font-serif text-xl font-semibold" style="color: var(--uc-black); margin: 4px 0;">${escapeHtml(nextDeadline.description || nextDeadline.type)}</p>
+            <p class="text-sm" style="color: var(--uc-warm-gray);">Vence em ${formatDate(nextDeadline.deadlineDate)}</p>
+          </div>
+          <span class="badge ${nextDeadline.days < 0 ? 'badge-red' : nextDeadline.days <= 5 ? 'badge-red' : nextDeadline.days <= 7 ? 'badge-amber' : 'badge-green'}">
+            ${nextDeadline.days < 0 ? `vencido há ${Math.abs(nextDeadline.days)}d` : nextDeadline.days === 0 ? 'HOJE' : `${nextDeadline.days} dias`}
+          </span>
+        </div>
+      </div>
+    ` : ''}
+
+    <div class="card mb-4">
+      <h3 class="font-serif text-lg font-semibold smallcaps mb-3" style="color: var(--uc-black);">Identificação</h3>
+      <div class="grid gap-2" style="grid-template-columns: 120px 1fr; font-size: 13px;">
+        ${p.cnj ? `<div style="color: var(--uc-warm-gray);">CNJ:</div><div class="process-cnj">${escapeHtml(p.cnj)}</div>` : ''}
+        ${p.client ? `<div style="color: var(--uc-warm-gray);">Cliente:</div><div>${escapeHtml(p.client)}</div>` : ''}
+        ${p.court ? `<div style="color: var(--uc-warm-gray);">Tribunal:</div><div>${escapeHtml(p.court)}</div>` : ''}
+        ${p.type ? `<div style="color: var(--uc-warm-gray);">Tipo:</div><div>${escapeHtml(p.type)}</div>` : ''}
+        ${p.polo ? `<div style="color: var(--uc-warm-gray);">Polo:</div><div>${escapeHtml(p.polo)}</div>` : ''}
+        ${p.area ? `<div style="color: var(--uc-warm-gray);">Área:</div><div>${escapeHtml(p.area)}</div>` : ''}
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="flex justify-between items-center mb-3">
+        <h3 class="font-serif text-lg font-semibold smallcaps" style="color: var(--uc-black);">Ações</h3>
+      </div>
+      <div class="grid gap-2" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));">
+        <button class="btn btn-outline" onclick="importPdfToProcess()">📄 Importar PDF do auto</button>
+        <button class="btn btn-outline" onclick="addNoteFlow()">📝 Nova nota</button>
+        <button class="btn btn-outline" onclick="addDeadlineFlow()">⏰ Adicionar prazo</button>
+        <button class="btn btn-outline" onclick="copyProcessToClaude()">📋 Copiar contexto p/ Claude</button>
+        <button class="btn btn-outline" onclick="generateProcessFiche()">📜 Gerar ficha (Word)</button>
+        <button class="btn btn-danger btn-sm" onclick="archiveProcessFlow()" style="grid-column: 1 / -1;">Arquivar processo</button>
+      </div>
+    </div>
+  `;
+}
+
+function renderProcessEvents(p, events, notes) {
+  if (events.length === 0) {
+    return `
+      <div class="empty-state">
+        <h3 class="empty-state-title">Nenhum evento indexado</h3>
+        <p class="empty-state-msg">Importe um PDF do auto pela aba Ferramentas PDF e indexe-o. Os eventos detectados serão vinculados a este processo.</p>
+        <button class="btn btn-primary" onclick="importPdfToProcess()">📄 Importar PDF do auto</button>
+      </div>
+    `;
+  }
+  const sorted = [...events].sort((a,b) => parseInt(a.eventNumber) - parseInt(b.eventNumber));
+  return `
+    <div class="flex justify-between items-center mb-3">
+      <p class="text-sm" style="color: var(--uc-warm-gray);">${events.length} evento(s) · clique em um evento para ver detalhes ou adicionar nota</p>
+      <button class="btn btn-outline btn-sm" onclick="importPdfToProcess()">+ Importar mais peças</button>
+    </div>
+    <div class="timeline">
+      ${sorted.map(e => {
+        const evNotes = notes.filter(n => n.eventId === e.id);
+        return `
+          <div class="timeline-event ${evNotes.length > 0 ? 'has-note' : ''}" onclick="openEventDetail('${e.id}')">
+            <div style="font-family: 'EB Garamond', serif; font-weight: 600; color: var(--uc-black); font-size: 16px;">
+              Evento ${escapeHtml(e.eventNumber)} · ${escapeHtml(e.type)}
+            </div>
+            <div style="font-size: 12px; color: var(--uc-warm-gray); margin-top: 2px;">
+              ${e.date ? escapeHtml(e.date) + ' · ' : ''}pgs ${e.startPage}–${e.endPage} (${e.pageCount} pgs)
+              ${evNotes.length > 0 ? ` · 📝 ${evNotes.length} nota(s)` : ''}
+            </div>
+          </div>
+        `;
+      }).join('')}
+    </div>
+  `;
+}
+
+function renderProcessDeadlines(p, deadlines) {
+  const active = deadlines.filter(d => d.status !== 'done');
+  const done = deadlines.filter(d => d.status === 'done');
+  return `
+    <div class="flex justify-between items-center mb-3">
+      <p class="text-sm" style="color: var(--uc-warm-gray);">${active.length} ativo(s) · ${done.length} concluído(s)</p>
+      <button class="btn btn-primary btn-sm" onclick="addDeadlineFlow()">+ Adicionar prazo</button>
+    </div>
+    ${deadlines.length === 0 ? `
+      <div class="empty-state">
+        <p class="empty-state-msg">Nenhum prazo cadastrado para este processo.</p>
+      </div>
+    ` : ''}
+    ${active.sort((a,b) => new Date(a.deadlineDate) - new Date(b.deadlineDate)).map(d => renderDeadlineRow(d, p)).join('')}
+    ${done.length > 0 ? `<h4 class="smallcaps text-xs mt-6 mb-2" style="color: var(--uc-warm-gray);">Concluídos</h4>` : ''}
+    ${done.sort((a,b) => b.completedAt - a.completedAt).map(d => renderDeadlineRow(d, p)).join('')}
+  `;
+}
+
+function renderDeadlineRow(d, p) {
+  const today = new Date(); today.setHours(0,0,0,0);
+  const dl = new Date(d.deadlineDate);
+  const days = Math.ceil((dl - today) / 86400000);
+  let cls = 'safe', label = `${days}d`;
+  if (d.status === 'done') { cls = 'done'; label = '✓ feito'; }
+  else if (days < 0) { cls = 'expired'; label = `vencido ${Math.abs(days)}d atrás`; }
+  else if (days === 0) { cls = 'urgent'; label = 'HOJE'; }
+  else if (days <= 3) { cls = 'urgent'; label = `${days}d`; }
+  else if (days <= 7) { cls = 'warning'; label = `${days}d`; }
+  return `
+    <div class="deadline-row ${cls}">
+      <div style="flex: 1; min-width: 0;">
+        <div style="font-weight: 600; color: var(--uc-black);">${escapeHtml(d.description || d.type)}</div>
+        <div style="font-size: 12px; color: var(--uc-warm-gray); margin-top: 2px;">
+          Vence ${formatDate(dl)}${d.intimationDate ? ' · intimação ' + formatDate(d.intimationDate) : ''}${d.daysAllowed ? ' · ' + d.daysAllowed + ' dias úteis' : ''}
+        </div>
+      </div>
+      <div class="flex gap-2 items-center">
+        <span class="badge ${cls === 'urgent' || cls === 'expired' ? 'badge-red' : cls === 'warning' ? 'badge-amber' : cls === 'done' ? 'badge-gray' : 'badge-green'}">${label}</span>
+        ${d.status !== 'done' ? `<button class="btn btn-ghost btn-sm" onclick="markDeadlineDone('${d.id}')" title="Marcar como concluído">✓</button>` : ''}
+        <button class="btn btn-ghost btn-sm" onclick="deleteDeadline('${d.id}')" title="Remover">🗑</button>
+      </div>
+    </div>
+  `;
+}
+
+function renderProcessJurisprudence(p, jurisprudence) {
+  if (jurisprudence.length === 0) {
+    return `
+      <div class="empty-state">
+        <h3 class="empty-state-title">Nenhuma jurisprudência catalogada</h3>
+        <p class="empty-state-msg">Use a ferramenta "Extrair Jurisprudência" no menu PDF apontando para um auto deste processo. As citações detectadas serão vinculadas aqui automaticamente.</p>
+      </div>
+    `;
+  }
+  // Group by type
+  const byType = {};
+  jurisprudence.forEach(j => { if (!byType[j.type]) byType[j.type] = []; byType[j.type].push(j); });
+  return `
+    <p class="text-sm mb-3" style="color: var(--uc-warm-gray);">${jurisprudence.length} citação(ões) catalogada(s)</p>
+    ${Object.entries(byType).map(([type, items]) => `
+      <div class="card mb-3">
+        <h4 class="font-serif font-semibold smallcaps mb-2" style="color: var(--uc-black);">${escapeHtml(type)} · ${items.length}</h4>
+        <div class="flex flex-wrap gap-2">
+          ${items.map(i => `<span class="badge badge-gold">${escapeHtml(i.citation)}</span>`).join('')}
+        </div>
+      </div>
+    `).join('')}
+  `;
+}
+
+function renderProcessNotes(p, notes) {
+  return `
+    <div class="flex justify-between items-center mb-3">
+      <p class="text-sm" style="color: var(--uc-warm-gray);">${notes.length} nota(s)</p>
+      <button class="btn btn-primary btn-sm" onclick="addNoteFlow()">+ Nova nota</button>
+    </div>
+    ${notes.length === 0 ? `
+      <div class="empty-state">
+        <p class="empty-state-msg">Nenhuma nota ainda. Adicione observações estratégicas, lembretes ou anotações sobre eventos específicos.</p>
+      </div>
+    ` : notes.sort((a,b) => b.createdAt - a.createdAt).map(n => `
+      <div class="note-item">
+        <div class="note-meta">
+          ${formatDateTime(n.createdAt)}
+          ${n.eventId ? ` · vinculada a evento` : ''}
+        </div>
+        <div style="white-space: pre-wrap;">${escapeHtml(n.text)}</div>
+        <div style="margin-top: 6px; display: flex; gap: 8px;">
+          <button class="btn btn-ghost btn-sm" onclick="editNote('${n.id}')">Editar</button>
+          <button class="btn btn-ghost btn-sm" onclick="deleteNote('${n.id}')">Remover</button>
+        </div>
+      </div>
+    `).join('')}
+  `;
+}
+
+function renderProcessAnalysis(p, events, deadlines, jurisprudence) {
+  return `
+    <div class="card card-gold-border">
+      <h3 class="font-serif text-lg font-semibold smallcaps mb-3" style="color: var(--uc-black);">Análise pelo Claude</h3>
+      <p style="color: var(--uc-warm-gray); font-size: 14px; margin-bottom: 16px;">
+        Gere um pacote estruturado com todos os dados deste processo (eventos, jurisprudência, prazos, notas, prompt sênior pré-preenchido) pronto para colar no Claude.
+      </p>
+      <div class="flex gap-2 flex-wrap">
+        <button class="btn btn-secondary" onclick="copyProcessToClaude()">📋 Copiar para área de transferência</button>
+        <button class="btn btn-outline" onclick="downloadProcessPackage()">⬇ Baixar como .md</button>
+      </div>
+      <p class="help-text" style="margin-top: 12px;">
+        ${events.length} evento(s) · ${jurisprudence.length} jurisprudência(s) · ${deadlines.filter(d => d.status !== 'done').length} prazo(s) ativo(s) serão incluídos no pacote.
+      </p>
+    </div>
+    <div class="card mt-4">
+      <h3 class="font-serif text-lg font-semibold smallcaps mb-3" style="color: var(--uc-black);">Prompts personalizados</h3>
+      <p style="color: var(--uc-warm-gray); font-size: 13px; margin-bottom: 12px;">
+        Configure prompts de análise específicos por área em <a onclick="navigate('settings')" style="color: var(--uc-gold); cursor: pointer;">Configurações → Prompts</a>.
+      </p>
+    </div>
+  `;
+}
+
+
+// ====================================================================
+// === PROCESS ACTIONS ================================================
+// ====================================================================
+
+async function editProcessFlow() {
+  const p = state._processView.p;
+  const r = await showModal('Editar processo', [
+    { label: 'Nome', default: p.name },
+    { label: 'CNJ', default: p.cnj || '' },
+    { label: 'Cliente', default: p.client || '' },
+    { label: 'Tribunal', default: p.court || '' },
+    { label: 'Tipo', default: p.type || '' },
+    { label: 'Área', type: 'select', default: p.area || 'Tributário', options: [
+      { value: 'Tributário', label: 'Tributário' }, { value: 'Cível', label: 'Cível' },
+      { value: 'Execução Fiscal', label: 'Execução Fiscal' }, { value: 'Recuperação Judicial', label: 'Recuperação Judicial' },
+      { value: 'Administrativo', label: 'Administrativo' }, { value: 'Consumidor', label: 'Consumidor' },
+      { value: 'Outros', label: 'Outros' }
+    ]},
+    { label: 'Polo', type: 'select', default: p.polo || 'Defesa', options: [
+      { value: 'Defesa', label: 'Defesa' }, { value: 'Ataque', label: 'Ataque' }
+    ]}
+  ], { confirmLabel: 'Salvar' });
+  if (!r) return;
+  const [name, cnj, client, court, type, area, polo] = r;
+  Object.assign(p, { name, cnj: cnj || null, client: client || null, court: court || null, type: type || null, area, polo });
+  await DB.saveProcess(p);
+  toast('Processo atualizado', '', 'success');
+  renderProcessDetail();
+}
+
+async function archiveProcessFlow() {
+  const p = state._processView.p;
+  const ok = await confirmDialog(p.status === 'archived' ? 'Reativar processo?' : 'Arquivar processo?',
+    p.status === 'archived' ? 'O processo voltará para a lista ativa.' : 'O processo continuará acessível mas marcado como arquivado.');
+  if (!ok) return;
+  p.status = p.status === 'archived' ? 'active' : 'archived';
+  await DB.saveProcess(p);
+  toast(p.status === 'archived' ? 'Arquivado' : 'Reativado', '', 'success');
+  renderProcessDetail();
+}
+
+async function addNoteFlow(eventId = null) {
+  const r = await showModal(eventId ? 'Adicionar nota ao evento' : 'Nova nota', [
+    { label: 'Texto da nota', type: 'textarea', rows: 6, placeholder: 'Observação, lembrete, estratégia...' }
+  ], { confirmLabel: 'Salvar' });
+  if (!r || !r[0]?.trim()) return;
+  const note = { id: uid(), processId: state.currentProcessId, eventId, text: r[0].trim(), createdAt: Date.now() };
+  await DB.saveNote(note);
+  toast('Nota adicionada', '', 'success');
+  renderProcessDetail();
+}
+
+async function editNote(id) {
+  const n = state._processView.notes.find(n => n.id === id);
+  if (!n) return;
+  const r = await showModal('Editar nota', [
+    { label: 'Texto', type: 'textarea', rows: 6, default: n.text }
+  ], { confirmLabel: 'Salvar' });
+  if (!r) return;
+  n.text = r[0].trim();
+  n.updatedAt = Date.now();
+  await DB.saveNote(n);
+  renderProcessDetail();
+}
+
+async function deleteNote(id) {
+  const ok = await confirmDialog('Remover nota?', 'Esta ação não pode ser desfeita.', true);
+  if (!ok) return;
+  await DB.deleteNote(id);
+  renderProcessDetail();
+}
+
+async function addDeadlineFlow() {
+  const r = await showModal('Adicionar prazo', [
+    { label: 'Descrição', placeholder: 'Ex: Embargos à execução · Resposta · Recurso' },
+    { label: 'Data da intimação/publicação (opcional)', type: 'date' },
+    { label: 'Prazo em dias úteis', type: 'number', default: '15', min: '1', max: '365' },
+    { label: 'OU data de vencimento direta (se preferir)', type: 'date' }
+  ], { confirmLabel: 'Adicionar', intro: 'Informe a data da intimação + dias OU diretamente a data de vencimento.' });
+  if (!r) return;
+  const [desc, intDate, days, directDate] = r;
+  if (!desc?.trim()) { toast('Descrição obrigatória', '', 'error'); return; }
+  let deadlineDate;
+  if (directDate) {
+    deadlineDate = new Date(directDate + 'T12:00:00');
+  } else if (intDate && days) {
+    deadlineDate = addBusinessDays(new Date(intDate + 'T12:00:00'), parseInt(days));
+  } else {
+    toast('Informe pelo menos a data de vencimento', '', 'error'); return;
+  }
+  const d = {
+    id: uid(), processId: state.currentProcessId,
+    description: desc.trim(),
+    type: 'manual',
+    intimationDate: intDate ? new Date(intDate + 'T12:00:00').toISOString() : null,
+    daysAllowed: days ? parseInt(days) : null,
+    deadlineDate: deadlineDate.toISOString(),
+    status: 'pending',
+    createdAt: Date.now()
+  };
+  await DB.saveDeadline(d);
+  toast('Prazo adicionado', formatDate(deadlineDate), 'success');
+  renderProcessDetail();
+}
+
+async function markDeadlineDone(id) {
+  const d = state._processView.deadlines.find(x => x.id === id);
+  if (!d) return;
+  d.status = 'done';
+  d.completedAt = Date.now();
+  await DB.saveDeadline(d);
+  toast('Prazo concluído', '', 'success');
+  renderProcessDetail();
+}
+
+async function deleteDeadline(id) {
+  const ok = await confirmDialog('Remover prazo?', '', true);
+  if (!ok) return;
+  await DB.deleteDeadline(id);
+  renderProcessDetail();
+}
+
+async function openEventDetail(eventId) {
+  const e = state._processView.events.find(x => x.id === eventId);
+  if (!e) return;
+  const evNotes = state._processView.notes.filter(n => n.eventId === eventId);
+  const modal = document.createElement('div');
+  modal.className = 'modal-backdrop';
+  modal.innerHTML = `
+    <div class="modal scroll-thin" style="max-width: 600px;">
+      <h3 class="modal-title">Evento ${escapeHtml(e.eventNumber)}</h3>
+      <div style="margin-bottom: 16px; font-size: 14px;">
+        <p><strong>Tipo:</strong> ${escapeHtml(e.type)}</p>
+        ${e.date ? `<p><strong>Data:</strong> ${escapeHtml(e.date)}</p>` : ''}
+        <p><strong>Páginas:</strong> ${e.startPage}–${e.endPage} (${e.pageCount} pgs)</p>
+      </div>
+      <h4 class="font-serif font-semibold smallcaps mb-2" style="color: var(--uc-black);">Notas vinculadas</h4>
+      ${evNotes.length === 0 ? `<p style="color: var(--uc-warm-gray); font-size: 13px;">Sem notas.</p>` :
+        evNotes.map(n => `<div class="note-item"><div class="note-meta">${formatDateTime(n.createdAt)}</div><div style="white-space: pre-wrap;">${escapeHtml(n.text)}</div></div>`).join('')}
+      <div class="flex gap-2 mt-4">
+        <button class="btn btn-outline" onclick="(function(){document.querySelector('.modal-backdrop').remove(); addNoteFlow('${eventId}');})()" style="flex:1">+ Nota neste evento</button>
+        <button class="btn btn-primary" onclick="document.querySelector('.modal-backdrop').remove()" style="flex:1">Fechar</button>
+      </div>
+    </div>`;
+  $('modalContainer').appendChild(modal);
+}
+
+// ====================================================================
+// === COPY/EXPORT TO CLAUDE ==========================================
+// ====================================================================
+
+function buildProcessClaudePackage(p, events, deadlines, notes, jurisprudence, promptTemplate) {
+  let md = `# Pacote de análise · ${p.name}\n\n`;
+  md += `**Gerado em:** ${formatDateTime(Date.now())}\n\n`;
+  md += `---\n\n## Identificação do processo\n\n`;
+  if (p.cnj) md += `- **CNJ:** ${p.cnj}\n`;
+  if (p.client) md += `- **Cliente:** ${p.client}\n`;
+  if (p.court) md += `- **Tribunal:** ${p.court}\n`;
+  if (p.type) md += `- **Tipo:** ${p.type}\n`;
+  if (p.area) md += `- **Área:** ${p.area}\n`;
+  if (p.polo) md += `- **Polo:** ${p.polo}\n`;
+
+  if (events.length > 0) {
+    md += `\n---\n\n## Cronologia (${events.length} eventos)\n\n`;
+    md += `| Evento | Data | Tipo | Pgs |\n|---|---|---|---|\n`;
+    [...events].sort((a,b) => parseInt(a.eventNumber) - parseInt(b.eventNumber)).forEach(e => {
+      md += `| ${e.eventNumber} | ${e.date || '—'} | ${e.type.replace(/\|/g,'/')} | ${e.startPage}–${e.endPage} |\n`;
+    });
+  }
+
+  if (deadlines.filter(d => d.status !== 'done').length > 0) {
+    md += `\n---\n\n## Prazos ativos\n\n`;
+    deadlines.filter(d => d.status !== 'done').sort((a,b) => new Date(a.deadlineDate) - new Date(b.deadlineDate)).forEach(d => {
+      const dl = new Date(d.deadlineDate);
+      const today = new Date(); today.setHours(0,0,0,0);
+      const days = Math.ceil((dl - today) / 86400000);
+      md += `- **${d.description || d.type}** · vence ${formatDate(dl)} (${days >= 0 ? days + ' dias úteis' : 'VENCIDO há ' + Math.abs(days) + ' dias'})\n`;
+    });
+  }
+
+  if (jurisprudence.length > 0) {
+    md += `\n---\n\n## Jurisprudência catalogada\n\n`;
+    const byType = {};
+    jurisprudence.forEach(j => { if (!byType[j.type]) byType[j.type] = []; byType[j.type].push(j.citation); });
+    for (const [t, items] of Object.entries(byType)) {
+      md += `### ${t} (${items.length})\n`;
+      items.forEach(i => md += `- ${i}\n`);
+      md += '\n';
+    }
+  }
+
+  if (notes.length > 0) {
+    md += `\n---\n\n## Notas e observações\n\n`;
+    notes.sort((a,b) => a.createdAt - b.createdAt).forEach(n => {
+      md += `**${formatDateTime(n.createdAt)}**${n.eventId ? ` (evento ${events.find(e => e.id === n.eventId)?.eventNumber || '?'})` : ''}\n${n.text}\n\n`;
+    });
+  }
+
+  // Prompt
+  md += `\n---\n\n## Prompt para análise\n\n\`\`\`\n`;
+  md += promptTemplate ? promptTemplate.replace(/\[NÚMERO\]/g, p.cnj || '[NÚMERO]')
+    .replace(/\[ÁREA DO DIREITO\]/g, p.area || 'Direito Tributário')
+    .replace(/\[TRIBUNAL\]/g, p.court || '[TRIBUNAL]')
+    .replace(/\[TIPO\]/g, p.type || '[TIPO]')
+    .replace(/\[NOME E POLO\]/g, p.client && p.polo ? `${p.client} (${p.polo})` : '[NOME E POLO]')
+    : DEFAULT_PROMPT_TEMPLATE.replace(/\[NÚMERO\]/g, p.cnj || '[NÚMERO]').replace(/\[ÁREA DO DIREITO\]/g, p.area || 'Direito Tributário');
+  md += `\n\`\`\`\n`;
+  return md;
+}
+
+async function copyProcessToClaude() {
+  const { p, events, deadlines, notes, jurisprudence } = state._processView;
+  const prompts = await DB.getAllPrompts();
+  const defaultId = await DB.getSetting('defaultPromptId');
+  const prompt = prompts.find(pr => pr.id === defaultId) || prompts[0];
+  const md = buildProcessClaudePackage(p, events, deadlines, notes, jurisprudence, prompt?.content);
+  try {
+    await navigator.clipboard.writeText(md);
+    toast('Copiado!', 'Cole no Claude para iniciar a análise.', 'success');
+  } catch(e) {
+    // Fallback: download
+    downloadBlob(new Blob([md], { type: 'text/markdown;charset=utf-8' }), `${p.name.replace(/[^\w]/g, '_')}_pacote_claude.md`);
+    toast('Baixado', 'Não foi possível copiar — arquivo baixado.', 'info');
+  }
+}
+
+async function downloadProcessPackage() {
+  const { p, events, deadlines, notes, jurisprudence } = state._processView;
+  const prompts = await DB.getAllPrompts();
+  const defaultId = await DB.getSetting('defaultPromptId');
+  const prompt = prompts.find(pr => pr.id === defaultId) || prompts[0];
+  const md = buildProcessClaudePackage(p, events, deadlines, notes, jurisprudence, prompt?.content);
+  downloadBlob(new Blob([md], { type: 'text/markdown;charset=utf-8' }), `${p.name.replace(/[^\w]/g, '_')}_pacote_claude.md`);
+  toast('Baixado', '', 'success');
+}
+
+// ====================================================================
+// === PAGE: ALL DEADLINES ============================================
+// ====================================================================
+
+async function renderDeadlines() {
+  const deadlines = await DB.getAllDeadlines();
+  const processes = await DB.getAllProcesses();
+  state.deadlines = deadlines;
+  state.processes = processes;
+  updateNavBadges();
+
+  const today = new Date(); today.setHours(0,0,0,0);
+  const enriched = deadlines.map(d => {
+    const proc = processes.find(p => p.id === d.processId);
+    const dl = new Date(d.deadlineDate);
+    const days = Math.ceil((dl - today) / 86400000);
+    return { ...d, processName: proc?.name || 'Processo removido', processCnj: proc?.cnj, days };
+  });
+  const active = enriched.filter(d => d.status !== 'done');
+  const done = enriched.filter(d => d.status === 'done');
+  const expired = active.filter(d => d.days < 0);
+  const urgent = active.filter(d => d.days >= 0 && d.days <= 5);
+  const warning = active.filter(d => d.days > 5 && d.days <= 14);
+  const safe = active.filter(d => d.days > 14);
+
+  $('appContent').innerHTML = `
+    <div class="page-header">
+      <div>
+        <h1 class="page-title"><span class="smallcaps-prefix">Agenda</span></h1>
+        <p class="page-subtitle">${active.length} prazo(s) ativo(s) na carteira</p>
+      </div>
+      <div class="flex gap-2">
+        <button class="btn btn-outline btn-sm" onclick="exportDeadlinesCsv()">Exportar CSV</button>
+      </div>
+    </div>
+
+    <div class="grid gap-3 mb-6" style="grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));">
+      <div class="stat-card" style="${expired.length > 0 ? 'background: var(--uc-red-soft); border-color: var(--uc-red);' : ''}">
+        <div class="stat-label">Vencidos</div>
+        <div class="stat-value" style="${expired.length > 0 ? 'color: var(--uc-red);' : ''}">${expired.length}</div>
+      </div>
+      <div class="stat-card" style="${urgent.length > 0 ? 'background: var(--uc-red-soft);' : ''}">
+        <div class="stat-label">Urgentes</div>
+        <div class="stat-value">${urgent.length}</div>
+        <div class="stat-meta">≤ 5 dias</div>
+      </div>
+      <div class="stat-card" style="${warning.length > 0 ? 'background: var(--uc-amber-soft);' : ''}">
+        <div class="stat-label">Atenção</div>
+        <div class="stat-value">${warning.length}</div>
+        <div class="stat-meta">6-14 dias</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Tranquilos</div>
+        <div class="stat-value">${safe.length}</div>
+        <div class="stat-meta">+14 dias</div>
+      </div>
+    </div>
+
+    ${active.length === 0 ? `
+      <div class="card empty-state">
+        <h3 class="empty-state-title">Nenhum prazo ativo</h3>
+        <p class="empty-state-msg">Você não tem prazos pendentes. Adicione prazos a partir de cada processo na aba "Prazos".</p>
+      </div>
+    ` : `
+      ${expired.length > 0 ? `<h3 class="font-serif text-lg font-semibold smallcaps mb-3" style="color: var(--uc-red);">⚠ Vencidos · ${expired.length}</h3>${expired.sort((a,b) => a.days - b.days).map(d => renderGlobalDeadlineRow(d)).join('')}` : ''}
+      ${urgent.length > 0 ? `<h3 class="font-serif text-lg font-semibold smallcaps mt-6 mb-3" style="color: var(--uc-red);">Urgentes · ${urgent.length}</h3>${urgent.sort((a,b) => a.days - b.days).map(d => renderGlobalDeadlineRow(d)).join('')}` : ''}
+      ${warning.length > 0 ? `<h3 class="font-serif text-lg font-semibold smallcaps mt-6 mb-3" style="color: var(--uc-amber);">Atenção · ${warning.length}</h3>${warning.sort((a,b) => a.days - b.days).map(d => renderGlobalDeadlineRow(d)).join('')}` : ''}
+      ${safe.length > 0 ? `<h3 class="font-serif text-lg font-semibold smallcaps mt-6 mb-3" style="color: var(--uc-green);">Próximos · ${safe.length}</h3>${safe.sort((a,b) => a.days - b.days).map(d => renderGlobalDeadlineRow(d)).join('')}` : ''}
+    `}
+  `;
+}
+
+function renderGlobalDeadlineRow(d) {
+  let cls = 'safe', label = `${d.days}d`;
+  if (d.days < 0) { cls = 'expired'; label = `há ${Math.abs(d.days)}d`; }
+  else if (d.days === 0) { cls = 'urgent'; label = 'HOJE'; }
+  else if (d.days <= 3) { cls = 'urgent'; label = `${d.days}d`; }
+  else if (d.days <= 7) { cls = 'warning'; label = `${d.days}d`; }
+  return `
+    <div class="deadline-row ${cls}" onclick="navigate('process', { currentProcessId: '${d.processId}' })">
+      <div style="flex: 1; min-width: 0;">
+        <div style="font-weight: 600; color: var(--uc-black);">${escapeHtml(d.description || d.type)}</div>
+        <div style="font-size: 12px; color: var(--uc-warm-gray); margin-top: 2px;">
+          ${escapeHtml(d.processName)}${d.processCnj ? ` · ${d.processCnj}` : ''} · vence ${formatDate(d.deadlineDate)}
+        </div>
+      </div>
+      <span class="badge ${cls === 'urgent' || cls === 'expired' ? 'badge-red' : cls === 'warning' ? 'badge-amber' : 'badge-green'}">${label}</span>
+    </div>
+  `;
+}
+
+async function exportDeadlinesCsv() {
+  const deadlines = await DB.getAllDeadlines();
+  const processes = await DB.getAllProcesses();
+  const today = new Date(); today.setHours(0,0,0,0);
+  let csv = 'Processo,CNJ,Prazo,Vencimento,Dias restantes,Status\n';
+  deadlines.forEach(d => {
+    const p = processes.find(x => x.id === d.processId);
+    const dl = new Date(d.deadlineDate);
+    const days = Math.ceil((dl - today) / 86400000);
+    csv += `"${(p?.name || '').replace(/"/g,'""')}","${p?.cnj || ''}","${(d.description || d.type).replace(/"/g,'""')}","${formatDate(dl)}","${d.status === 'done' ? 'concluído' : days}","${d.status === 'done' ? 'concluído' : days < 0 ? 'vencido' : 'pendente'}"\n`;
+  });
+  downloadBlob(new Blob([csv], { type: 'text/csv;charset=utf-8' }), `prazos_${new Date().toISOString().slice(0,10)}.csv`);
+  toast('Exportado', '', 'success');
+}
+
+
+// ====================================================================
+// === PDF PROCESSING FUNCTIONS (preserved from v3) ===================
+// ====================================================================
+
+let tesseractWorker = null, tesseractWorkerLang = null;
+
+// ============== TESSERACT WORKER MGMT ==============
+async function getTesseractWorker(lang) {
+  if (tesseractWorker && tesseractWorkerLang === lang) return tesseractWorker;
+  if (tesseractWorker) { try { await tesseractWorker.terminate(); } catch(e) {} tesseractWorker = null; }
+  tesseractWorker = await Tesseract.createWorker(lang, 1);
+  tesseractWorkerLang = lang;
+  return tesseractWorker;
+}
+
+// ============== CORE PROCESSING FUNCTIONS ==============
+
+async function processCompressAggressive(pdfBytes, dpi = 150, quality = 0.7, progressCb = null) {
+  const pdfDoc = await pdfjsLib.getDocument({ data: pdfBytes.slice(0) }).promise;
+  const newPdf = await PDFDocument.create();
+  const scale = dpi / 72;
+  for (let i = 1; i <= pdfDoc.numPages; i++) {
+    if (progressCb) progressCb(i, pdfDoc.numPages);
+    const page = await pdfDoc.getPage(i);
+    const viewport = page.getViewport({ scale });
+    const canvas = document.createElement('canvas');
+    canvas.width = viewport.width; canvas.height = viewport.height;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = 'white'; ctx.fillRect(0,0,canvas.width,canvas.height);
+    await page.render({ canvasContext: ctx, viewport }).promise;
+    const blob = await new Promise(r => canvas.toBlob(r, 'image/jpeg', quality));
+    const jpegBytes = await blob.arrayBuffer();
+    const jpegImage = await newPdf.embedJpg(jpegBytes);
+    const newPage = newPdf.addPage([jpegImage.width, jpegImage.height]);
+    newPage.drawImage(jpegImage, { x: 0, y: 0, width: jpegImage.width, height: jpegImage.height });
+  }
+  return await newPdf.save({ useObjectStreams: true });
+}
+
+async function processCompressLight(pdfBytes) {
+  const pdfLib = await PDFDocument.load(pdfBytes.slice(0), { ignoreEncryption: true });
+  return await pdfLib.save({ useObjectStreams: true });
+}
+
+async function processExtractText(pdfBytes, progressCb = null) {
+  const pdfDoc = await pdfjsLib.getDocument({ data: pdfBytes.slice(0) }).promise;
+  let fullText = '';
+  for (let i = 1; i <= pdfDoc.numPages; i++) {
+    if (progressCb) progressCb(i, pdfDoc.numPages);
+    const page = await pdfDoc.getPage(i);
+    const tc = await page.getTextContent();
+    let lastY = null, pageText = '';
+    for (const item of tc.items) {
+      if (lastY !== null && Math.abs(item.transform[5] - lastY) > 2) pageText += '\n';
+      pageText += item.str + ' ';
+      lastY = item.transform[5];
+    }
+    fullText += `\n\n========== PÁGINA ${i} ==========\n\n${pageText.trim()}\n`;
+  }
+  return fullText;
+}
+
+async function processOcr(pdfBytes, lang = 'por', dpi = 200, progressCb = null) {
+  const pdfDoc = await pdfjsLib.getDocument({ data: pdfBytes.slice(0) }).promise;
+  const worker = await getTesseractWorker(lang);
+  const scale = dpi / 72;
+  let fullText = '';
+  for (let i = 1; i <= pdfDoc.numPages; i++) {
+    if (progressCb) progressCb(i, pdfDoc.numPages, 'OCR');
+    const page = await pdfDoc.getPage(i);
+    const viewport = page.getViewport({ scale });
+    const canvas = document.createElement('canvas');
+    canvas.width = viewport.width; canvas.height = viewport.height;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = 'white'; ctx.fillRect(0,0,canvas.width,canvas.height);
+    await page.render({ canvasContext: ctx, viewport }).promise;
+    const { data } = await worker.recognize(canvas);
+    fullText += `\n\n========== PÁGINA ${i} ==========\n\n${data.text.trim()}\n`;
+    canvas.width = 0; canvas.height = 0;
+  }
+  return fullText;
+}
+
+async function processOcrSelective(pdfBytes, lang = 'por', dpi = 200, progressCb = null) {
+  const pdfDoc = await pdfjsLib.getDocument({ data: pdfBytes.slice(0) }).promise;
+  let worker = null;
+  let fullText = '';
+  let nativeCount = 0, ocrCount = 0;
+  for (let i = 1; i <= pdfDoc.numPages; i++) {
+    if (progressCb) progressCb(i, pdfDoc.numPages);
+    const page = await pdfDoc.getPage(i);
+    const tc = await page.getTextContent();
+    const nativeText = tc.items.map(it => it.str).join(' ').trim();
+    if (nativeText.length > 100) {
+      // page has reliable native text
+      let pageText = '', lastY = null;
+      for (const item of tc.items) {
+        if (lastY !== null && Math.abs(item.transform[5] - lastY) > 2) pageText += '\n';
+        pageText += item.str + ' ';
+        lastY = item.transform[5];
+      }
+      fullText += `\n\n========== PÁGINA ${i} (nativo) ==========\n\n${pageText.trim()}\n`;
+      nativeCount++;
+    } else {
+      // OCR
+      if (!worker) worker = await getTesseractWorker(lang);
+      const viewport = page.getViewport({ scale: dpi/72 });
+      const canvas = document.createElement('canvas');
+      canvas.width = viewport.width; canvas.height = viewport.height;
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = 'white'; ctx.fillRect(0,0,canvas.width,canvas.height);
+      await page.render({ canvasContext: ctx, viewport }).promise;
+      const { data } = await worker.recognize(canvas);
+      fullText += `\n\n========== PÁGINA ${i} (OCR) ==========\n\n${data.text.trim()}\n`;
+      canvas.width = 0; canvas.height = 0;
+      ocrCount++;
+    }
+  }
+  return { text: fullText, nativeCount, ocrCount };
+}
+
+async function processSearchablePdf(pdfBytes, lang = 'por', dpi = 200, quality = 0.85, progressCb = null) {
+  const pdfDoc = await pdfjsLib.getDocument({ data: pdfBytes.slice(0) }).promise;
+  const worker = await getTesseractWorker(lang);
+  const newPdf = await PDFDocument.create();
+  const helvFont = await newPdf.embedFont(StandardFonts.Helvetica);
+  const scale = dpi / 72;
+  let totalWords = 0;
+  for (let i = 1; i <= pdfDoc.numPages; i++) {
+    if (progressCb) progressCb(i, pdfDoc.numPages);
+    const page = await pdfDoc.getPage(i);
+    const viewport = page.getViewport({ scale });
+    const canvas = document.createElement('canvas');
+    canvas.width = viewport.width; canvas.height = viewport.height;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = 'white'; ctx.fillRect(0,0,canvas.width,canvas.height);
+    await page.render({ canvasContext: ctx, viewport }).promise;
+    const { data } = await worker.recognize(canvas);
+    const blob = await new Promise(r => canvas.toBlob(r, 'image/jpeg', quality));
+    const jpegBytes = await blob.arrayBuffer();
+    const jpegImage = await newPdf.embedJpg(jpegBytes);
+    const newPage = newPdf.addPage([jpegImage.width, jpegImage.height]);
+    newPage.drawImage(jpegImage, { x: 0, y: 0, width: jpegImage.width, height: jpegImage.height });
+
+    // Embed invisible text layer at word positions
+    if (data.words) {
+      for (const word of data.words) {
+        if (!word.text || !word.bbox) continue;
+        const txt = word.text.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^\x20-\x7E]/g, '');
+        if (!txt.trim()) continue;
+        const { x0, y0, x1, y1 } = word.bbox;
+        const h = y1 - y0;
+        const pdfY = jpegImage.height - y1;
+        try {
+          newPage.drawText(txt, {
+            x: x0, y: pdfY,
+            size: Math.max(2, h * 0.7),
+            font: helvFont,
+            opacity: 0.001,
+            color: rgb(1,1,1)
+          });
+          totalWords++;
+        } catch(e) {}
+      }
+    }
+    canvas.width = 0; canvas.height = 0;
+  }
+  return { bytes: await newPdf.save({ useObjectStreams: true }), totalWords };
+}
+
+async function processSplit(pdfBytes, fileName, chunkSize, progressCb = null) {
+  const pdfLib = await PDFDocument.load(pdfBytes.slice(0), { ignoreEncryption: true });
+  const totalPages = pdfLib.getPageCount();
+  const numChunks = Math.ceil(totalPages / chunkSize);
+  const baseName = fileName.replace(/\.pdf$/i, '');
+  const parts = [];
+  for (let c = 0; c < numChunks; c++) {
+    if (progressCb) progressCb(c + 1, numChunks);
+    const start = c * chunkSize;
+    const end = Math.min(start + chunkSize, totalPages);
+    const newPdf = await PDFDocument.create();
+    const idx = Array.from({length: end - start}, (_, i) => start + i);
+    const pages = await newPdf.copyPages(pdfLib, idx);
+    pages.forEach(p => newPdf.addPage(p));
+    parts.push({ name: `${baseName}_parte${String(c+1).padStart(2,'0')}_pgs${start+1}-${end}.pdf`, bytes: await newPdf.save() });
+  }
+  return parts;
+}
+
+async function processToImages(pdfBytes, dpi = 150, quality = 0.85, progressCb = null) {
+  const pdfDoc = await pdfjsLib.getDocument({ data: pdfBytes.slice(0) }).promise;
+  const scale = dpi / 72;
+  const images = [];
+  for (let i = 1; i <= pdfDoc.numPages; i++) {
+    if (progressCb) progressCb(i, pdfDoc.numPages);
+    const page = await pdfDoc.getPage(i);
+    const viewport = page.getViewport({ scale });
+    const canvas = document.createElement('canvas');
+    canvas.width = viewport.width; canvas.height = viewport.height;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = 'white'; ctx.fillRect(0,0,canvas.width,canvas.height);
+    await page.render({ canvasContext: ctx, viewport }).promise;
+    const blob = await new Promise(r => canvas.toBlob(r, 'image/jpeg', quality));
+    images.push({ name: `pagina_${String(i).padStart(3,'0')}.jpg`, blob });
+    canvas.width = 0; canvas.height = 0;
+  }
+  return images;
+}
+
+// ============== LEGAL PROCESSING ==============
+
+// Detect event headers in PJe/eSAJ/PROJUDI documents
+async function processIndexAutos(pdfBytes, progressCb = null) {
+  const pdfDoc = await pdfjsLib.getDocument({ data: pdfBytes.slice(0) }).promise;
+  const numPages = pdfDoc.numPages;
+  const events = [];
+  const allPagesText = [];
+
+  // Patterns ordered by specificity
+  const patterns = [
+    // PJe TRF/TJ classic: "Evento N - Tipo - DD/MM/AAAA"
+    { re: /Evento\s+(\d+)[\s\-–·]+([^\n\-–]{3,80}?)[\s\-–·]+(\d{2}\/\d{2}\/\d{4})/i, fmt: m => ({ num: m[1], type: m[2].trim(), date: m[3] }) },
+    // PJe alt: "Evento N - Tipo"
+    { re: /Evento\s+(\d+)[\s\-–·]+([A-ZÁÉÍÓÚÂÊÔÃÕÇ][^\n]{3,80})/i, fmt: m => ({ num: m[1], type: m[2].trim(), date: '' }) },
+    // eSAJ: "fls. NNNN" with peça name nearby
+    { re: /(?:Pe[çc]a|Documento)\s+(\d+)[\s\-–:]+([^\n]{3,80})/i, fmt: m => ({ num: m[1], type: m[2].trim(), date: '' }) },
+    // Sequencial
+    { re: /Sequencial\s+(\d+)[\s\-–:]+([^\n]{3,80})/i, fmt: m => ({ num: m[1], type: m[2].trim(), date: '' }) },
+  ];
+
+  // Also detect process number (CNJ format)
+  const processRe = /(\d{7}-\d{2}\.\d{4}\.\d\.\d{2}\.\d{4})/;
+  let detectedProcessNumber = null;
+
+  for (let i = 1; i <= numPages; i++) {
+    if (progressCb) progressCb(i, numPages);
+    const page = await pdfDoc.getPage(i);
+    const tc = await page.getTextContent();
+    const pageText = tc.items.map(it => it.str).join(' ');
+    allPagesText.push(pageText);
+
+    if (!detectedProcessNumber) {
+      const pm = pageText.match(processRe);
+      if (pm) detectedProcessNumber = pm[1];
+    }
+
+    // Check first 400 chars for header
+    const headerSample = pageText.substring(0, 500);
+    for (const p of patterns) {
+      const m = headerSample.match(p.re);
+      if (m) {
+        const data = p.fmt(m);
+        // Avoid duplicate consecutive events
+        const last = events[events.length - 1];
+        if (!last || last.eventNumber !== data.num || last.startPage !== i) {
+          events.push({
+            eventNumber: data.num,
+            type: data.type,
+            date: data.date,
+            startPage: i,
+            rawHeader: m[0].substring(0, 120)
+          });
+        }
+        break;
+      }
+    }
+  }
+
+  // Set endPage for each event
+  for (let i = 0; i < events.length; i++) {
+    events[i].endPage = i < events.length - 1 ? events[i+1].startPage - 1 : numPages;
+    events[i].pageCount = events[i].endPage - events[i].startPage + 1;
+  }
+
+  return { events, processNumber: detectedProcessNumber, totalPages: numPages, allPagesText };
+}
+
+// Detect jurisprudence citations
+function detectCitations(text) {
+  const patterns = {
+    'Processo CNJ': /\b\d{7}-\d{2}\.\d{4}\.\d\.\d{2}\.\d{4}\b/g,
+    'AgRg/AgInt em REsp': /Ag(?:Rg|Int)\s+(?:no\s+)?(?:A?REsp)\s*(?:n[°º.]?\s*)?[\d.]+(?:\/[A-Z]{2})?/gi,
+    'AgRg/AgInt em RE': /Ag(?:Rg|Int)\s+(?:no\s+)?A?RE\s*(?:n[°º.]?\s*)?[\d.]+(?:\/[A-Z]{2})?/gi,
+    'REsp': /\bREsp\s*(?:n[°º.]?\s*)?[\d.]+(?:\/[A-Z]{2})?/gi,
+    'AREsp': /\bAREsp\s*(?:n[°º.]?\s*)?[\d.]+(?:\/[A-Z]{2})?/gi,
+    'RE': /\bRE\s*(?:n[°º.]?\s*)?[\d.]{4,}(?:\/[A-Z]{2})?/gi,
+    'ARE': /\bARE\s*(?:n[°º.]?\s*)?[\d.]+(?:\/[A-Z]{2})?/gi,
+    'HC': /\bHC\s*(?:n[°º.]?\s*)?[\d.]{4,}(?:\/[A-Z]{2})?/gi,
+    'MS': /\bMS\s*(?:n[°º.]?\s*)?[\d.]{4,}(?:\/[A-Z]{2})?/gi,
+    'ADI': /\bADI\s*(?:n[°º.]?\s*)?[\d.]+/gi,
+    'ADC': /\bADC\s*(?:n[°º.]?\s*)?[\d.]+/gi,
+    'ADPF': /\bADPF\s*(?:n[°º.]?\s*)?[\d.]+/gi,
+    'Tema STF': /Tema\s+(?:n[°º.]?\s*)?(\d+)\s+(?:do\s+|da\s+)?STF/gi,
+    'Tema STJ': /Tema\s+(?:n[°º.]?\s*)?(\d+)\s+(?:do\s+|da\s+)?STJ/gi,
+    'Tema (genérico)': /Tema\s+(?:n[°º.]?\s*)?\d{1,4}\b/gi,
+    'Súmula Vinculante': /S[úu]mula\s+Vinculante\s+(?:n[°º.]?\s*)?\d+/gi,
+    'Súmula STF': /S[úu]mula\s+(?:n[°º.]?\s*)?\d+\s+(?:do\s+|da\s+)?STF/gi,
+    'Súmula STJ': /S[úu]mula\s+(?:n[°º.]?\s*)?\d+\s+(?:do\s+|da\s+)?STJ/gi,
+    'Súmula TST': /S[úu]mula\s+(?:n[°º.]?\s*)?\d+\s+(?:do\s+|da\s+)?TST/gi,
+    'Súmula (genérica)': /S[úu]mula\s+(?:n[°º.]?\s*)?\d+/gi,
+  };
+  const found = {};
+  for (const [type, re] of Object.entries(patterns)) {
+    const matches = [...text.matchAll(re)];
+    if (matches.length) {
+      const unique = [...new Set(matches.map(m => m[0].trim().replace(/\s+/g, ' ')))];
+      found[type] = unique.sort();
+    }
+  }
+  return found;
+}
+
+// Anonymize sensitive data
+function anonymizeText(text) {
+  return text
+    // CPF formatted: 123.456.789-01
+    .replace(/\b\d{3}\.\d{3}\.\d{3}-\d{2}\b/g, '[CPF]')
+    // CNPJ formatted: 12.345.678/0001-90
+    .replace(/\b\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2}\b/g, '[CNPJ]')
+    // CNPJ raw 14 digits
+    .replace(/\b\d{14}\b/g, '[CNPJ?]')
+    // CPF raw 11 digits (be careful not to match other things — only when preceded by CPF context or surrounded by whitespace)
+    .replace(/(?<![\d.\-/])\d{11}(?![\d.\-/])/g, '[CPF?]')
+    // RG: varies by state; common formats
+    .replace(/\b\d{1,2}\.?\d{3}\.?\d{3}-?[\dXx]\b/g, m => m.replace(/\d/g, '#').replace(/[Xx]/g, '#') === m ? m : '[RG]')
+    // Phone: (11) 91234-5678 or (11) 1234-5678
+    .replace(/\(\d{2}\)\s*9?\d{4}-?\d{4}/g, '[TEL]')
+    // CEP
+    .replace(/\b\d{5}-?\d{3}\b/g, '[CEP]')
+    // Email
+    .replace(/\b[\w._%+-]+@[\w.-]+\.[A-Za-z]{2,}\b/g, '[EMAIL]')
+    // Bank
+    .replace(/Ag[êe]ncia\s*:?\s*\d{1,5}[-\s]?\d?/gi, 'Agência: [AG]')
+    .replace(/(C\/C|Conta\s+Corrente|Conta)\s*:?\s*\d{4,}[-\s]?\d/gi, 'Conta: [CC]')
+    // Credit card-like
+    .replace(/\b\d{4}[\s-]?\d{4}[\s-]?\d{4}[\s-]?\d{4}\b/g, '[CARTÃO]');
+}
+
+// Detect deadlines from intimations
+function addBusinessDays(date, days) {
+  const result = new Date(date);
+  let added = 0;
+  while (added < days) {
+    result.setDate(result.getDate() + 1);
+    const day = result.getDay();
+    if (day !== 0 && day !== 6) added++;
+  }
+  return result;
+}
+
+function detectDeadlines(text, events) {
+  const intimationRe = /(intima(?:ção|do|r|tória)|publica(?:ção|do)|ci[êe]ncia|notifica(?:ção|do))\s+(?:em\s+|de\s+)?(\d{2}\/\d{2}\/\d{4})/gi;
+  const found = [...text.matchAll(intimationRe)].map(m => ({
+    type: m[1],
+    date: m[2],
+    context: text.substring(Math.max(0, m.index - 50), Math.min(text.length, m.index + 100)).replace(/\s+/g, ' ').trim()
+  }));
+
+  // Sort by date desc (most recent first)
+  found.sort((a, b) => {
+    const [da, ma, ya] = a.date.split('/').map(Number);
+    const [db, mb, yb] = b.date.split('/').map(Number);
+    return new Date(yb, mb-1, db) - new Date(ya, ma-1, da);
+  });
+
+  // Calculate deadlines for the most recent intimation, if any
+  let analysis = null;
+  if (found.length > 0) {
+    const last = found[0];
+    const [d, m, y] = last.date.split('/').map(Number);
+    const intimationDate = new Date(y, m-1, d);
+    const today = new Date();
+    today.setHours(0,0,0,0);
+
+    const commonDeadlines = [5, 10, 15, 30];
+    const deadlines = commonDeadlines.map(days => {
+      const deadline = addBusinessDays(intimationDate, days);
+      const remaining = Math.ceil((deadline - today) / (1000*60*60*24));
+      return { days, deadline, remaining };
+    });
+    analysis = { lastIntimation: last, intimationDate, deadlines };
+  }
+
+  return { intimations: found, analysis };
+}
+
+// Extract tables by clustering text by Y coordinate
+async function processExtractTables(pdfBytes, progressCb = null) {
+  const pdfDoc = await pdfjsLib.getDocument({ data: pdfBytes.slice(0) }).promise;
+  const tables = [];
+  for (let i = 1; i <= pdfDoc.numPages; i++) {
+    if (progressCb) progressCb(i, pdfDoc.numPages);
+    const page = await pdfDoc.getPage(i);
+    const items = (await page.getTextContent()).items;
+    if (items.length === 0) continue;
+
+    // Group by Y coordinate (rounded to handle minor variations)
+    const rowMap = new Map();
+    for (const item of items) {
+      const y = Math.round(item.transform[5]);
+      if (!rowMap.has(y)) rowMap.set(y, []);
+      rowMap.get(y).push({ text: item.str.trim(), x: item.transform[4] });
+    }
+    // Sort rows top to bottom
+    const rows = [...rowMap.entries()]
+      .sort((a, b) => b[0] - a[0])
+      .map(([y, cells]) => cells.sort((a, b) => a.x - b.x).filter(c => c.text));
+
+    // Detect table candidates: groups of consecutive rows with 3+ cells
+    let currentTable = [], currentStartY = null;
+    for (const row of rows) {
+      if (row.length >= 3) {
+        currentTable.push(row.map(c => c.text));
+      } else {
+        if (currentTable.length >= 3) {
+          tables.push({ page: i, rows: currentTable });
+        }
+        currentTable = [];
+      }
+    }
+    if (currentTable.length >= 3) tables.push({ page: i, rows: currentTable });
+  }
+  return tables;
+}
+
+function tablesToCsv(tables) {
+  let csv = '';
+  for (const t of tables) {
+    csv += `# Página ${t.page}\n`;
+    for (const row of t.rows) {
+      csv += row.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',') + '\n';
+    }
+    csv += '\n';
+  }
+  return csv;
+}
+
+// ============== SINGLE MODE ACTIONS ==============
+
+function parsePageRange(input, max) {
+  const result = new Set();
+  for (const part of input.split(',').map(s => s.trim())) {
+    if (!part) continue;
+    if (part.includes('-')) {
+      const [a, b] = part.split('-').map(s => parseInt(s.trim()));
+      if (isNaN(a) || isNaN(b)) throw new Error(`Intervalo inválido: ${part}`);
+      for (let i = Math.min(a,b); i <= Math.max(a,b); i++) {
+        if (i >= 1 && i <= max) result.add(i);
+      }
+    } else {
+      const n = parseInt(part);
+      if (isNaN(n)) throw new Error(`Número inválido: ${part}`);
+      if (n >= 1 && n <= max) result.add(n);
+    }
+  }
+  return Array.from(result).sort((a,b) => a-b);
+}
+
+// === RESULT HELPERS ===
+
+
+// ====================================================================
+// === DEFAULT PROMPT TEMPLATE (Eduardo's senior lawyer prompt) =======
+// ====================================================================
+
+const DEFAULT_PROMPT_TEMPLATE = `Você é um advogado sênior brasileiro especialista em [ÁREA DO DIREITO].
+Analise o processo judicial abaixo com rigor técnico, profundidade doutrinária
+e alinhamento à jurisprudência majoritária dos tribunais superiores.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+DADOS DO PROCESSO
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+• Número do processo: [NÚMERO]
+• Tribunal/Vara: [TRIBUNAL]
+• Tipo de ação: [TIPO]
+• Fase processual atual: [FASE]
+• Nosso cliente: [NOME E POLO]
+• Parte adversa: [NOME E POLO]
+• Objeto/valor em disputa: [DESCREVER]
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+DOCUMENTOS E PEÇAS DISPONÍVEIS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[Eventos processuais, jurisprudência, prazos e notas conforme blocos acima.]
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+INSTRUÇÕES DE ANÁLISE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Execute obrigatoriamente as etapas abaixo, nesta ordem:
+
+**1. SÍNTESE FÁTICA**
+Resuma os fatos centrais da demanda de forma objetiva e cronológica.
+Identifique os fatos incontroversos e os fatos controvertidos.
+
+**2. MAPEAMENTO DAS TESES DA PARTE ADVERSA**
+Liste e analise cada argumento apresentado pela parte contrária,
+classificando-os em:
+- Teses com maior potencial de acolhimento pelo tribunal
+- Teses frágeis ou sem respaldo jurisprudencial
+- Teses processuais (preliminares/prejudiciais)
+- Teses de mérito
+
+**3. ANÁLISE JURÍDICA FUNDAMENTADA**
+Para cada tese adversa identificada:
+a) Cite a legislação aplicável (indicando artigo, lei e redação vigente)
+b) Apresente doutrina real e identificada (autor, obra, edição, página)
+c) Cite jurisprudência REAL dos tribunais superiores (STF, STJ, TST
+   ou tribunal competente), com número do acórdão, relator, turma/câmara
+   e data de julgamento. NÃO fabricar ementas nem precedentes.
+d) Indique se há Tema de Repercussão Geral (STF) ou Recurso Repetitivo
+   (STJ) sobre a matéria, com número do tema e tese fixada.
+
+**4. PONTOS CRÍTICOS E RISCOS**
+Identifique:
+- Fragilidades da posição do nosso cliente
+- Documentos ou provas que podem ser desfavoráveis
+- Risco de sucumbência total ou parcial (alto / médio / baixo)
+- Eventuais nulidades ou irregularidades processuais detectadas
+
+**5. OPORTUNIDADES PROCESSUAIS E ESTRATÉGIAS**
+Sugira, de forma fundamentada:
+- Medidas processuais imediatas cabíveis (exceções, impugnações,
+  reconvenção, incidentes, cautelares, tutelas)
+- Provas a requerer (documental, pericial, testemunhal, inspeção)
+- Recursos cabíveis contra eventuais decisões desfavoráveis
+- Possibilidade e conveniência de acordo ou transação
+
+**6. PLANO DE AÇÃO — PRÓXIMOS PASSOS**
+Liste as ações recomendadas em ordem de prioridade, com:
+- Prazo (se houver)
+- Peça ou providência a adotar
+- Objetivo estratégico de cada medida
+
+**7. SÍNTESE EXECUTIVA**
+Parágrafo final com avaliação global do processo: perspectiva de êxito,
+estratégia central recomendada e maior risco a neutralizar.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+RESTRIÇÕES OBRIGATÓRIAS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✗ NÃO fabricar jurisprudência, doutrina, legislação, ementa ou número de processo inexistente
+✗ NÃO inventar citações doutrinárias
+✗ NÃO afirmar como certo aquilo que for incerto — use "possivelmente",
+  "há precedentes no sentido de" ou "recomenda-se verificar"
+✗ NÃO omitir riscos desfavoráveis ao cliente
+✓ Se não houver jurisprudência consolidada, diga expressamente e
+  indique o estado atual do debate nos tribunais
+✓ Priorize sempre precedentes vinculantes ou de tribunais superiores`;
+
+function generateIndexMarkdown(indexed, baseName) {
+  let md = `# Índice de eventos · ${baseName}\n\n`;
+  if (indexed.processNumber) md += `**Processo:** \`${indexed.processNumber}\`\n`;
+  md += `**Total de páginas:** ${indexed.totalPages}\n**Eventos detectados:** ${indexed.events.length}\n\n---\n\n`;
+  md += `| Evento | Data | Tipo | Páginas | Pgs |\n|---|---|---|---|---|\n`;
+  for (const e of indexed.events) md += `| ${e.eventNumber} | ${e.date || '—'} | ${e.type.replace(/\|/g,'/')} | ${e.startPage}–${e.endPage} | ${e.pageCount} |\n`;
+  return md;
+}
+
+function generateTimelineHtml(indexed, baseName) {
+  return `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Timeline · ${baseName}</title>
+<style>body{font-family:'EB Garamond',serif;max-width:900px;margin:30px auto;padding:24px;color:#1f1f1f;background:#fafaf7}
+h1{font-size:26px;color:#0a0a0a}.event{background:white;border:1px solid #d4cfc0;border-left:4px solid #8a6f3d;padding:12px 16px;margin-bottom:8px;border-radius:6px}
+.meta{font-size:12px;color:#6b6b68;margin-top:4px}</style></head><body>
+<h1>Timeline · ${baseName}</h1>
+<p><strong>Processo:</strong> ${indexed.processNumber || 'n/d'} · <strong>Total:</strong> ${indexed.totalPages} pgs · <strong>Eventos:</strong> ${indexed.events.length}</p>
+${indexed.events.map(e => `<div class="event"><strong>Evento ${e.eventNumber}</strong> · ${e.type}<br><span class="meta">${e.date || '—'} · pgs ${e.startPage}–${e.endPage} (${e.pageCount} pgs)</span></div>`).join('')}
+</body></html>`;
+}
+
+
+// ====================================================================
+// === PAGE: TOOLS (PDF processing) ===================================
+// ====================================================================
+
+const _toolsState = {
+  file: null, fileBytes: null, fileName: '',
+  linkedProcessId: null,
+  result: null
+};
+
+async function renderTools() {
+  const processes = await DB.getAllProcesses();
+  state.processes = processes;
+  $('appContent').innerHTML = `
+    <div class="page-header">
+      <div>
+        <h1 class="page-title"><span class="smallcaps-prefix">Ferramentas</span></h1>
+        <p class="page-subtitle">Processamento de PDFs jurídicos · 100% local</p>
+      </div>
+    </div>
+
+    <div class="card mb-4">
+      <h3 class="font-serif text-lg font-semibold smallcaps mb-3" style="color: var(--uc-black);">1. Selecione o PDF</h3>
+      <div id="toolDropZone" class="drop-zone">
+        <input type="file" id="toolFileInput" accept=".pdf" class="hidden">
+        <p style="font-size: 14px; color: var(--uc-graphite);"><strong>Clique ou arraste</strong> um PDF aqui</p>
+        <p class="help-text" style="margin-top: 4px;">Os arquivos não saem do seu dispositivo</p>
+      </div>
+      <div id="toolFileInfo" class="hidden mt-3"></div>
+    </div>
+
+    <div class="card mb-4">
+      <h3 class="font-serif text-lg font-semibold smallcaps mb-3" style="color: var(--uc-black);">2. Vincular a um processo (opcional)</h3>
+      <p class="help-text" style="margin-bottom: 8px;">Se você indexar autos ou extrair jurisprudência com um processo selecionado, os resultados serão salvos automaticamente nele.</p>
+      <select class="select" id="toolProcessLink">
+        <option value="">— Não vincular —</option>
+        ${processes.map(p => `<option value="${p.id}" ${p.id === _toolsState.linkedProcessId ? 'selected' : ''}>${escapeHtml(p.name)}${p.cnj ? ' · ' + p.cnj : ''}</option>`).join('')}
+      </select>
+    </div>
+
+    <div class="card">
+      <h3 class="font-serif text-lg font-semibold smallcaps mb-3" style="color: var(--uc-black);">3. Escolha a ação</h3>
+      <div class="grid gap-3" style="grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));">
+        ${renderToolCard('indexAutos', '📂', 'Indexar Autos', 'Detecta eventos PJe/eSAJ e cria índice navegável', true)}
+        ${renderToolCard('claudePackage', '🤖', 'Pacote para Claude', 'Indexa + jurisprudência + prazos + texto + prompt', true)}
+        ${renderToolCard('extractCitations', '📜', 'Extrair Jurisprudência', 'Detecta REsps, Temas, Súmulas, ADIs, ADCs')}
+        ${renderToolCard('detectDeadlines', '⏰', 'Calcular Prazos', 'Identifica intimações e calcula vencimento')}
+        ${renderToolCard('anonymize', '🔒', 'Anonimizar', 'Remove CPF, CNPJ, RG, telefone, email')}
+        ${renderToolCard('extractTables', '📊', 'Extrair Tabelas', 'Detecta tabelas e exporta como CSV')}
+        ${renderToolCard('extractText', '📝', 'Extrair Texto', 'Extrai texto bruto do PDF')}
+        ${renderToolCard('ocrSelective', '🔍', 'OCR Inteligente', 'OCR só nas páginas que precisam')}
+        ${renderToolCard('ocr', '👁', 'OCR Completo', 'OCR em todas as páginas')}
+        ${renderToolCard('searchablePdf', '🔎', 'PDF Pesquisável', 'OCR + camada invisível para busca')}
+        ${renderToolCard('split', '✂️', 'Dividir PDF', 'Divide em partes menores')}
+        ${renderToolCard('toImages', '🖼', 'Para Imagens', 'Cada página → JPG (zip)')}
+        ${renderToolCard('compressLight', '📦', 'Compressão Leve', 'Reduz sem perda visual')}
+        ${renderToolCard('compressAggressive', '🗜', 'Compressão Forte', 'Reduz tamanho ao máximo')}
+      </div>
+    </div>
+
+    <div id="toolResultArea" class="mt-4"></div>
+  `;
+
+  // Setup file input
+  const fi = $('toolFileInput'), dz = $('toolDropZone');
+  dz.onclick = () => fi.click();
+  fi.onchange = (e) => handleToolFile(e.target.files[0]);
+  dz.ondragover = (e) => { e.preventDefault(); dz.classList.add('dragover'); };
+  dz.ondragleave = () => dz.classList.remove('dragover');
+  dz.ondrop = (e) => { e.preventDefault(); dz.classList.remove('dragover'); handleToolFile(e.dataTransfer.files[0]); };
+
+  $('toolProcessLink').onchange = (e) => { _toolsState.linkedProcessId = e.target.value || null; };
+
+  // If a file was already loaded, restore display
+  if (_toolsState.file) showToolFileInfo();
+}
+
+function renderToolCard(action, icon, name, desc, gold = false) {
+  return `
+    <div class="card tool-card card-hover" onclick="runToolAction('${action}')">
+      <div class="tool-icon ${gold ? 'tool-icon-gold' : ''}">${icon}</div>
+      <div class="tool-name">${name}</div>
+      <div class="tool-desc">${desc}</div>
+    </div>
+  `;
+}
+
+async function handleToolFile(file) {
+  if (!file || file.type !== 'application/pdf') { toast('Arquivo inválido', 'Selecione um PDF.', 'error'); return; }
+  _toolsState.file = file;
+  _toolsState.fileName = file.name;
+  _toolsState.fileBytes = await file.arrayBuffer();
+  _toolsState.result = null;
+  showToolFileInfo();
+}
+
+function showToolFileInfo() {
+  const f = _toolsState.file;
+  const info = $('toolFileInfo');
+  info.classList.remove('hidden');
+  info.innerHTML = `
+    <div style="background: var(--uc-cream); border: 1px solid var(--uc-line); padding: 12px; border-radius: 6px; display: flex; gap: 12px; align-items: center;">
+      <span style="font-size: 24px;">📄</span>
+      <div style="flex: 1; min-width: 0;">
+        <div style="font-weight: 600; color: var(--uc-black); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${escapeHtml(f.name)}</div>
+        <div style="font-size: 12px; color: var(--uc-warm-gray);">${formatBytes(f.size)}</div>
+      </div>
+      <button class="btn btn-ghost btn-sm" onclick="_toolsState.file=null; renderTools();">Trocar</button>
+    </div>
+  `;
+}
+
+async function runToolAction(action) {
+  if (!_toolsState.file) { toast('Selecione um PDF antes', '', 'error'); return; }
+  const ra = $('toolResultArea');
+  ra.innerHTML = `<div class="card"><div class="flex items-center gap-3"><div class="spinner"></div><div><strong>Processando...</strong><div id="toolProgress" class="help-text">Aguarde</div></div></div><div class="progress-wrap"><div class="progress-bar-bg"><div class="progress-bar-fg" id="toolProgressBar"></div></div></div></div>`;
+  const progressCb = (msg, pct = null) => {
+    $('toolProgress').textContent = msg;
+    if (pct !== null) $('toolProgressBar').style.width = (pct * 100) + '%';
+  };
+  try {
+    const bytes = _toolsState.fileBytes;
+    const baseName = _toolsState.fileName.replace(/\.pdf$/i, '');
+    if (action === 'compressAggressive') {
+      const blob = await processCompressAggressive(bytes, 150, 0.7, progressCb);
+      const reduction = Math.round((1 - blob.size / _toolsState.file.size) * 100);
+      showToolResult({ blob, name: baseName + '_comprimido.pdf', summary: `Compressão forte concluída · ${formatBytes(_toolsState.file.size)} → ${formatBytes(blob.size)} (${reduction}%)` });
+    } else if (action === 'compressLight') {
+      const blob = await processCompressLight(bytes);
+      const reduction = Math.round((1 - blob.size / _toolsState.file.size) * 100);
+      showToolResult({ blob, name: baseName + '_otimizado.pdf', summary: `Compressão leve concluída · ${formatBytes(_toolsState.file.size)} → ${formatBytes(blob.size)} (${reduction}%)` });
+    } else if (action === 'extractText') {
+      const text = await processExtractText(bytes, progressCb);
+      const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+      showToolResult({ blob, name: baseName + '.txt', summary: `${text.length.toLocaleString('pt-BR')} caracteres extraídos`, preview: text.slice(0, 500) });
+    } else if (action === 'ocr') {
+      const text = await processOcr(bytes, 'por', 200, progressCb);
+      const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+      showToolResult({ blob, name: baseName + '_ocr.txt', summary: `${text.length.toLocaleString('pt-BR')} caracteres reconhecidos`, preview: text.slice(0, 500) });
+    } else if (action === 'ocrSelective') {
+      const r = await processOcrSelective(bytes, 'por', 200, progressCb);
+      const blob = new Blob([r.text], { type: 'text/plain;charset=utf-8' });
+      showToolResult({ blob, name: baseName + '_ocr_inteligente.txt', summary: `${r.text.length.toLocaleString('pt-BR')} caracteres · ${r.ocrPages}/${r.totalPages} páginas precisaram OCR`, preview: r.text.slice(0, 500) });
+    } else if (action === 'searchablePdf') {
+      const blob = await processSearchablePdf(bytes, 'por', 200, 0.85, progressCb);
+      showToolResult({ blob, name: baseName + '_pesquisavel.pdf', summary: `PDF pesquisável criado · ${formatBytes(blob.size)}` });
+    } else if (action === 'split') {
+      const r = await showModal('Dividir PDF', [
+        { label: 'Páginas por parte', type: 'number', default: '50', min: '1', max: '500' }
+      ], { confirmLabel: 'Dividir' });
+      if (!r) { ra.innerHTML = ''; return; }
+      const blob = await processSplit(bytes, baseName, parseInt(r[0]), progressCb);
+      showToolResult({ blob, name: baseName + '_dividido.zip', summary: `Dividido em partes de ${r[0]} páginas` });
+    } else if (action === 'toImages') {
+      const blob = await processToImages(bytes, 150, 0.85, progressCb);
+      showToolResult({ blob, name: baseName + '_imagens.zip', summary: `Convertido para imagens JPG`});
+    } else if (action === 'indexAutos') {
+      const indexed = await processIndexAutos(bytes, progressCb);
+      const md = generateIndexMarkdown(indexed, baseName);
+      const html = generateTimelineHtml(indexed, baseName);
+      // Save to linked process if any
+      if (_toolsState.linkedProcessId) {
+        await saveIndexedToProcess(_toolsState.linkedProcessId, indexed, _toolsState.fileName, bytes);
+      }
+      showToolResult({
+        summary: `${indexed.events.length} eventos detectados em ${indexed.totalPages} páginas${_toolsState.linkedProcessId ? ' · salvos no processo' : ''}`,
+        custom: `
+          <div class="grid grid-cols-2 gap-3 mb-3">
+            <div class="stat-card"><div class="stat-label">Eventos</div><div class="stat-value">${indexed.events.length}</div></div>
+            <div class="stat-card"><div class="stat-label">Páginas</div><div class="stat-value">${indexed.totalPages}</div></div>
+          </div>
+          ${indexed.processNumber ? `<p class="text-sm mb-3" style="color: var(--uc-warm-gray);"><strong>Nº detectado:</strong> <code>${escapeHtml(indexed.processNumber)}</code></p>` : ''}
+          <div class="flex gap-2 flex-wrap">
+            <button class="btn btn-secondary btn-sm" onclick='downloadBlob(new Blob([${JSON.stringify(md)}], {type:"text/markdown"}), "${baseName}_indice.md")'>⬇ Baixar índice (.md)</button>
+            <button class="btn btn-outline btn-sm" onclick='downloadBlob(new Blob([${JSON.stringify(html)}], {type:"text/html"}), "${baseName}_timeline.html")'>⬇ Timeline (HTML)</button>
+            ${_toolsState.linkedProcessId ? `<button class="btn btn-primary btn-sm" onclick="navigate('process', { currentProcessId: '${_toolsState.linkedProcessId}' })">Ver processo →</button>` : ''}
+          </div>
+          <details class="mt-3">
+            <summary style="cursor:pointer; font-weight: 500;">Ver primeiros eventos</summary>
+            <div style="margin-top: 8px; max-height: 300px; overflow-y: auto;" class="scroll-thin">
+              ${indexed.events.slice(0, 20).map(e => `<div style="padding: 6px 0; border-bottom: 1px solid var(--uc-line-soft); font-size: 13px;"><strong>Ev. ${escapeHtml(e.eventNumber)}</strong> · ${escapeHtml(e.type)} · ${escapeHtml(e.date || '—')} · pgs ${e.startPage}–${e.endPage}</div>`).join('')}
+              ${indexed.events.length > 20 ? `<p class="help-text" style="margin-top:8px;">... e mais ${indexed.events.length - 20} eventos.</p>` : ''}
+            </div>
+          </details>
+        `
+      });
+    } else if (action === 'extractCitations') {
+      progressCb('Extraindo texto...', 0.3);
+      const text = await processExtractText(bytes);
+      progressCb('Detectando citações...', 0.7);
+      const citations = detectCitations(text);
+      const total = Object.values(citations).reduce((s, a) => s + a.length, 0);
+      // Save to linked process
+      if (_toolsState.linkedProcessId && total > 0) {
+        for (const [type, items] of Object.entries(citations)) {
+          for (const cit of items) {
+            await DB.saveJurisprudence({
+              id: uid(), processId: _toolsState.linkedProcessId,
+              type, citation: cit, source: _toolsState.fileName, addedAt: Date.now()
+            });
+          }
+        }
+      }
+      showToolResult({
+        summary: `${total} citações detectadas${_toolsState.linkedProcessId ? ' · vinculadas ao processo' : ''}`,
+        custom: total === 0 ? '<p style="color: var(--uc-warm-gray);">Nenhuma jurisprudência detectada.</p>' : `
+          ${Object.entries(citations).filter(([t, items]) => items.length > 0).map(([t, items]) => `
+            <div class="card mb-3">
+              <h4 class="font-serif font-semibold smallcaps mb-2" style="color: var(--uc-black);">${escapeHtml(t)} · ${items.length}</h4>
+              <div class="flex flex-wrap gap-2">${items.slice(0, 30).map(i => `<span class="badge badge-gold">${escapeHtml(i)}</span>`).join('')}</div>
+              ${items.length > 30 ? `<p class="help-text" style="margin-top: 8px;">+${items.length - 30} citações</p>` : ''}
+            </div>
+          `).join('')}
+        `
+      });
+    } else if (action === 'detectDeadlines') {
+      progressCb('Extraindo texto...', 0.3);
+      const text = await processExtractText(bytes);
+      progressCb('Indexando eventos...', 0.6);
+      const indexed = await processIndexAutos(bytes);
+      progressCb('Detectando intimações...', 0.9);
+      const dl = detectDeadlines(text, indexed.events);
+      showToolResult({
+        summary: dl.lastIntimation ? `Intimação detectada: ${dl.lastIntimation.type} em ${dl.lastIntimation.date}` : 'Nenhuma intimação detectada',
+        custom: !dl.lastIntimation ? '<p style="color: var(--uc-warm-gray);">Nenhuma intimação encontrada no texto.</p>' : `
+          <div class="card mb-3">
+            <p style="font-size: 13px;"><strong>Última intimação:</strong> ${escapeHtml(dl.lastIntimation.type)} em <strong>${escapeHtml(dl.lastIntimation.date)}</strong></p>
+            <p class="help-text" style="margin-top: 4px;">"${escapeHtml(dl.lastIntimation.context.substring(0, 200))}..."</p>
+          </div>
+          <h4 class="font-serif font-semibold smallcaps mb-2">Cálculos (dias úteis)</h4>
+          ${dl.deadlines.map(d => `
+            <div class="deadline-row ${d.remaining < 0 ? 'expired' : d.remaining <= 5 ? 'urgent' : d.remaining <= 14 ? 'warning' : 'safe'}">
+              <div><strong>${d.days} dias úteis</strong><div class="help-text">vencimento ${d.deadline.toLocaleDateString('pt-BR')}</div></div>
+              <span class="badge ${d.remaining < 0 ? 'badge-red' : d.remaining <= 5 ? 'badge-red' : d.remaining <= 14 ? 'badge-amber' : 'badge-green'}">${d.remaining > 0 ? d.remaining + 'd' : 'EXPIRADO ' + Math.abs(d.remaining) + 'd'}</span>
+            </div>
+          `).join('')}
+          <p class="help-text" style="margin-top: 12px;">⚠️ Cálculos não consideram feriados, suspensões processuais ou prazos especiais. Sempre confirme manualmente.</p>
+        `
+      });
+    } else if (action === 'anonymize') {
+      progressCb('Extraindo texto...', 0.5);
+      const text = await processExtractText(bytes);
+      const r = anonymizeText(text);
+      const blob = new Blob([r.text], { type: 'text/plain;charset=utf-8' });
+      showToolResult({ blob, name: baseName + '_anonimizado.txt', summary: `${r.replacements} dados pessoais anonimizados`, preview: r.text.slice(0, 500) });
+    } else if (action === 'extractTables') {
+      const tables = await processExtractTables(bytes, progressCb);
+      if (tables.length === 0) {
+        showToolResult({ summary: 'Nenhuma tabela detectada', custom: '<p style="color: var(--uc-warm-gray);">Detecção heurística não encontrou tabelas. PDFs scaneados precisam de OCR primeiro.</p>' });
+      } else {
+        const csv = tablesToCsv(tables);
+        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+        showToolResult({ blob, name: baseName + '_tabelas.csv', summary: `${tables.length} tabela(s) detectada(s)`, preview: csv.slice(0, 500) });
+      }
+    } else if (action === 'claudePackage') {
+      progressCb('Indexando autos...', 0.3);
+      const indexed = await processIndexAutos(bytes);
+      progressCb('Extraindo texto...', 0.6);
+      const fullText = await processExtractText(bytes);
+      const citations = detectCitations(fullText);
+      const dl = detectDeadlines(fullText, indexed.events);
+      // Save to process if linked
+      if (_toolsState.linkedProcessId) {
+        await saveIndexedToProcess(_toolsState.linkedProcessId, indexed, _toolsState.fileName, bytes);
+        // Also save jurisprudence
+        for (const [type, items] of Object.entries(citations)) {
+          for (const cit of items) {
+            await DB.saveJurisprudence({ id: uid(), processId: _toolsState.linkedProcessId, type, citation: cit, source: _toolsState.fileName, addedAt: Date.now() });
+          }
+        }
+      }
+      const md = generateLegacyClaudePackage(_toolsState.fileName, indexed, fullText, citations, dl);
+      const blob = new Blob([md], { type: 'text/markdown;charset=utf-8' });
+      const totalCitations = Object.values(citations).reduce((s,a) => s+a.length, 0);
+      showToolResult({
+        blob, name: baseName + '_pacote_claude.md',
+        summary: `Pacote pronto · ${indexed.events.length} eventos · ${totalCitations} citações${_toolsState.linkedProcessId ? ' · salvo no processo' : ''}`,
+        actions: _toolsState.linkedProcessId ? [{ label: 'Ir ao processo →', cb: `navigate('process', { currentProcessId: '${_toolsState.linkedProcessId}' })` }] : []
+      });
+    }
+  } catch(err) {
+    console.error(err);
+    ra.innerHTML = `<div class="card" style="border-left: 3px solid var(--uc-red);"><strong style="color: var(--uc-red);">Erro</strong><p>${escapeHtml(err.message)}</p></div>`;
+    toast('Erro ao processar', err.message, 'error');
+  }
+}
+
+function showToolResult({ blob = null, name = '', summary = '', preview = null, custom = null, actions = [] }) {
+  const ra = $('toolResultArea');
+  ra.innerHTML = `
+    <div class="card card-gold-border fade-in">
+      <h3 class="font-serif text-lg font-semibold smallcaps mb-2" style="color: var(--uc-black);">✓ Concluído</h3>
+      <p style="color: var(--uc-graphite); margin-bottom: 12px;">${escapeHtml(summary)}</p>
+      ${custom || ''}
+      ${preview ? `<details class="mt-3"><summary style="cursor:pointer; font-weight: 500;">Pré-visualizar texto</summary><pre style="background: var(--uc-cream); padding: 12px; border-radius: 6px; max-height: 200px; overflow: auto; font-size: 12px; white-space: pre-wrap; margin-top: 8px;">${escapeHtml(preview)}...</pre></details>` : ''}
+      <div class="flex gap-2 flex-wrap mt-3">
+        ${blob ? `<button class="btn btn-primary btn-sm" id="_dlBtn">⬇ Baixar ${escapeHtml(name)}</button>` : ''}
+        ${actions.map((a, i) => `<button class="btn btn-outline btn-sm" onclick="${a.cb}">${escapeHtml(a.label)}</button>`).join('')}
+      </div>
+    </div>
+  `;
+  if (blob) $('_dlBtn').onclick = () => downloadBlob(blob, name);
+  ra.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+async function saveIndexedToProcess(processId, indexed, sourceFileName, bytes) {
+  // Save events
+  for (const e of indexed.events) {
+    const event = {
+      id: uid(), processId,
+      eventNumber: e.eventNumber,
+      type: e.type, date: e.date,
+      startPage: e.startPage, endPage: e.endPage, pageCount: e.pageCount,
+      sourceFile: sourceFileName, addedAt: Date.now()
+    };
+    await DB.saveEvent(event);
+  }
+  // Save PDF blob
+  const blob = new Blob([bytes], { type: 'application/pdf' });
+  await DB.savePdf({ id: uid(), processId, blob, name: sourceFileName, addedAt: Date.now() });
+}
+
+function generateLegacyClaudePackage(fileName, indexed, fullText, citations, deadlines) {
+  let md = `# Pacote para análise: ${fileName}\n\n`;
+  md += `**Gerado em:** ${new Date().toLocaleString('pt-BR')}\n\n`;
+  if (indexed.processNumber) md += `**Processo:** ${indexed.processNumber}\n\n`;
+  md += `---\n\n## Estatísticas\n\n- **Páginas:** ${indexed.totalPages}\n- **Eventos:** ${indexed.events.length}\n- **Caracteres:** ${fullText.length.toLocaleString('pt-BR')}\n\n`;
+  md += `## Cronologia\n\n| Ev | Data | Tipo | Pgs |\n|---|---|---|---|\n`;
+  indexed.events.forEach(e => md += `| ${e.eventNumber} | ${e.date || '—'} | ${e.type.replace(/\|/g,'/')} | ${e.startPage}–${e.endPage} |\n`);
+  md += `\n## Jurisprudência detectada\n\n`;
+  Object.entries(citations).forEach(([t, items]) => { if (items.length > 0) md += `**${t}:** ${items.join('; ')}\n\n`; });
+  if (deadlines.lastIntimation) {
+    md += `\n## Prazos\n\n**Última intimação:** ${deadlines.lastIntimation.type} em ${deadlines.lastIntimation.date}\n\n`;
+    deadlines.deadlines.forEach(d => md += `- ${d.days} dias úteis → ${d.deadline.toLocaleDateString('pt-BR')} (${d.remaining > 0 ? d.remaining + ' dias restantes' : 'EXPIRADO há ' + Math.abs(d.remaining) + ' dias'})\n`);
+  }
+  md += `\n---\n\n## Texto integral\n\n${fullText}\n\n---\n\n## Prompt\n\n\`\`\`\n${DEFAULT_PROMPT_TEMPLATE}\n\`\`\`\n`;
+  return md;
+}
+
+async function importPdfToProcess() {
+  // Trigger file picker, force linked process
+  _toolsState.linkedProcessId = state.currentProcessId;
+  navigate('tools');
+  toast('Aba ferramentas', 'Selecione o PDF e use Indexar Autos ou Pacote para Claude.', 'info');
+}
+
+
+// ====================================================================
+// === PAGE: DILIGENCE (quick mobile mode) ============================
+// ====================================================================
+
+async function renderDiligence() {
+  $('appContent').innerHTML = `
+    <div class="page-header">
+      <div>
+        <h1 class="page-title"><span class="smallcaps-prefix">Diligência</span></h1>
+        <p class="page-subtitle">Ações rápidas para audiência e fórum</p>
+      </div>
+    </div>
+
+    <div class="quick-grid mb-6">
+      <div class="quick-action" onclick="quickCalcDeadline()">
+        <div class="qa-icon">⏰</div>
+        <div class="qa-label">Calcular prazo</div>
+        <div class="help-text">Data + dias úteis</div>
+      </div>
+      <div class="quick-action" onclick="quickPhotoOcr()">
+        <div class="qa-icon">📸</div>
+        <div class="qa-label">Foto + OCR</div>
+        <div class="help-text">Capturar e ler texto</div>
+      </div>
+      <div class="quick-action" onclick="quickNote()">
+        <div class="qa-icon">📝</div>
+        <div class="qa-label">Nota rápida</div>
+        <div class="help-text">Vincular a um processo</div>
+      </div>
+      <div class="quick-action" onclick="quickJurisSearch()">
+        <div class="qa-icon">📜</div>
+        <div class="qa-label">Buscar jurisp.</div>
+        <div class="help-text">Em processos salvos</div>
+      </div>
+      <div class="quick-action" onclick="quickProcessLookup()">
+        <div class="qa-icon">🔍</div>
+        <div class="qa-label">Achar processo</div>
+        <div class="help-text">Busca por CNJ ou nome</div>
+      </div>
+      <div class="quick-action" onclick="navigate('deadlines')">
+        <div class="qa-icon">📅</div>
+        <div class="qa-label">Agenda</div>
+        <div class="help-text">Próximos prazos</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3 class="font-serif text-lg font-semibold smallcaps mb-3" style="color: var(--uc-black);">Como usar</h3>
+      <p style="color: var(--uc-graphite); font-size: 14px; line-height: 1.6;">
+        O modo Diligência foi pensado para uso em audiência ou no fórum, com botões grandes e ações de uma só etapa.
+        Ideal para celular. Combine com o modo escuro (em <a onclick="navigate('settings')" style="color: var(--uc-gold); cursor: pointer;">Configurações</a>) para uso noturno.
+      </p>
+    </div>
+  `;
+}
+
+async function quickCalcDeadline() {
+  const r = await showModal('Calcular prazo', [
+    { label: 'Data da intimação/publicação', type: 'date' },
+    { label: 'Prazo (dias úteis)', type: 'number', default: '15', min: '1', max: '365' }
+  ], { confirmLabel: 'Calcular' });
+  if (!r) return;
+  const [date, days] = r;
+  if (!date) { toast('Informe a data', '', 'error'); return; }
+  const intDate = new Date(date + 'T12:00:00');
+  const dl = addBusinessDays(intDate, parseInt(days));
+  const today = new Date(); today.setHours(0,0,0,0);
+  const remaining = Math.ceil((dl - today) / 86400000);
+  toast(`Vencimento: ${dl.toLocaleDateString('pt-BR')}`, `${remaining > 0 ? remaining + ' dias úteis restantes' : 'EXPIRADO há ' + Math.abs(remaining) + ' dias'}`, remaining > 0 ? 'success' : 'error');
+  // Show a result card too
+  $('appContent').insertAdjacentHTML('afterbegin', `
+    <div class="card card-gold-border fade-in mb-4">
+      <p class="smallcaps text-xs" style="color: var(--uc-gold); font-weight: 600;">Cálculo de prazo</p>
+      <p class="font-serif text-2xl font-semibold mt-1" style="color: var(--uc-black);">${dl.toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' })}</p>
+      <p style="font-size: 14px; color: var(--uc-graphite); margin-top: 4px;">${days} dias úteis a partir de ${intDate.toLocaleDateString('pt-BR')}</p>
+      <p style="margin-top: 8px;"><span class="badge ${remaining < 0 ? 'badge-red' : remaining <= 5 ? 'badge-red' : remaining <= 14 ? 'badge-amber' : 'badge-green'}">${remaining > 0 ? remaining + ' dias úteis restantes' : 'EXPIRADO há ' + Math.abs(remaining) + ' dias'}</span></p>
+      <p class="help-text mt-2">⚠️ Não considera feriados forenses ou suspensões processuais.</p>
+    </div>
+  `);
+}
+
+async function quickNote() {
+  const processes = state.processes.length > 0 ? state.processes : await DB.getAllProcesses();
+  if (processes.length === 0) {
+    toast('Cadastre um processo primeiro', '', 'error');
+    navigate('processes'); return;
+  }
+  const r = await showModal('Nota rápida', [
+    { label: 'Processo', type: 'select', options: processes.map(p => ({ value: p.id, label: p.name })) },
+    { label: 'Texto', type: 'textarea', rows: 5, placeholder: 'Observação rápida da audiência ou diligência...' }
+  ], { confirmLabel: 'Salvar' });
+  if (!r) return;
+  const [pid, text] = r;
+  if (!text?.trim()) return;
+  await DB.saveNote({ id: uid(), processId: pid, text: text.trim(), createdAt: Date.now() });
+  toast('Nota salva', '', 'success');
+}
+
+async function quickProcessLookup() {
+  const processes = await DB.getAllProcesses();
+  if (processes.length === 0) { toast('Nenhum processo cadastrado', '', 'error'); return; }
+  navigate('processes');
+}
+
+async function quickJurisSearch() {
+  const r = await showModal('Buscar jurisprudência', [
+    { label: 'Termo de busca', placeholder: 'Ex: REsp 123 · Tema 1182 · Súmula 211' }
+  ]);
+  if (!r || !r[0]) return;
+  const q = r[0].toLowerCase();
+  const allJuris = [];
+  const processes = await DB.getAllProcesses();
+  for (const p of processes) {
+    const items = await DB.getJurisprudenceByProcess(p.id);
+    items.forEach(i => allJuris.push({ ...i, processName: p.name, processId: p.id }));
+  }
+  const matches = allJuris.filter(j => j.citation.toLowerCase().includes(q));
+  $('appContent').insertAdjacentHTML('afterbegin', `
+    <div class="card fade-in mb-4">
+      <h4 class="font-serif font-semibold smallcaps mb-2">Resultados: ${matches.length}</h4>
+      ${matches.length === 0 ? '<p style="color: var(--uc-warm-gray); font-size: 13px;">Nenhuma citação encontrada na carteira.</p>' :
+        matches.map(m => `
+          <div style="padding: 8px 0; border-bottom: 1px solid var(--uc-line-soft); cursor: pointer;" onclick="navigate('process', { currentProcessId: '${m.processId}' })">
+            <span class="badge badge-gold">${escapeHtml(m.citation)}</span>
+            <span style="font-size: 12px; color: var(--uc-warm-gray); margin-left: 8px;">${escapeHtml(m.processName)}</span>
+          </div>
+        `).join('')}
+    </div>
+  `);
+}
+
+async function quickPhotoOcr() {
+  // Trigger file input with capture=camera
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'image/*';
+  input.capture = 'environment';
+  input.onchange = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    toast('Processando OCR...', 'Pode demorar alguns segundos', 'info');
+    try {
+      const w = await getTesseractWorker('por');
+      const r = await w.recognize(file);
+      const text = r.data.text;
+      const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+      $('appContent').insertAdjacentHTML('afterbegin', `
+        <div class="card card-gold-border fade-in mb-4">
+          <h4 class="font-serif font-semibold smallcaps mb-2">Texto reconhecido</h4>
+          <p class="help-text">${text.length} caracteres · confiança ${Math.round(r.data.confidence)}%</p>
+          <pre style="background: var(--uc-cream); padding: 12px; border-radius: 6px; max-height: 300px; overflow: auto; font-size: 13px; white-space: pre-wrap; margin: 8px 0;">${escapeHtml(text.slice(0, 1500))}${text.length > 1500 ? '\n\n...' : ''}</pre>
+          <button class="btn btn-secondary btn-sm" id="_ocrDl">⬇ Baixar texto</button>
+        </div>
+      `);
+      $('_ocrDl').onclick = () => downloadBlob(blob, 'ocr_diligencia.txt');
+    } catch(err) {
+      toast('Erro no OCR', err.message, 'error');
+    }
+  };
+  input.click();
+}
+
+// ====================================================================
+// === PAGE: SETTINGS =================================================
+// ====================================================================
+
+async function renderSettings() {
+  const prompts = await DB.getAllPrompts();
+  const defaultPromptId = await DB.getSetting('defaultPromptId');
+  state.prompts = prompts;
+  const tab = state._settingsTab || 'appearance';
+
+  $('appContent').innerHTML = `
+    <div class="page-header">
+      <div>
+        <h1 class="page-title"><span class="smallcaps-prefix">Configurações</span></h1>
+        <p class="page-subtitle">Personalização e segurança dos dados</p>
+      </div>
+    </div>
+
+    <div class="tabs">
+      <button class="tab ${tab === 'appearance' ? 'active' : ''}" onclick="setSettingsTab('appearance')">Aparência</button>
+      <button class="tab ${tab === 'djen' ? 'active' : ''}" onclick="setSettingsTab('djen')">DJEN</button>
+      <button class="tab ${tab === 'prompts' ? 'active' : ''}" onclick="setSettingsTab('prompts')">Prompts</button>
+      <button class="tab ${tab === 'backup' ? 'active' : ''}" onclick="setSettingsTab('backup')">Backup</button>
+      <button class="tab ${tab === 'sync' ? 'active' : ''}" onclick="setSettingsTab('sync')">Sincronização</button>
+      <button class="tab ${tab === 'security' ? 'active' : ''}" onclick="setSettingsTab('security')">Segurança</button>
+      <button class="tab ${tab === 'about' ? 'active' : ''}" onclick="setSettingsTab('about')">Sobre</button>
+    </div>
+
+    <div id="settingsContent">${renderSettingsTab(tab, prompts, defaultPromptId)}</div>
+  `;
+  setupSettingsHandlers(tab);
+}
+
+function setSettingsTab(tab) {
+  state._settingsTab = tab;
+  renderSettings();
+}
+
+function renderSettingsTab(tab, prompts, defaultPromptId) {
+  if (tab === 'appearance') {
+    return `
+      <div class="card mb-3">
+        <h3 class="font-serif text-lg font-semibold smallcaps mb-3" style="color: var(--uc-black);">Tema</h3>
+        <div class="flex gap-2">
+          <button class="btn ${state.settings.theme === 'light' ? 'btn-primary' : 'btn-outline'}" onclick="setTheme('light')">☀ Claro</button>
+          <button class="btn ${state.settings.theme === 'dark' ? 'btn-primary' : 'btn-outline'}" onclick="setTheme('dark')">🌙 Escuro</button>
+        </div>
+      </div>
+    `;
+  }
+  if (tab === 'djen') {
+    // Use cached state for sync render; full update happens via setupSettingsHandlers
+    const oabs = state._djenCache?.oabs || DJEN_DEFAULT_OABS;
+    const lookback = state._djenCache?.lookback || 7;
+    const workerUrl = state._djenCache?.workerUrl || '';
+    const lastFetch = state._djenCache?.lastFetch || null;
+    return `
+      <div class="card mb-3">
+        <h3 class="font-serif text-lg font-semibold smallcaps mb-3" style="color: var(--uc-black);">Monitor DJEN</h3>
+        <p style="color: var(--uc-graphite); font-size: 14px; margin-bottom: 12px;">
+          Consulta a API pública do CNJ (<code>comunicaapi.pje.jus.br</code>) e importa intimações
+          do <strong>Diário de Justiça Eletrônico Nacional</strong> diretamente para sua carteira,
+          casando-as automaticamente com processos cadastrados pelo número CNJ.
+        </p>
+        <p class="help-text">
+          Última consulta: <strong>${lastFetch ? formatDateTime(lastFetch) : 'nunca'}</strong>
+        </p>
+      </div>
+
+      <div class="card mb-3">
+        <div class="flex justify-between items-center mb-3">
+          <h4 class="font-serif font-semibold smallcaps" style="color: var(--uc-black);">OABs monitoradas</h4>
+          <button class="btn btn-primary btn-sm" onclick="djenAddOabFlow()">+ Adicionar OAB</button>
+        </div>
+        <p class="help-text" style="margin-bottom: 10px;">
+          Marque apenas as OABs que entrarão na próxima consulta. Você pode ajustar a qualquer momento.
+        </p>
+        <div style="display: flex; gap: 8px; margin-bottom: 10px;">
+          <button class="btn btn-ghost btn-sm" onclick="djenToggleAllOabs(true)">Marcar todas</button>
+          <button class="btn btn-ghost btn-sm" onclick="djenToggleAllOabs(false)">Desmarcar todas</button>
+          <span class="help-text" style="margin-left:auto;">
+            <strong id="djenActiveCount">${oabs.filter(o => o.enabled !== false).length}</strong> de ${oabs.length} ativa(s)
+          </span>
+        </div>
+        <div id="djenOabList">
+          ${oabs.length === 0 ? '<p class="help-text">Nenhuma OAB cadastrada.</p>' :
+            oabs.map((o, i) => `
+              <div class="card" style="background: ${o.enabled !== false ? 'var(--uc-cream)' : 'var(--uc-paper-warm, #f5f3ec)'}; margin-bottom: 6px; padding: 10px; opacity: ${o.enabled !== false ? '1' : '0.55'};">
+                <div class="flex justify-between items-center">
+                  <label style="display:flex; align-items:center; gap:10px; cursor:pointer; flex:1;">
+                    <input type="checkbox" ${o.enabled !== false ? 'checked' : ''} onchange="djenToggleOab(${i}, this.checked)" style="margin: 0;">
+                    <div>
+                      <strong>${escapeHtml(o.numero)}/${escapeHtml(o.uf)}</strong>
+                      <span style="color: var(--uc-warm-gray); font-size: 13px; margin-left: 8px;">${escapeHtml(o.nome || '')}</span>
+                    </div>
+                  </label>
+                  <button class="btn btn-ghost btn-sm" onclick="djenRemoveOab(${i})">🗑</button>
+                </div>
+              </div>
+            `).join('')}
+        </div>
+      </div>
+
+      <div class="card mb-3">
+        <h4 class="font-serif font-semibold smallcaps mb-2" style="color: var(--uc-black);">Período padrão de busca</h4>
+        <div style="display:flex; align-items:center; gap:8px;">
+          <label class="label" style="margin:0;">Buscar publicações dos últimos</label>
+          <input type="number" id="djenLookbackInput" value="${lookback}" min="1" max="90" style="width: 70px; padding: 6px; border: 1px solid var(--uc-line); border-radius: 4px;">
+          <span style="font-size: 14px;">dia(s)</span>
+        </div>
+        <p class="help-text" style="margin-top: 6px;">
+          Recomendado: 7 dias para uso semanal. Aceita de 1 a 90 dias. Períodos longos (60+) podem demorar mais e gerar muitas publicações para revisar; útil para retornos de férias ou recuperar publicações de meses anteriores.
+        </p>
+      </div>
+
+      <div class="card mb-3">
+        <h4 class="font-serif font-semibold smallcaps mb-2" style="color: var(--uc-black);">Endpoint da API</h4>
+        <p class="help-text" style="margin-bottom: 8px;">
+          Por padrão, o app chama a API do CNJ diretamente. Se aparecer erro de CORS, configure aqui a URL de uma <strong>Cloudflare Worker</strong> (ou outro proxy) que repassa as chamadas.
+        </p>
+        <input type="url" id="djenWorkerInput" class="input" value="${escapeHtml(workerUrl)}" placeholder="(vazio = usar API do CNJ direto)" style="margin-bottom: 8px;">
+        <details>
+          <summary style="cursor: pointer; color: var(--uc-gold); font-weight: 500;">Como criar a Cloudflare Worker em 5 minutos</summary>
+          <div style="margin-top: 8px; font-size: 13px; line-height: 1.6;">
+            <ol style="padding-left: 20px;">
+              <li>Acesse <a href="https://dash.cloudflare.com/sign-up" target="_blank" style="color: var(--uc-gold);">cloudflare.com</a> e crie conta gratuita.</li>
+              <li>No menu lateral: <strong>Workers &amp; Pages → Create → Hello World worker</strong>.</li>
+              <li>Apague o código de exemplo e cole o seguinte:</li>
+            </ol>
+            <pre style="background: var(--uc-cream); padding: 10px; border-radius: 4px; font-size: 11px; overflow-x: auto; margin: 8px 0;">export default {
+  async fetch(req) {
+    const url = new URL(req.url);
+    const target = 'https://comunicaapi.pje.jus.br/api/v1/comunicacao' + url.search;
+    const r = await fetch(target);
+    const body = await r.text();
+    return new Response(body, {
+      status: r.status,
+      headers: {
+        'content-type': 'application/json',
+        'access-control-allow-origin': '*',
+        'cache-control': 'no-cache'
+      }
+    });
+  }
+}</pre>
+            <ol start="4" style="padding-left: 20px;">
+              <li><strong>Save and Deploy</strong>. Copie a URL gerada (ex: <code>https://uc-djen.SEU-USUARIO.workers.dev</code>) e cole no campo acima.</li>
+            </ol>
+            <p class="help-text" style="margin-top:6px;">⚠ A Cloudflare nunca vê o conteúdo das publicações — apenas que houve uma chamada. Os dados ficam só no seu dispositivo.</p>
+          </div>
+        </details>
+        <button class="btn btn-outline btn-sm" id="djenSaveSettings" style="margin-top: 10px;">Salvar configurações</button>
+      </div>
+
+      <div class="card">
+        <h4 class="font-serif font-semibold smallcaps mb-2" style="color: var(--uc-black);">Ações</h4>
+        <div class="flex gap-2 flex-wrap">
+          <button class="btn btn-secondary" onclick="djenRunSearch()">🔔 Buscar agora</button>
+          <button class="btn btn-outline" onclick="djenViewHistory()">Ver histórico de publicações</button>
+        </div>
+      </div>
+    `;
+  }
+  if (tab === 'prompts') {
+    return `
+      <div class="card mb-3">
+        <div class="flex justify-between items-center mb-3">
+          <h3 class="font-serif text-lg font-semibold smallcaps" style="color: var(--uc-black);">Prompts personalizados</h3>
+          <button class="btn btn-primary btn-sm" onclick="addPromptFlow()">+ Novo</button>
+        </div>
+        <p class="help-text mb-3">Configure prompts diferentes para cada área. O prompt padrão é usado ao gerar pacotes para o Claude.</p>
+        ${prompts.length === 0 ? `
+          <p style="color: var(--uc-warm-gray); font-size: 13px;">Nenhum prompt personalizado. O prompt padrão (advogado sênior) será usado.</p>
+        ` : prompts.map(p => `
+          <div class="card mb-2" style="background: var(--uc-cream);">
+            <div class="flex justify-between items-start gap-2">
+              <div style="flex: 1; min-width: 0;">
+                <div class="flex gap-2 items-center mb-1">
+                  <strong style="color: var(--uc-black);">${escapeHtml(p.name)}</strong>
+                  ${p.id === defaultPromptId ? '<span class="badge badge-gold">padrão</span>' : ''}
+                </div>
+                <p class="help-text" style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${escapeHtml(p.content.slice(0, 100))}...</p>
+              </div>
+              <div class="flex gap-1 flex-shrink-0">
+                ${p.id !== defaultPromptId ? `<button class="btn btn-ghost btn-sm" onclick="setDefaultPrompt('${p.id}')" title="Tornar padrão">★</button>` : ''}
+                <button class="btn btn-ghost btn-sm" onclick="editPromptFlow('${p.id}')">Editar</button>
+                <button class="btn btn-ghost btn-sm" onclick="deletePromptFlow('${p.id}')">🗑</button>
+              </div>
+            </div>
+          </div>
+        `).join('')}
+      </div>
+      <div class="card">
+        <h4 class="font-serif font-semibold smallcaps mb-2" style="color: var(--uc-black);">Prompt padrão do escritório</h4>
+        <p class="help-text mb-2">Este é o prompt sênior pré-configurado, usado quando nenhum prompt personalizado é selecionado.</p>
+        <details>
+          <summary style="cursor: pointer; font-weight: 500; color: var(--uc-gold);">Visualizar</summary>
+          <pre style="background: var(--uc-cream); padding: 12px; border-radius: 6px; font-size: 11px; white-space: pre-wrap; margin-top: 8px; max-height: 300px; overflow: auto;">${escapeHtml(DEFAULT_PROMPT_TEMPLATE)}</pre>
+        </details>
+      </div>
+    `;
+  }
+  if (tab === 'backup') {
+    const lastBackup = state.settings.lastBackupAt;
+    const days = lastBackup ? Math.floor((Date.now() - lastBackup) / 86400000) : null;
+    return `
+      <div class="card mb-3">
+        <h3 class="font-serif text-lg font-semibold smallcaps mb-3" style="color: var(--uc-black);">Backup local</h3>
+        <p style="color: var(--uc-graphite); font-size: 14px; margin-bottom: 12px;">
+          Os dados são armazenados <strong>apenas neste dispositivo</strong>. Faça backups regulares para evitar perda em caso de troca de aparelho ou limpeza do navegador.
+        </p>
+        <p class="help-text mb-3">
+          Último backup: <strong>${lastBackup ? days + ' dia(s) atrás (' + formatDateTime(lastBackup) + ')' : 'nunca'}</strong>
+        </p>
+        <div class="flex gap-2 flex-wrap">
+          <button class="btn btn-primary" onclick="exportBackup()">⬇ Exportar backup</button>
+          <button class="btn btn-outline" onclick="importBackupFlow()">⬆ Importar backup</button>
+        </div>
+      </div>
+      <div class="card">
+        <h4 class="font-serif font-semibold smallcaps mb-2" style="color: var(--uc-black);">Lembrete automático</h4>
+        <div style="display: flex; align-items: flex-start; gap: 8px;">
+          <input type="checkbox" id="backupReminderToggle" ${state.settings.backupReminder ? 'checked' : ''} style="margin-top: 3px;">
+          <label for="backupReminderToggle" style="cursor: pointer; flex: 1;">
+            <strong style="color: var(--uc-black);">Avisar a cada 7 dias sem backup</strong>
+            <p class="help-text">Mostra um banner discreto no Início quando faz uma semana sem exportar.</p>
+          </label>
+        </div>
+      </div>
+    `;
+  }
+  if (tab === 'sync') {
+    return `
+      <div class="card mb-3">
+        <h3 class="font-serif text-lg font-semibold smallcaps mb-3" style="color: var(--uc-black);">Sincronização entre dispositivos</h3>
+        <p style="color: var(--uc-graphite); font-size: 14px; margin-bottom: 16px;">
+          Para usar os mesmos dados em desktop e celular, exporte um backup em um dispositivo e importe no outro. <strong>Não há servidor central</strong> — tudo passa por arquivo local.
+        </p>
+        <ol style="font-size: 14px; color: var(--uc-graphite); padding-left: 24px; line-height: 1.8;">
+          <li>No <strong>desktop</strong>, vá em Backup → Exportar backup</li>
+          <li>Envie o arquivo <code>.uc-backup.json</code> para o celular (Google Drive, e-mail, WhatsApp, AirDrop)</li>
+          <li>No <strong>celular</strong>, abra este app, vá em Backup → Importar backup</li>
+          <li>Pronto — os dois dispositivos terão os mesmos dados</li>
+        </ol>
+        <p class="help-text mt-3">⚠️ A importação substitui os dados locais. Faça backup do dispositivo de destino antes, se já tiver dados nele.</p>
+      </div>
+      <div class="card" style="border-left: 3px solid var(--uc-gold);">
+        <h4 class="font-serif font-semibold smallcaps mb-2" style="color: var(--uc-black);">Por que sem servidor?</h4>
+        <p style="font-size: 13px; color: var(--uc-graphite); line-height: 1.6;">
+          Manter 100% dos dados no seu dispositivo é uma escolha deliberada para preservar sigilo profissional e segredo de justiça. Nenhum dado de cliente sai do seu controle, mesmo em caso de comprometimento de servidor.
+        </p>
+      </div>
+    `;
+  }
+  if (tab === 'security') {
+    return `
+      <div class="card mb-3">
+        <h3 class="font-serif text-lg font-semibold smallcaps mb-3" style="color: var(--uc-black);">Auditoria de privacidade</h3>
+        <div style="background: var(--uc-green-soft); border: 1px solid var(--uc-green); border-radius: 6px; padding: 12px; display: flex; gap: 12px; align-items: center;">
+          <span style="font-size: 24px;">✓</span>
+          <div>
+            <strong style="color: var(--uc-green);">Nenhum upload nesta sessão</strong>
+            <p style="font-size: 12px; color: var(--uc-graphite); margin: 2px 0 0;">Todos os PDFs processados ficaram no seu dispositivo.</p>
+          </div>
+        </div>
+      </div>
+      <div class="card mb-3">
+        <h4 class="font-serif font-semibold smallcaps mb-2" style="color: var(--uc-black);">Senha mestra</h4>
+        <p class="help-text mb-2">Em desenvolvimento. Permitirá criptografar todos os dados locais com uma senha mestra.</p>
+        <button class="btn btn-outline btn-sm" disabled>Em breve</button>
+      </div>
+      <div class="card" style="border-left: 3px solid var(--uc-red);">
+        <h4 class="font-serif font-semibold smallcaps mb-2" style="color: var(--uc-red);">Apagar todos os dados</h4>
+        <p class="help-text mb-3">Remove permanentemente <strong>todos</strong> os processos, eventos, prazos, notas, jurisprudência e PDFs salvos. Útil antes de emprestar dispositivo. <strong>Faça backup antes.</strong></p>
+        <button class="btn btn-danger btn-sm" onclick="wipeAllData()">Apagar tudo</button>
+      </div>
+    `;
+  }
+  if (tab === 'about') {
+    return `
+      <div class="card">
+        <h3 class="font-serif text-2xl font-semibold smallcaps mb-2" style="color: var(--uc-black);">UC Jurídico</h3>
+        <p style="font-style: italic; color: var(--uc-warm-gray); margin-bottom: 16px;">Suite de gestão e análise processual</p>
+        <p style="font-size: 14px; line-height: 1.7;">
+          Desenvolvido para o escritório <strong>Urany de Castro Advocacia</strong> · 30 anos.<br>
+          Versão 4.0 · 2026<br><br>
+          Goiânia · Av. Deputado Jamel Cecílio, 2690 · Ed. Metropolitan Mall · sala 2903 · Jardim Goiás · CEP 74.810-100<br>
+          Anápolis · Rua Conde Afonso Celso, 557 · Centro · CEP 75.025-030
+        </p>
+        <hr style="margin: 16px 0; border-color: var(--uc-line-soft);">
+        <p class="help-text">
+          Aplicação 100% local · Sem servidor · Sem rastreamento · PWA instalável<br>
+          Bibliotecas: pdf.js, pdf-lib, Tesseract.js, JSZip, Tailwind CSS, EB Garamond, Inter
+        </p>
+        <div id="installSection" class="mt-4 hidden">
+          <button class="btn btn-secondary" id="installBtn">📲 Instalar como aplicativo</button>
+        </div>
+      </div>
+    `;
+  }
+}
+
+function setupSettingsHandlers(tab) {
+  if (tab === 'backup') {
+    const cb = $('backupReminderToggle');
+    if (cb) cb.onchange = async (e) => {
+      state.settings.backupReminder = e.target.checked;
+      await DB.setSetting('backupReminder', e.target.checked);
+      toast('Preferência salva', '', 'success');
+    };
+  }
+  if (tab === 'djen') {
+    // Load fresh data and re-render if cache was empty
+    djenLoadSettingsCache().then(() => {
+      if (!state._djenRenderedFresh) {
+        state._djenRenderedFresh = true;
+        renderSettings();
+      } else {
+        state._djenRenderedFresh = false;
+      }
+    });
+    const saveBtn = $('djenSaveSettings');
+    if (saveBtn) saveBtn.onclick = async () => {
+      const lookback = parseInt($('djenLookbackInput').value) || 7;
+      const workerUrl = $('djenWorkerInput').value.trim();
+      await DB.setSetting('djenLookbackDays', lookback);
+      await DB.setSetting('djenWorkerUrl', workerUrl || null);
+      state._djenCache = { ...state._djenCache, lookback, workerUrl };
+      toast('Configurações salvas', '', 'success');
+    };
+  }
+  if (tab === 'about') {
+    if (state.installPrompt) {
+      $('installSection').classList.remove('hidden');
+      $('installBtn').onclick = async () => {
+        state.installPrompt.prompt();
+        const r = await state.installPrompt.userChoice;
+        if (r.outcome === 'accepted') toast('Instalado!', '', 'success');
+        state.installPrompt = null;
+        $('installSection').classList.add('hidden');
+      };
+    }
+  }
+}
+
+async function djenLoadSettingsCache() {
+  const oabs = await DB.getSetting('djenOabs', DJEN_DEFAULT_OABS);
+  const lookback = await DB.getSetting('djenLookbackDays', 7);
+  const workerUrl = await DB.getSetting('djenWorkerUrl', '') || '';
+  const lastFetch = await DB.getSetting('djenLastFetch', null);
+  state._djenCache = { oabs, lookback, workerUrl, lastFetch };
+}
+
+async function djenAddOabFlow() {
+  const r = await showModal('Adicionar OAB ao monitor', [
+    { label: 'Número da OAB', placeholder: 'Ex: 16539 (apenas números)' },
+    { label: 'UF', type: 'select', options: [
+      { value: 'GO', label: 'GO' }, { value: 'DF', label: 'DF' }, { value: 'SP', label: 'SP' },
+      { value: 'RJ', label: 'RJ' }, { value: 'MG', label: 'MG' }, { value: 'BA', label: 'BA' },
+      { value: 'PR', label: 'PR' }, { value: 'RS', label: 'RS' }, { value: 'SC', label: 'SC' },
+      { value: 'PE', label: 'PE' }, { value: 'CE', label: 'CE' }, { value: 'PA', label: 'PA' },
+      { value: 'AM', label: 'AM' }, { value: 'MT', label: 'MT' }, { value: 'MS', label: 'MS' },
+      { value: 'TO', label: 'TO' }, { value: 'PI', label: 'PI' }, { value: 'MA', label: 'MA' },
+      { value: 'AL', label: 'AL' }, { value: 'SE', label: 'SE' }, { value: 'RN', label: 'RN' },
+      { value: 'PB', label: 'PB' }, { value: 'ES', label: 'ES' }, { value: 'AC', label: 'AC' },
+      { value: 'AP', label: 'AP' }, { value: 'RO', label: 'RO' }, { value: 'RR', label: 'RR' }
+    ], default: 'GO' },
+    { label: 'Nome do advogado (opcional)', placeholder: 'Para identificação na lista' }
+  ], { confirmLabel: 'Adicionar' });
+  if (!r) return;
+  const [numero, uf, nome] = r;
+  if (!numero?.trim()) { toast('Número obrigatório', '', 'error'); return; }
+  const oabs = await DB.getSetting('djenOabs', DJEN_DEFAULT_OABS);
+  const exists = oabs.some(o => o.numero === numero.trim() && o.uf === uf);
+  if (exists) { toast('OAB já cadastrada', '', 'error'); return; }
+  oabs.push({ numero: numero.trim(), uf, nome: nome?.trim() || '' });
+  await DB.setSetting('djenOabs', oabs);
+  state._djenCache = { ...(state._djenCache || {}), oabs };
+  toast('OAB adicionada', '', 'success');
+  renderSettings();
+}
+
+async function djenRemoveOab(index) {
+  const oabs = await DB.getSetting('djenOabs', DJEN_DEFAULT_OABS);
+  const oab = oabs[index];
+  const ok = await confirmDialog('Remover OAB?', `${oab.numero}/${oab.uf} ${oab.nome ? '(' + oab.nome + ')' : ''} não será mais consultada.`, true);
+  if (!ok) return;
+  oabs.splice(index, 1);
+  await DB.setSetting('djenOabs', oabs);
+  state._djenCache = { ...(state._djenCache || {}), oabs };
+  renderSettings();
+}
+
+async function djenToggleOab(index, enabled) {
+  const oabs = await DB.getSetting('djenOabs', DJEN_DEFAULT_OABS);
+  if (!oabs[index]) return;
+  oabs[index].enabled = enabled;
+  await DB.setSetting('djenOabs', oabs);
+  state._djenCache = { ...(state._djenCache || {}), oabs };
+  // Update the active count badge inline without re-rendering everything
+  const countEl = document.getElementById('djenActiveCount');
+  if (countEl) countEl.textContent = oabs.filter(o => o.enabled !== false).length;
+  // Re-render the list to update opacity/background of each row
+  renderSettings();
+}
+
+async function djenToggleAllOabs(enabled) {
+  const oabs = await DB.getSetting('djenOabs', DJEN_DEFAULT_OABS);
+  oabs.forEach(o => o.enabled = enabled);
+  await DB.setSetting('djenOabs', oabs);
+  state._djenCache = { ...(state._djenCache || {}), oabs };
+  renderSettings();
+}
+
+async function djenViewHistory() {
+  const all = await DB.getAllDjenPublications();
+  const sorted = all.sort((a,b) => (b.importedAt || 0) - (a.importedAt || 0));
+  const modal = document.createElement('div');
+  modal.className = 'modal-backdrop';
+  modal.innerHTML = `
+    <div class="modal scroll-thin" style="max-width: 800px;">
+      <h3 class="modal-title">Histórico DJEN · ${sorted.length} publicações</h3>
+      <div style="max-height:60vh; overflow-y:auto;" class="scroll-thin">
+        ${sorted.length === 0 ? '<p class="empty-state-msg">Nenhuma publicação importada ainda.</p>' :
+          sorted.map(p => `
+            <div class="card" style="margin-bottom:6px; padding:10px;">
+              <div style="display:flex; gap:6px; flex-wrap:wrap; align-items:center; margin-bottom:4px;">
+                <span class="process-cnj" style="font-size:11px; font-weight:600;">${escapeHtml(normalizeCnj(p.cnj))}</span>
+                <span class="badge badge-gray">${escapeHtml(p.tribunal)}</span>
+                ${p.processId ? `<span class="badge badge-green">vinculada</span>` : `<span class="badge badge-amber">órfã</span>`}
+                <span style="font-size:11px; color: var(--uc-warm-gray); margin-left:auto;">${formatDate(p.importedAt, { relative: true })}</span>
+              </div>
+              <div style="font-size:12px; color: var(--uc-graphite);">${escapeHtml(p.tipo)} · ${escapeHtml(p.orgao)} · ${escapeHtml(p.dataDisponibilizacao)}</div>
+              ${p.processId ? `<button class="btn btn-ghost btn-sm" onclick="document.querySelector('.modal-backdrop').remove(); navigate('process', { currentProcessId: '${p.processId}' })">Ver processo →</button>` : ''}
+            </div>
+          `).join('')}
+      </div>
+      <button class="btn btn-primary btn-full" onclick="this.closest('.modal-backdrop').remove()" style="margin-top:12px;">Fechar</button>
+    </div>`;
+  $('modalContainer').appendChild(modal);
+}
+
+async function setTheme(theme) {
+  applyTheme(theme);
+  await DB.setSetting('theme', theme);
+  renderSettings();
+}
+
+async function addPromptFlow() {
+  const r = await showModal('Novo prompt', [
+    { label: 'Nome', placeholder: 'Ex: Análise tributária federal' },
+    { label: 'Conteúdo do prompt', type: 'textarea', rows: 12, placeholder: 'Você é um advogado...' }
+  ], { confirmLabel: 'Salvar' });
+  if (!r) return;
+  const [name, content] = r;
+  if (!name?.trim() || !content?.trim()) { toast('Preencha todos os campos', '', 'error'); return; }
+  await DB.savePrompt({ id: uid(), name: name.trim(), content: content.trim(), createdAt: Date.now() });
+  toast('Prompt salvo', '', 'success');
+  renderSettings();
+}
+
+async function editPromptFlow(id) {
+  const p = state.prompts.find(x => x.id === id);
+  if (!p) return;
+  const r = await showModal('Editar prompt', [
+    { label: 'Nome', default: p.name },
+    { label: 'Conteúdo', type: 'textarea', rows: 14, default: p.content }
+  ], { confirmLabel: 'Salvar' });
+  if (!r) return;
+  p.name = r[0].trim(); p.content = r[1].trim();
+  await DB.savePrompt(p);
+  toast('Atualizado', '', 'success');
+  renderSettings();
+}
+
+async function deletePromptFlow(id) {
+  const ok = await confirmDialog('Remover prompt?', '', true);
+  if (!ok) return;
+  await DB.deletePrompt(id);
+  if (await DB.getSetting('defaultPromptId') === id) await DB.setSetting('defaultPromptId', null);
+  renderSettings();
+}
+
+async function setDefaultPrompt(id) {
+  await DB.setSetting('defaultPromptId', id);
+  toast('Prompt padrão atualizado', '', 'success');
+  renderSettings();
+}
+
+// ====================================================================
+// === BACKUP / RESTORE ===============================================
+// ====================================================================
+
+async function exportBackup() {
+  const data = {
+    version: 4,
+    generatedAt: Date.now(),
+    processes: await DB.getAllProcesses(),
+    events: [],
+    deadlines: await DB.getAllDeadlines(),
+    notes: [],
+    jurisprudence: [],
+    prompts: await DB.getAllPrompts(),
+    djenPublications: await DB.getAllDjenPublications(),
+    settings: {
+      theme: state.settings.theme,
+      backupReminder: state.settings.backupReminder,
+      defaultPromptId: await DB.getSetting('defaultPromptId'),
+      djenOabs: await DB.getSetting('djenOabs', DJEN_DEFAULT_OABS),
+      djenLookbackDays: await DB.getSetting('djenLookbackDays', 7),
+      djenWorkerUrl: await DB.getSetting('djenWorkerUrl', null),
+      djenLastFetch: await DB.getSetting('djenLastFetch', null)
+    }
+  };
+  // Get all events/notes/jurisprudence per process
+  for (const p of data.processes) {
+    const evts = await DB.getEventsByProcess(p.id);
+    const notes = await DB.getNotesByProcess(p.id);
+    const juris = await DB.getJurisprudenceByProcess(p.id);
+    data.events.push(...evts);
+    data.notes.push(...notes);
+    data.jurisprudence.push(...juris);
+  }
+  const json = JSON.stringify(data, null, 2);
+  const blob = new Blob([json], { type: 'application/json' });
+  const ts = new Date().toISOString().slice(0,10);
+  downloadBlob(blob, `uc-juridico-backup-${ts}.json`);
+  state.settings.lastBackupAt = Date.now();
+  await DB.setSetting('lastBackupAt', state.settings.lastBackupAt);
+  toast('Backup exportado', `${data.processes.length} processos · ${data.events.length} eventos · ${data.deadlines.length} prazos · ${data.djenPublications.length} DJEN`, 'success');
+}
+
+async function importBackupFlow() {
+  const ok = await confirmDialog(
+    'Importar backup?',
+    'Os dados atuais SERÃO SUBSTITUÍDOS pelos dados do arquivo. Esta ação não pode ser desfeita. Faça backup do estado atual antes, se necessário.',
+    true
+  );
+  if (!ok) return;
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = '.json,application/json';
+  input.onchange = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const data = JSON.parse(text);
+      if (!data.version || !Array.isArray(data.processes)) throw new Error('Arquivo inválido');
+      // Wipe current data
+      for (const p of await DB.getAllProcesses()) await DB.deleteProcess(p.id);
+      for (const pr of await DB.getAllPrompts()) await DB.deletePrompt(pr.id);
+      // Import
+      for (const p of data.processes) await dbPromise('processes', 'readwrite', s => s.put(p));
+      for (const e of (data.events || [])) await dbPromise('events', 'readwrite', s => s.put(e));
+      for (const d of (data.deadlines || [])) await dbPromise('deadlines', 'readwrite', s => s.put(d));
+      for (const n of (data.notes || [])) await dbPromise('notes', 'readwrite', s => s.put(n));
+      for (const j of (data.jurisprudence || [])) await dbPromise('jurisprudence', 'readwrite', s => s.put(j));
+      for (const pr of (data.prompts || [])) await DB.savePrompt(pr);
+      // DJEN restore (v4.1+)
+      if (db.objectStoreNames.contains('djen_publications')) {
+        for (const dp of (data.djenPublications || [])) await dbPromise('djen_publications', 'readwrite', s => s.put(dp));
+      }
+      if (data.settings) {
+        if (data.settings.defaultPromptId) await DB.setSetting('defaultPromptId', data.settings.defaultPromptId);
+        if (data.settings.theme) await DB.setSetting('theme', data.settings.theme);
+        if (data.settings.djenOabs) await DB.setSetting('djenOabs', data.settings.djenOabs);
+        if (data.settings.djenLookbackDays) await DB.setSetting('djenLookbackDays', data.settings.djenLookbackDays);
+        if (data.settings.djenWorkerUrl) await DB.setSetting('djenWorkerUrl', data.settings.djenWorkerUrl);
+      }
+      toast('Backup importado', `${data.processes.length} processos restaurados`, 'success');
+      navigate('dashboard');
+    } catch(err) {
+      toast('Erro ao importar', err.message, 'error');
+    }
+  };
+  input.click();
+}
+
+async function wipeAllData() {
+  const c1 = await confirmDialog('Apagar TODOS os dados?', 'Isso removerá processos, eventos, prazos, notas, jurisprudência, PDFs, prompts personalizados e histórico DJEN. Faça backup antes!', true);
+  if (!c1) return;
+  const c2 = await confirmDialog('Tem certeza absoluta?', 'Última chance. Esta ação é PERMANENTE.', true);
+  if (!c2) return;
+  for (const store of ['processes', 'events', 'deadlines', 'notes', 'jurisprudence', 'pdfs', 'prompts', 'djen_publications']) {
+    if (db.objectStoreNames.contains(store)) {
+      await dbPromise(store, 'readwrite', s => s.clear());
+    }
+  }
+  toast('Dados apagados', 'Tudo limpo.', 'success');
+  navigate('dashboard');
+}
+
+// ====================================================================
+// === GENERATE PROCESS FICHE (DOCX would need server; HTML for now) ==
+// ====================================================================
+
+async function generateProcessFiche() {
+  const { p, events, deadlines, notes, jurisprudence } = state._processView;
+  // Generate as standalone HTML mimicking the office template
+  const html = `<!DOCTYPE html>
+<html lang="pt-BR"><head><meta charset="UTF-8"><title>Ficha · ${escapeHtml(p.name)}</title>
+<style>
+@page { size: A4; margin: 2cm 2cm 2cm 2.5cm; }
+body { font-family: 'EB Garamond', 'Times New Roman', serif; font-size: 12pt; line-height: 1.5; color: #1f1f1f; max-width: 760px; margin: 0 auto; padding: 24px; }
+h1 { font-size: 18pt; font-variant: small-caps; letter-spacing: 0.06em; text-align: center; border-bottom: 2px solid #8a6f3d; padding-bottom: 8px; }
+h2 { font-size: 14pt; font-variant: small-caps; letter-spacing: 0.06em; color: #0a0a0a; margin-top: 24px; border-left: 3px solid #8a6f3d; padding-left: 12px; }
+h2::before { content: "§ "; color: #8a6f3d; }
+.cnj { font-family: monospace; color: #6b6b68; }
+table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 11pt; }
+th, td { padding: 6px 8px; border-bottom: 1px solid #d4cfc0; text-align: left; }
+th { background: #f4f1e8; font-variant: small-caps; }
+.assinatura { margin-top: 60px; text-align: center; font-variant: small-caps; letter-spacing: 0.06em; font-weight: 600; }
+.oab { font-variant: normal; font-weight: normal; font-size: 10pt; margin-top: 4px; }
+@media print { body { padding: 0; } }
+</style></head><body>
+
+<h1>Ficha Processual</h1>
+
+<h2>Identificação</h2>
+<table>
+${p.cnj ? `<tr><th width="180">Número CNJ</th><td class="cnj">${escapeHtml(p.cnj)}</td></tr>` : ''}
+${p.client ? `<tr><th>Cliente</th><td>${escapeHtml(p.client)}</td></tr>` : ''}
+${p.court ? `<tr><th>Tribunal</th><td>${escapeHtml(p.court)}</td></tr>` : ''}
+${p.type ? `<tr><th>Tipo de ação</th><td>${escapeHtml(p.type)}</td></tr>` : ''}
+${p.area ? `<tr><th>Área</th><td>${escapeHtml(p.area)}</td></tr>` : ''}
+${p.polo ? `<tr><th>Polo</th><td>${escapeHtml(p.polo)}</td></tr>` : ''}
+</table>
+
+${events.length > 0 ? `<h2>Cronologia processual</h2>
+<table>
+<tr><th>Evento</th><th>Data</th><th>Tipo</th><th>Páginas</th></tr>
+${[...events].sort((a,b) => parseInt(a.eventNumber) - parseInt(b.eventNumber)).map(e => `<tr><td>${escapeHtml(e.eventNumber)}</td><td>${escapeHtml(e.date || '—')}</td><td>${escapeHtml(e.type)}</td><td>${e.startPage}–${e.endPage}</td></tr>`).join('')}
+</table>` : ''}
+
+${deadlines.filter(d => d.status !== 'done').length > 0 ? `<h2>Prazos pendentes</h2>
+<table>
+<tr><th>Descrição</th><th>Vencimento</th></tr>
+${deadlines.filter(d => d.status !== 'done').sort((a,b) => new Date(a.deadlineDate) - new Date(b.deadlineDate)).map(d => `<tr><td>${escapeHtml(d.description || d.type)}</td><td>${formatDate(d.deadlineDate)}</td></tr>`).join('')}
+</table>` : ''}
+
+${jurisprudence.length > 0 ? `<h2>Jurisprudência catalogada</h2>
+${(() => { const byT = {}; jurisprudence.forEach(j => { if (!byT[j.type]) byT[j.type] = []; byT[j.type].push(j.citation); });
+return Object.entries(byT).map(([t, items]) => `<p><strong>${escapeHtml(t)}:</strong> ${items.map(escapeHtml).join('; ')}</p>`).join('');
+})()}` : ''}
+
+${notes.length > 0 ? `<h2>Notas e observações</h2>
+${notes.sort((a,b) => a.createdAt - b.createdAt).map(n => `<p style="border-left: 2px solid #c9b687; padding-left: 12px; margin: 8px 0;"><em>${formatDateTime(n.createdAt)}:</em> ${escapeHtml(n.text)}</p>`).join('')}` : ''}
+
+<div class="assinatura">
+Eduardo Urany de Castro
+<div class="oab">OAB/GO n.º 16.539 · OAB/DF n.º 87.243</div>
+</div>
+
+</body></html>`;
+  downloadBlob(new Blob([html], { type: 'text/html;charset=utf-8' }), `ficha_${p.name.replace(/[^\w]/g,'_')}.html`);
+  toast('Ficha gerada', 'Abra no navegador e use Imprimir → Salvar como PDF', 'success');
+}
+
+// ====================================================================
+// === DJEN MONITOR ===================================================
+// ====================================================================
+// Public CNJ API: https://comunicaapi.pje.jus.br/api/v1/comunicacao
+// Returns judicial publications filtered by OAB+UF and date range.
+// Used by AASP, JusAPI, Projuris, Aurum etc. — public, no auth required.
+
+const DJEN_API_DIRECT = 'https://comunicaapi.pje.jus.br/api/v1/comunicacao';
+// If CORS blocks direct browser calls, set this to a Cloudflare Worker URL
+// that proxies the request. The worker code is in /docs/cloudflare-worker.js
+const DJEN_DEFAULT_OABS = [
+  // Sociedade Advocacia Urany de Castro S/S (OAB-GO 519)
+  { numero: '16539', uf: 'GO', nome: 'Eduardo Urany de Castro' },
+  { numero: '87243', uf: 'DF', nome: 'Eduardo Urany de Castro' },
+  { numero: '2725',  uf: 'GO', nome: 'Terezinha Urany de Castro' },
+  { numero: '51774', uf: 'GO', nome: 'Sara Carolina Urany de Castro Melhem' },
+  // Sociedade Costa Ferreira, Duarte, França e Ribeiro Advogados (OAB-GO 1.653)
+  { numero: '18809', uf: 'GO', nome: 'Juliano da Costa Ferreira' },
+  { numero: '18601', uf: 'GO', nome: 'Marko Antônio Duarte' },
+  { numero: '18222', uf: 'GO', nome: 'Cleber Ribeiro' },
+  { numero: '14301', uf: 'GO', nome: 'Marcelo Mendes França' },
+  // Demais parceiros do escritório (Goiânia/GO)
+  { numero: '26648', uf: 'GO', nome: 'Bruno Naciff da Rocha' },
+  { numero: '24030', uf: 'GO', nome: 'Marcelo Bittar' },
+  { numero: '45212', uf: 'GO', nome: 'Marcos Fernando da Silva' }
+];
+
+// Try direct call first, fallback to user-configured worker URL
+async function djenFetch(params) {
+  const workerUrl = await DB.getSetting('djenWorkerUrl', null);
+  const baseUrl = workerUrl || DJEN_API_DIRECT;
+  const qs = new URLSearchParams(params).toString();
+  const url = `${baseUrl}?${qs}`;
+  const resp = await fetch(url, { method: 'GET', headers: { 'Accept': 'application/json' } });
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${resp.statusText}`);
+  return await resp.json();
+}
+
+// Normalize CNJ to canonical form (with separators)
+function normalizeCnj(raw) {
+  if (!raw) return null;
+  const digits = String(raw).replace(/\D/g, '');
+  if (digits.length !== 20) return digits; // return as-is if not standard length
+  return `${digits.slice(0,7)}-${digits.slice(7,9)}.${digits.slice(9,13)}.${digits.slice(13,14)}.${digits.slice(14,16)}.${digits.slice(16,20)}`;
+}
+
+function normalizeCnjForCompare(raw) {
+  return String(raw || '').replace(/\D/g, '');
+}
+
+// Calculate prazo: publication is considered effective the next business day
+// after disponibilizacao. Prazo starts the next business day after publication.
+// We just compute deadlineDate = addBusinessDays(publicationDate + 1bd, daysAllowed)
+function calcDjenDeadline(dataDisponibilizacao, daysAllowed = 15) {
+  const dispo = new Date(dataDisponibilizacao + 'T12:00:00');
+  const publication = addBusinessDays(dispo, 1);
+  const startCount = addBusinessDays(publication, 1);
+  // startCount IS day 1 of the prazo, so we add daysAllowed-1 more business days
+  const deadline = addBusinessDays(startCount, daysAllowed - 1);
+  return { publication, startCount, deadline };
+}
+
+// Fetch publications for all configured OABs in a date range
+async function djenFetchAll(oabs, dataInicio, dataFim, progressCb = null) {
+  const allPubs = [];
+  let total = 0;
+  for (let i = 0; i < oabs.length; i++) {
+    const oab = oabs[i];
+    if (progressCb) progressCb(`Consultando OAB ${oab.numero}/${oab.uf}...`, (i / oabs.length) * 0.9);
+    let pagina = 1;
+    while (true) {
+      try {
+        const data = await djenFetch({
+          numeroOab: oab.numero,
+          ufOab: oab.uf,
+          dataDisponibilizacaoInicio: dataInicio,
+          dataDisponibilizacaoFim: dataFim,
+          itensPorPagina: 100,
+          pagina
+        });
+        const items = data.items || [];
+        if (items.length === 0) break;
+        items.forEach(item => {
+          item._oab = oab;
+          allPubs.push(item);
+        });
+        total += items.length;
+        if (items.length < 100) break;
+        pagina += 1;
+        if (pagina > 20) break; // safety cap
+      } catch(err) {
+        throw new Error(`Falha na OAB ${oab.numero}/${oab.uf}: ${err.message}`);
+      }
+    }
+  }
+  if (progressCb) progressCb('Processando...', 0.95);
+  return allPubs;
+}
+
+// Match publications against existing processes by CNJ
+async function djenClassify(publications) {
+  const processes = await DB.getAllProcesses();
+  const cnjMap = new Map();
+  processes.forEach(p => {
+    const norm = normalizeCnjForCompare(p.cnj);
+    if (norm) cnjMap.set(norm, p);
+  });
+
+  const result = { matched: [], unmatched: [], duplicates: [] };
+
+  for (const pub of publications) {
+    const cnj = pub.numero_processo || pub.numeroProcesso || '';
+    const cnjNorm = normalizeCnjForCompare(cnj);
+    pub._cnjNormalized = cnjNorm;
+    pub._cnjFormatted = normalizeCnj(cnj);
+    pub._proc = cnjMap.get(cnjNorm) || null;
+
+    // Dedup check
+    if (await DB.hasDjenPublication(pub.hash)) {
+      result.duplicates.push(pub);
+    } else if (pub._proc) {
+      result.matched.push(pub);
+    } else {
+      result.unmatched.push(pub);
+    }
+  }
+  return result;
+}
+
+// Render the main DJEN modal with results
+async function djenShowResultsModal(classified, oabs, dataInicio, dataFim) {
+  const total = classified.matched.length + classified.unmatched.length + classified.duplicates.length;
+  const modal = document.createElement('div');
+  modal.className = 'modal-backdrop';
+  modal.innerHTML = `
+    <div class="modal scroll-thin" style="max-width: 900px;">
+      <h3 class="modal-title">Resultado da consulta DJEN</h3>
+      <p class="help-text" style="margin-bottom: 12px;">
+        Período: ${formatDate(dataInicio)} a ${formatDate(dataFim)} ·
+        ${oabs.length} OAB(s) consultada(s) ·
+        <strong>${total}</strong> publicações encontradas
+      </p>
+
+      <div style="display:flex; gap:8px; margin-bottom:16px; flex-wrap:wrap;">
+        <span class="badge badge-green">${classified.matched.length} casam com processo cadastrado</span>
+        <span class="badge badge-amber">${classified.unmatched.length} de processo desconhecido</span>
+        <span class="badge badge-gray">${classified.duplicates.length} já vistas</span>
+      </div>
+
+      <div id="djenResultsBody" style="max-height: 60vh; overflow-y:auto; margin-bottom:16px;" class="scroll-thin">
+        ${classified.matched.length > 0 ? `
+          <h4 class="font-serif font-semibold smallcaps" style="color: var(--uc-green); margin: 16px 0 8px;">✓ Vinculadas a processo · ${classified.matched.length}</h4>
+          ${classified.matched.map((p, i) => djenRenderPubRow(p, 'matched', i)).join('')}
+        ` : ''}
+
+        ${classified.unmatched.length > 0 ? `
+          <h4 class="font-serif font-semibold smallcaps" style="color: var(--uc-amber); margin: 20px 0 8px;">⚠ Processo não cadastrado · ${classified.unmatched.length}</h4>
+          ${classified.unmatched.map((p, i) => djenRenderPubRow(p, 'unmatched', i)).join('')}
+        ` : ''}
+
+        ${classified.duplicates.length > 0 ? `
+          <h4 class="font-serif font-semibold smallcaps" style="color: var(--uc-warm-gray); margin: 20px 0 8px;">⊙ Já importadas · ${classified.duplicates.length}</h4>
+          <div style="font-size:12px; color: var(--uc-warm-gray); padding: 8px;">
+            ${classified.duplicates.map(p => `${p._cnjFormatted} (${p.data_disponibilizacao || p.data_publicacao})`).join(' · ')}
+          </div>
+        ` : ''}
+
+        ${total === 0 ? `
+          <div class="empty-state" style="padding: 24px;">
+            <p class="empty-state-msg">Nenhuma publicação encontrada no período.</p>
+          </div>
+        ` : ''}
+      </div>
+
+      <div class="flex gap-2">
+        <button class="btn btn-outline" id="_djenCancel" style="flex:1">Fechar</button>
+        ${classified.matched.length + classified.unmatched.length > 0 ? `
+          <button class="btn btn-primary" id="_djenImport" style="flex:1">Importar selecionadas</button>
+        ` : ''}
+      </div>
+    </div>`;
+  $('modalContainer').appendChild(modal);
+  document.getElementById('_djenCancel').onclick = () => modal.remove();
+  const importBtn = document.getElementById('_djenImport');
+  if (importBtn) {
+    // Stash data globally so import button can access (closure would need binding)
+    window._djenClassifiedCache = classified;
+    importBtn.onclick = () => djenImportSelected(modal);
+  }
+}
+
+function djenRenderPubRow(pub, kind, idx) {
+  const id = `_djenpub_${kind}_${idx}`;
+  const proc = pub._proc;
+  const cnj = pub._cnjFormatted;
+  const data = pub.data_disponibilizacao || pub.data_publicacao || '';
+  const tribunal = pub.siglaTribunal || pub.tribunal || '';
+  const orgao = pub.nomeOrgao || pub.orgao || '';
+  const tipo = pub.tipoComunicacao || pub.tipo_documento_id || 'Intimação';
+  const textoPreview = (pub.texto || '').slice(0, 280);
+  return `
+    <div class="card" style="margin-bottom:8px; padding:12px;" data-djen-id="${pub.hash}">
+      <div style="display:flex; gap:10px; align-items:flex-start;">
+        <input type="checkbox" id="${id}" data-djen-row checked style="margin-top:4px;">
+        <div style="flex:1; min-width:0;">
+          <div style="display:flex; gap:6px; flex-wrap:wrap; align-items:center; margin-bottom:4px;">
+            <span class="process-cnj" style="font-size:11px; font-weight:600;">${escapeHtml(cnj)}</span>
+            <span class="badge badge-gray">${escapeHtml(tribunal)}</span>
+            <span class="badge ${kind === 'matched' ? 'badge-green' : 'badge-amber'}">${kind === 'matched' ? '✓ ' + escapeHtml(proc.name) : 'novo'}</span>
+            ${pub._oab ? `<span style="font-size:11px; color: var(--uc-warm-gray);">OAB ${pub._oab.numero}/${pub._oab.uf}</span>` : ''}
+          </div>
+          <div style="font-size:13px; color: var(--uc-graphite); margin-bottom: 4px;">
+            <strong>${escapeHtml(orgao)}</strong> · ${escapeHtml(data)}
+          </div>
+          <div style="font-size:12px; color: var(--uc-warm-gray); line-height:1.5; max-height:60px; overflow:hidden;">
+            ${escapeHtml(textoPreview)}${pub.texto && pub.texto.length > 280 ? '…' : ''}
+          </div>
+          ${kind === 'unmatched' ? `
+            <div style="margin-top: 8px; font-size: 11px;">
+              <label style="display:inline-flex; align-items:center; gap:4px;">
+                <input type="checkbox" data-djen-create-process checked>
+                Criar processo na importação
+              </label>
+            </div>
+          ` : ''}
+          <div style="margin-top: 6px; font-size: 11px;">
+            <label style="display:inline-flex; align-items:center; gap:6px;">
+              Prazo (dias úteis):
+              <input type="number" data-djen-prazo value="15" min="1" max="365" style="width: 60px; padding: 2px 6px; border: 1px solid var(--uc-line); border-radius: 4px;">
+            </label>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+async function djenImportSelected(modal) {
+  const classified = window._djenClassifiedCache || { matched: [], unmatched: [] };
+  const allPubs = [...classified.matched, ...classified.unmatched];
+  let imported = 0, processosCriados = 0, prazosCriados = 0;
+
+  // Collect selected hashes + per-row config
+  const rowSettings = {};
+  modal.querySelectorAll('[data-djen-id]').forEach(card => {
+    const hash = card.dataset.djenId;
+    const checkbox = card.querySelector('[data-djen-row]');
+    const prazoInput = card.querySelector('[data-djen-prazo]');
+    const createProcCheckbox = card.querySelector('[data-djen-create-process]');
+    rowSettings[hash] = {
+      selected: checkbox?.checked,
+      prazo: parseInt(prazoInput?.value || '15'),
+      createProcess: createProcCheckbox?.checked ?? false
+    };
+  });
+
+  for (const pub of allPubs) {
+    const cfg = rowSettings[pub.hash];
+    if (!cfg || !cfg.selected) continue;
+
+    let processId = pub._proc?.id;
+
+    // If unmatched and user wants to create the process
+    if (!processId && cfg.createProcess) {
+      const newProc = djenInferProcessFromPublication(pub);
+      await DB.saveProcess(newProc);
+      processId = newProc.id;
+      processosCriados++;
+    }
+
+    // Save publication record (always, for dedup)
+    const dataDispo = pub.data_disponibilizacao || pub.data_publicacao;
+    await DB.saveDjenPublication({
+      hash: pub.hash,
+      cnj: pub._cnjNormalized,
+      processId: processId || null,
+      tribunal: pub.siglaTribunal || pub.tribunal || '',
+      orgao: pub.nomeOrgao || pub.orgao || '',
+      tipo: pub.tipoComunicacao || 'Intimação',
+      dataDisponibilizacao: dataDispo,
+      texto: pub.texto || '',
+      link: pub.link || '',
+      oab: pub._oab,
+      raw: pub,
+      status: processId ? 'imported' : 'orphan',
+      importedAt: Date.now()
+    });
+    imported++;
+
+    // Create deadline if linked to process
+    if (processId && dataDispo) {
+      const calc = calcDjenDeadline(dataDispo, cfg.prazo);
+      const deadline = {
+        id: uid(),
+        processId,
+        description: `[DJEN] ${pub.tipoComunicacao || 'Intimação'} · ${pub.nomeOrgao || pub.orgao || ''}`.slice(0, 200),
+        type: 'djen',
+        intimationDate: calc.publication.toISOString(),
+        daysAllowed: cfg.prazo,
+        deadlineDate: calc.deadline.toISOString(),
+        status: 'pending',
+        djenHash: pub.hash,
+        createdAt: Date.now()
+      };
+      await DB.saveDeadline(deadline);
+      prazosCriados++;
+
+      // Also create event in process timeline
+      const event = {
+        id: uid(),
+        processId,
+        eventNumber: 'DJEN-' + dataDispo,
+        type: pub.tipoComunicacao || 'Intimação DJEN',
+        date: formatDate(calc.publication),
+        startPage: 0, endPage: 0, pageCount: 0,
+        sourceFile: 'DJEN',
+        djenHash: pub.hash,
+        addedAt: Date.now()
+      };
+      await DB.saveEvent(event);
+    }
+  }
+
+  modal.remove();
+  await DB.setSetting('djenLastFetch', Date.now());
+  toast('DJEN importado',
+    `${imported} publicações · ${processosCriados} processos novos · ${prazosCriados} prazos criados`,
+    'success');
+  // Reload current view
+  if (state.currentRoute === 'dashboard') renderDashboard();
+  else if (state.currentRoute === 'deadlines') renderDeadlines();
+  else if (state.currentRoute === 'processes') renderProcessList();
+}
+
+// Try to extract a meaningful name and metadata from a DJEN publication
+function djenInferProcessFromPublication(pub) {
+  const cnj = pub._cnjFormatted || pub.numero_processo;
+  const tribunal = pub.siglaTribunal || pub.tribunal || '';
+  const orgao = pub.nomeOrgao || pub.orgao || '';
+  // Extract polo ativo from text if possible
+  let cliente = '';
+  const m = (pub.texto || '').match(/POLO\s+ATIVO\s*:?\s*([^\n]+?)(?:\s+REPRESENTANTES|\s+POLO\s+PASSIVO|$)/i);
+  if (m) cliente = m[1].trim().replace(/\s{2,}/g, ' ').slice(0, 80);
+  // Try to detect area from tribunal
+  let area = 'Outros';
+  if (/TRF|JF/i.test(tribunal)) area = 'Tributário';
+  else if (/TJ/i.test(tribunal) && /fazenda|fiscal/i.test(orgao)) area = 'Execução Fiscal';
+  else if (/TJ/i.test(tribunal)) area = 'Cível';
+  return {
+    id: uid(),
+    name: `${cliente || 'Processo'} · ${cnj}`.slice(0, 100),
+    cnj,
+    client: cliente || null,
+    court: `${tribunal}${orgao ? ' · ' + orgao : ''}`.trim(),
+    area,
+    type: pub.tipoComunicacao || 'A definir',
+    polo: 'A definir',
+    status: 'active',
+    eventCount: 0,
+    noteCount: 0,
+    source: 'djen-auto'
+  };
+}
+
+// === MAIN ENTRY POINT: triggered from Dashboard button ===
+async function djenRunSearch() {
+  // Load config
+  const allOabs = await DB.getSetting('djenOabs', DJEN_DEFAULT_OABS);
+  if (!allOabs || allOabs.length === 0) {
+    toast('Cadastre OABs primeiro', 'Vá em Configurações → DJEN', 'error');
+    state._settingsTab = 'djen';
+    navigate('settings');
+    return;
+  }
+  // Filter only enabled OABs (default true if field absent)
+  const oabs = allOabs.filter(o => o.enabled !== false);
+  if (oabs.length === 0) {
+    toast('Nenhuma OAB selecionada',
+      `Você tem ${allOabs.length} OAB(s) cadastrada(s) mas todas estão desmarcadas. Vá em Configurações → DJEN para marcar pelo menos uma.`,
+      'error');
+    state._settingsTab = 'djen';
+    navigate('settings');
+    return;
+  }
+  const lookbackDays = await DB.getSetting('djenLookbackDays', 7);
+
+  // Date range — last N days, ending yesterday (DJEN doesn't return today's data reliably)
+  const today = new Date();
+  const fim = new Date(today); fim.setDate(today.getDate() - 1);
+  const inicio = new Date(today); inicio.setDate(today.getDate() - lookbackDays);
+  const fmtDate = d => d.toISOString().slice(0, 10);
+
+  // Show progress modal
+  const modal = document.createElement('div');
+  modal.className = 'modal-backdrop';
+  modal.innerHTML = `
+    <div class="modal" style="max-width: 480px;">
+      <h3 class="modal-title">Consultando DJEN…</h3>
+      <div class="flex items-center gap-3" style="margin-bottom: 12px;">
+        <div class="spinner"></div>
+        <div>
+          <div id="djenProgressMsg" style="font-weight: 600;">Iniciando…</div>
+          <div class="help-text">Período: ${formatDate(inicio)} a ${formatDate(fim)} · ${lookbackDays} dia(s)</div>
+        </div>
+      </div>
+      <div class="progress-wrap">
+        <div class="progress-bar-bg"><div class="progress-bar-fg" id="djenProgressBar"></div></div>
+      </div>
+      <p class="help-text" style="margin-top:12px;">
+        Consultando ${oabs.length} de ${allOabs.length} OAB(s):<br>
+        ${oabs.map(o => `<span class="badge badge-gold">${escapeHtml(o.numero)}/${escapeHtml(o.uf)}</span>`).join(' ')}
+      </p>
+    </div>`;
+  $('modalContainer').appendChild(modal);
+  const progressCb = (msg, pct) => {
+    const m = document.getElementById('djenProgressMsg');
+    const b = document.getElementById('djenProgressBar');
+    if (m) m.textContent = msg;
+    if (b) b.style.width = (pct * 100) + '%';
+  };
+
+  try {
+    const pubs = await djenFetchAll(oabs, fmtDate(inicio), fmtDate(fim), progressCb);
+    const classified = await djenClassify(pubs);
+    modal.remove();
+    await djenShowResultsModal(classified, oabs, fmtDate(inicio), fmtDate(fim));
+  } catch(err) {
+    modal.remove();
+    djenShowError(err);
+  }
+}
+
+function djenShowError(err) {
+  const isCors = /CORS|Failed to fetch|NetworkError|access-control/i.test(err.message);
+  const modal = document.createElement('div');
+  modal.className = 'modal-backdrop';
+  modal.innerHTML = `
+    <div class="modal" style="max-width: 600px;">
+      <h3 class="modal-title" style="color: var(--uc-red);">⚠ Erro na consulta DJEN</h3>
+      <pre style="background: var(--uc-cream); padding: 10px; border-radius: 4px; font-size: 12px; white-space: pre-wrap; margin-bottom: 12px;">${escapeHtml(err.message)}</pre>
+      ${isCors ? `
+        <div class="callout warn" style="background: var(--uc-amber-soft); border: 1px solid var(--uc-amber); border-left: 4px solid var(--uc-amber); padding: 12px; border-radius: 4px; margin: 12px 0;">
+          <strong>Diagnóstico:</strong> a API do CNJ provavelmente bloqueou a chamada direta do navegador (CORS).
+          <br><br>
+          <strong>Solução em 5 min:</strong> publicar uma <em>Cloudflare Worker</em> (gratuita) que repassa as chamadas. Veja instruções em Configurações → DJEN.
+        </div>
+        <button class="btn btn-primary" id="_djenGoSettings" style="width:100%; margin-bottom:8px;">Ir para Configurações → DJEN</button>
+      ` : ''}
+      <button class="btn btn-outline" id="_djenErrClose" style="width:100%;">Fechar</button>
+    </div>`;
+  $('modalContainer').appendChild(modal);
+  document.getElementById('_djenErrClose').onclick = () => modal.remove();
+  const goBtn = document.getElementById('_djenGoSettings');
+  if (goBtn) goBtn.onclick = () => {
+    modal.remove();
+    state._settingsTab = 'djen';
+    navigate('settings');
+  };
+}
+
+// ====================================================================
+// === APP INITIALIZATION =============================================
+// ====================================================================
+
+async function bootApp() {
+  try {
+    await openDB();
+  } catch(err) {
+    document.body.innerHTML = `<div style="padding: 40px; text-align: center;"><h1>Erro ao abrir banco de dados</h1><p>${escapeHtml(err.message)}</p></div>`;
+    return;
+  }
+
+  // Load settings
+  state.settings.theme = await DB.getSetting('theme', 'light');
+  state.settings.backupReminder = await DB.getSetting('backupReminder', true);
+  state.settings.lastBackupAt = await DB.getSetting('lastBackupAt', null);
+  applyTheme(state.settings.theme);
+
+  // Seed default prompt if none exists
+  const prompts = (await DB.getAllPrompts()) || [];
+  if (prompts.length === 0) {
+    const id = uid();
+    await DB.savePrompt({ id, name: 'Análise sênior (padrão do escritório)', content: DEFAULT_PROMPT_TEMPLATE, createdAt: Date.now() });
+    await DB.setSetting('defaultPromptId', id);
+  }
+
+  // Seed default DJEN OABs on first run
+  const existingOabs = await DB.getSetting('djenOabs', null);
+  if (!existingOabs) {
+    await DB.setSetting('djenOabs', DJEN_DEFAULT_OABS);
+  }
+
+  // Setup nav clicks
+  document.querySelectorAll('[data-route]').forEach(el => {
+    el.addEventListener('click', (e) => {
+      e.preventDefault();
+      navigate(el.dataset.route);
+    });
+  });
+
+  // Initial route
+  const { route, ...params } = parseHash();
+  Object.assign(state, params);
+  navigate(route, params);
+
+  // Service worker
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('service-worker.js').catch(() => {});
+  }
+
+  // PWA install prompt
+  window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault();
+    state.installPrompt = e;
+  });
+}
+
+// Start
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', bootApp);
+} else {
+  bootApp();
+}
+
+</script>
+</body></html>

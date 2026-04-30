@@ -1,0 +1,25 @@
+{
+  "name": "UC Jurídico · Urany de Castro Advocacia",
+  "short_name": "UC Jurídico",
+  "description": "Urany de Castro Advocacia · Suite jurídica completa: gestão de processos, prazos, jurisprudência, análise de autos, ferramentas PDF. 100% local.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#fafaf7",
+  "theme_color": "#0a0a0a",
+  "lang": "pt-BR",
+  "dir": "ltr",
+  "categories": ["productivity", "utilities", "business"],
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Início", "short_name": "Início", "url": "./#dashboard" },
+    { "name": "Prazos", "short_name": "Prazos", "url": "./#deadlines" },
+    { "name": "Diligência rápida", "short_name": "Rápido", "url": "./#diligence" },
+    { "name": "Ferramentas PDF", "short_name": "PDF", "url": "./#tools" }
+  ]
+}
