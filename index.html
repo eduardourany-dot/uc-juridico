@@ -2854,39 +2854,28 @@ function renderSettingsTab(tab, prompts, defaultPromptId) {
       </div>
 
       <div class="card mb-3">
-        <h4 class="font-serif font-semibold smallcaps mb-2" style="color: var(--uc-black);">Endpoint da API</h4>
+        <h4 class="font-serif font-semibold smallcaps mb-2" style="color: var(--uc-black);">Endpoint DJEN (Diário Eletrônico)</h4>
         <p class="help-text" style="margin-bottom: 8px;">
-          Por padrão, o app chama a API do CNJ diretamente. Se aparecer erro de CORS, configure aqui a URL de uma <strong>Cloudflare Worker</strong> (ou outro proxy) que repassa as chamadas.
+          URL da Cloudflare Worker que repassa as chamadas para a API do DJEN do CNJ. Deixe vazio para tentar chamar a API direto (provavelmente vai dar CORS).
         </p>
-        <input type="url" id="djenWorkerInput" class="input" value="${escapeHtml(workerUrl)}" placeholder="(vazio = usar API do CNJ direto)" style="margin-bottom: 8px;">
+        <input type="url" id="djenWorkerInput" class="input" value="${escapeHtml(workerUrl)}" placeholder="https://uc-djen.SEU-USUARIO.workers.dev" style="margin-bottom: 8px;">
+      </div>
+
+      <div class="card mb-3">
+        <h4 class="font-serif font-semibold smallcaps mb-2" style="color: var(--uc-black);">Endpoint DataJud (Base Nacional CNJ)</h4>
+        <p class="help-text" style="margin-bottom: 8px;">
+          URL da Cloudflare Worker que repassa as chamadas para a API DataJud do CNJ (consulta de processos por CNJ). Pode ser a mesma do DJEN se a Worker for unificada, ou separada.
+        </p>
+        <input type="url" id="datajudWorkerInput" class="input" value="${escapeHtml(state._djenCache?.datajudWorkerUrl || '')}" placeholder="https://uc-datajud.SEU-USUARIO.workers.dev" style="margin-bottom: 8px;">
         <details>
-          <summary style="cursor: pointer; color: var(--uc-gold); font-weight: 500;">Como criar a Cloudflare Worker em 5 minutos</summary>
+          <summary style="cursor: pointer; color: var(--uc-gold); font-weight: 500; font-size: 13px;">Como criar Worker separada para DataJud</summary>
           <div style="margin-top: 8px; font-size: 13px; line-height: 1.6;">
             <ol style="padding-left: 20px;">
-              <li>Acesse <a href="https://dash.cloudflare.com/sign-up" target="_blank" style="color: var(--uc-gold);">cloudflare.com</a> e crie conta gratuita.</li>
-              <li>No menu lateral: <strong>Workers &amp; Pages → Create → Hello World worker</strong>.</li>
-              <li>Apague o código de exemplo e cole o seguinte:</li>
+              <li>Em <a href="https://dash.cloudflare.com" target="_blank" style="color: var(--uc-gold);">dash.cloudflare.com</a>: <strong>Workers &amp; Pages → Create → Create Worker</strong></li>
+              <li>Nome: <code>uc-datajud</code> → Deploy → Edit code</li>
+              <li>Apague o código exemplo e cole o código fornecido pelo Claude (versão DataJud-only)</li>
+              <li>Deploy → copie a URL gerada → cole no campo acima</li>
             </ol>
-            <pre style="background: var(--uc-cream); padding: 10px; border-radius: 4px; font-size: 11px; overflow-x: auto; margin: 8px 0;">export default {
-  async fetch(req) {
-    const url = new URL(req.url);
-    const target = 'https://comunicaapi.pje.jus.br/api/v1/comunicacao' + url.search;
-    const r = await fetch(target);
-    const body = await r.text();
-    return new Response(body, {
-      status: r.status,
-      headers: {
-        'content-type': 'application/json',
-        'access-control-allow-origin': '*',
-        'cache-control': 'no-cache'
-      }
-    });
-  }
-}</pre>
-            <ol start="4" style="padding-left: 20px;">
-              <li><strong>Save and Deploy</strong>. Copie a URL gerada (ex: <code>https://uc-djen.SEU-USUARIO.workers.dev</code>) e cole no campo acima.</li>
-            </ol>
-            <p class="help-text" style="margin-top:6px;">⚠ A Cloudflare nunca vê o conteúdo das publicações — apenas que houve uma chamada. Os dados ficam só no seu dispositivo.</p>
           </div>
         </details>
         <button class="btn btn-outline btn-sm" id="djenSaveSettings" style="margin-top: 10px;">Salvar configurações</button>
@@ -3063,9 +3052,12 @@ function setupSettingsHandlers(tab) {
     if (saveBtn) saveBtn.onclick = async () => {
       const lookback = parseInt($('djenLookbackInput').value) || 7;
       const workerUrl = $('djenWorkerInput').value.trim();
+      const datajudWorkerInput = $('datajudWorkerInput');
+      const datajudWorkerUrl = datajudWorkerInput ? datajudWorkerInput.value.trim() : '';
       await DB.setSetting('djenLookbackDays', lookback);
       await DB.setSetting('djenWorkerUrl', workerUrl || null);
-      state._djenCache = { ...state._djenCache, lookback, workerUrl };
+      await DB.setSetting('datajudWorkerUrl', datajudWorkerUrl || null);
+      state._djenCache = { ...state._djenCache, lookback, workerUrl, datajudWorkerUrl };
       toast('Configurações salvas', '', 'success');
     };
   }
@@ -3087,8 +3079,9 @@ async function djenLoadSettingsCache() {
   const oabs = await DB.getSetting('djenOabs', DJEN_DEFAULT_OABS);
   const lookback = await DB.getSetting('djenLookbackDays', 7);
   const workerUrl = await DB.getSetting('djenWorkerUrl', '') || '';
+  const datajudWorkerUrl = await DB.getSetting('datajudWorkerUrl', '') || '';
   const lastFetch = await DB.getSetting('djenLastFetch', null);
-  state._djenCache = { oabs, lookback, workerUrl, lastFetch };
+  state._djenCache = { oabs, lookback, workerUrl, datajudWorkerUrl, lastFetch };
 }
 
 async function djenAddOabFlow() {
@@ -3249,6 +3242,7 @@ async function exportBackup() {
       djenOabs: await DB.getSetting('djenOabs', DJEN_DEFAULT_OABS),
       djenLookbackDays: await DB.getSetting('djenLookbackDays', 7),
       djenWorkerUrl: await DB.getSetting('djenWorkerUrl', null),
+      datajudWorkerUrl: await DB.getSetting('datajudWorkerUrl', null),
       djenLastFetch: await DB.getSetting('djenLastFetch', null)
     }
   };
@@ -3307,6 +3301,7 @@ async function importBackupFlow() {
         if (data.settings.djenOabs) await DB.setSetting('djenOabs', data.settings.djenOabs);
         if (data.settings.djenLookbackDays) await DB.setSetting('djenLookbackDays', data.settings.djenLookbackDays);
         if (data.settings.djenWorkerUrl) await DB.setSetting('djenWorkerUrl', data.settings.djenWorkerUrl);
+        if (data.settings.datajudWorkerUrl) await DB.setSetting('datajudWorkerUrl', data.settings.datajudWorkerUrl);
       }
       toast('Backup importado', `${data.processes.length} processos restaurados`, 'success');
       navigate('dashboard');
@@ -3683,16 +3678,22 @@ async function datajudFetch(cnj) {
     throw new Error(resolved.error);
   }
 
-  // Obter URL da Worker (mesma do DJEN, com path diferente)
-  const workerUrl = await DB.getSetting('djenWorkerUrl', null);
+  // Obter URL da Worker — preferir datajudWorkerUrl (separada), fallback para djenWorkerUrl (unificada)
+  const datajudUrl = await DB.getSetting('datajudWorkerUrl', null);
+  const djenUrl = await DB.getSetting('djenWorkerUrl', null);
+  const workerUrl = datajudUrl || djenUrl;
   if (!workerUrl) {
-    throw new Error('Configure a Cloudflare Worker em Configurações → DJEN antes de usar DataJud.');
+    throw new Error('Configure a Cloudflare Worker em Configurações → DJEN (campo "Endpoint DataJud") antes de usar a integração DataJud.');
   }
 
-  // Construir URL da Worker para DataJud
-  // Worker espera: /datajud/api_publica_TRIBUNAL/_search
+  // Construir URL da Worker para DataJud.
+  // Se a Worker for a DataJud-only (URL própria), o path é /api_publica_TRIBUNAL/_search
+  // Se for a Worker unificada do DJEN (mesma URL), o path é /datajud/api_publica_TRIBUNAL/_search
   const baseUrl = workerUrl.replace(/\/$/, ''); // remove trailing slash
-  const url = `${baseUrl}/datajud/api_publica_${resolved.tribunal}/_search`;
+  const useUnifiedPath = !datajudUrl && djenUrl; // fallback para Worker unificada
+  const url = useUnifiedPath
+    ? `${baseUrl}/datajud/api_publica_${resolved.tribunal}/_search`
+    : `${baseUrl}/api_publica_${resolved.tribunal}/_search`;
 
   // Body Elasticsearch — busca pelo número do processo
   const body = {

@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v4.2.0 (Integração DataJud do CNJ)
-const CACHE_NAME = 'uc-juridico-v4-2-0';
+// Service Worker — UC Jurídico v4.2.1 (DataJud com Worker separada opcional)
+const CACHE_NAME = 'uc-juridico-v4-2-1';
 const APP_SHELL = [
   './',
   './index.html',
