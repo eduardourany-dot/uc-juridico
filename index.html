@@ -1132,15 +1132,69 @@ function renderProcessOverview(p, events, deadlines, notes, jurisprudence) {
 
     <div class="card mb-4">
       <h3 class="font-serif text-lg font-semibold smallcaps mb-3" style="color: var(--uc-black);">Identificação</h3>
-      <div class="grid gap-2" style="grid-template-columns: 120px 1fr; font-size: 13px;">
+      <div class="grid gap-2" style="grid-template-columns: 140px 1fr; font-size: 13px;">
         ${p.cnj ? `<div style="color: var(--uc-warm-gray);">CNJ:</div><div class="process-cnj">${escapeHtml(p.cnj)}</div>` : ''}
         ${p.client ? `<div style="color: var(--uc-warm-gray);">Cliente:</div><div>${escapeHtml(p.client)}</div>` : ''}
-        ${p.court ? `<div style="color: var(--uc-warm-gray);">Tribunal:</div><div>${escapeHtml(p.court)}</div>` : ''}
+        ${p.court ? `<div style="color: var(--uc-warm-gray);">Tribunal/Vara:</div><div>${escapeHtml(p.court)}</div>` : ''}
         ${p.type ? `<div style="color: var(--uc-warm-gray);">Tipo:</div><div>${escapeHtml(p.type)}</div>` : ''}
         ${p.polo ? `<div style="color: var(--uc-warm-gray);">Polo:</div><div>${escapeHtml(p.polo)}</div>` : ''}
         ${p.area ? `<div style="color: var(--uc-warm-gray);">Área:</div><div>${escapeHtml(p.area)}</div>` : ''}
+        ${p.datajudData?.dataAjuizamento ? `<div style="color: var(--uc-warm-gray);">Distribuição:</div><div>${formatDate(p.datajudData.dataAjuizamento)}</div>` : ''}
+        ${p.datajudData?.valorCausa ? `<div style="color: var(--uc-warm-gray);">Valor da causa:</div><div><strong>R$ ${Number(p.datajudData.valorCausa).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</strong></div>` : ''}
+        ${p.datajudData?.classe ? `<div style="color: var(--uc-warm-gray);">Classe processual:</div><div>${escapeHtml(p.datajudData.classe)}</div>` : ''}
+        ${p.datajudData?.assuntos?.length ? `<div style="color: var(--uc-warm-gray);">Assuntos:</div><div>${p.datajudData.assuntos.slice(0, 5).map(a => escapeHtml(a)).join(' · ')}</div>` : ''}
+        ${p.datajudData?.sistema ? `<div style="color: var(--uc-warm-gray);">Sistema:</div><div>${escapeHtml(p.datajudData.sistema)}${p.datajudData.formato ? ' · ' + escapeHtml(p.datajudData.formato) : ''}</div>` : ''}
+        ${p.datajudData?.grau ? `<div style="color: var(--uc-warm-gray);">Grau:</div><div>${escapeHtml(p.datajudData.grau)}</div>` : ''}
+        ${p.datajudLastSync ? `<div style="color: var(--uc-warm-gray);">Última atualização DataJud:</div><div style="color: var(--uc-warm-gray); font-size: 12px;">${formatDate(p.datajudLastSync, { relative: true })}</div>` : ''}
       </div>
     </div>
+
+    ${p.partes?.ativo?.length || p.partes?.passivo?.length || p.advogados?.ativo?.length || p.advogados?.passivo?.length ? `
+    <div class="card mb-4">
+      <div class="flex justify-between items-center mb-3">
+        <h3 class="font-serif text-lg font-semibold smallcaps" style="color: var(--uc-black);">Partes e advogados</h3>
+        <button class="btn btn-ghost btn-sm" onclick="djenReExtractParties('${p.id}')" title="Re-extrair partes e advogados de todas as publicações DJEN já importadas para este processo">🔄 Re-extrair</button>
+      </div>
+      <p class="help-text" style="margin-bottom: 10px;">Extraído automaticamente do texto das publicações DJEN. Pode estar incompleto se nenhuma publicação relevante foi importada ainda.</p>
+      ${p.partes?.ativo?.length ? `
+        <div style="margin-bottom: 10px;">
+          <div style="color: var(--uc-warm-gray); font-size: 11px; font-variant: small-caps; letter-spacing: 0.06em; margin-bottom: 4px;">Polo Ativo</div>
+          <ul style="margin: 0; padding-left: 18px; font-size: 13px;">
+            ${p.partes.ativo.map(parte => `<li>${escapeHtml(parte)}</li>`).join('')}
+          </ul>
+          ${p.advogados?.ativo?.length ? `
+            <div style="margin-top: 4px; font-size: 12px; color: var(--uc-graphite); padding-left: 18px;">
+              <em>Advogados:</em> ${p.advogados.ativo.map(a => `${escapeHtml(a.nome)} (${escapeHtml(a.oab)})`).join(' · ')}
+            </div>
+          ` : ''}
+        </div>
+      ` : ''}
+      ${p.partes?.passivo?.length ? `
+        <div style="margin-bottom: 6px;">
+          <div style="color: var(--uc-warm-gray); font-size: 11px; font-variant: small-caps; letter-spacing: 0.06em; margin-bottom: 4px;">Polo Passivo</div>
+          <ul style="margin: 0; padding-left: 18px; font-size: 13px;">
+            ${p.partes.passivo.map(parte => `<li>${escapeHtml(parte)}</li>`).join('')}
+          </ul>
+          ${p.advogados?.passivo?.length ? `
+            <div style="margin-top: 4px; font-size: 12px; color: var(--uc-graphite); padding-left: 18px;">
+              <em>Advogados:</em> ${p.advogados.passivo.map(a => `${escapeHtml(a.nome)} (${escapeHtml(a.oab)})`).join(' · ')}
+            </div>
+          ` : ''}
+        </div>
+      ` : ''}
+    </div>
+    ` : `
+    ${p.cnj ? `
+    <div class="card mb-4" style="background: var(--uc-cream); border: 1px dashed var(--uc-line);">
+      <div style="display: flex; align-items: center; justify-content: space-between; gap: 10px;">
+        <div style="font-size: 13px; color: var(--uc-graphite);">
+          <strong>Partes e advogados ainda não extraídos.</strong> Quando uma publicação DJEN deste processo for importada, partes (POLO ATIVO/PASSIVO) e advogados (com OAB) serão extraídos automaticamente do texto.
+        </div>
+        <button class="btn btn-outline btn-sm" onclick="djenReExtractParties('${p.id}')" style="white-space: nowrap;">🔄 Tentar extrair agora</button>
+      </div>
+    </div>
+    ` : ''}
+    `}
 
     <div class="card">
       <div class="flex justify-between items-center mb-3">
@@ -4347,6 +4401,201 @@ function djenRenderPubRow(pub, kind, idx) {
   `;
 }
 
+// Extrai partes (polo ativo/passivo) e advogados/OABs do texto da publicação DJEN
+// O texto típico tem formato:
+//   POLO ATIVO: NOME DA PARTE
+//   REPRESENTANTES POLO ATIVO: ADVOGADO X - OAB/UF NUMERO, ADVOGADO Y - OAB/UF NUMERO
+//   POLO PASSIVO: NOME DA PARTE
+//   REPRESENTANTES POLO PASSIVO: ADVOGADO Z - OAB/UF NUMERO
+function djenParsePartes(texto) {
+  if (!texto) return null;
+  const result = {
+    poloAtivo: [],
+    poloPassivo: [],
+    advogadosAtivo: [],
+    advogadosPassivo: []
+  };
+
+  // Captura POLO ATIVO até REPRESENTANTES, POLO PASSIVO ou final do texto
+  const reAtivo = /POLO\s+ATIVO\s*:?\s*([\s\S]+?)(?=\s+REPRESENTANTES\s+POLO|\s+POLO\s+PASSIVO|\s+ADVOGADO|$)/i;
+  const mAtivo = texto.match(reAtivo);
+  if (mAtivo) {
+    result.poloAtivo = mAtivo[1].split(/\s*[;,]\s*|\s+e\s+(?=[A-ZÁÉÍÓÚÂÊÔÃÕÇ])/)
+      .map(s => s.trim().replace(/\s{2,}/g, ' '))
+      .filter(s => s.length > 2 && s.length < 200);
+  }
+
+  const rePassivo = /POLO\s+PASSIVO\s*:?\s*([\s\S]+?)(?=\s+REPRESENTANTES\s+POLO|\s+POLO\s+ATIVO|\s+ADVOGADO|$)/i;
+  const mPassivo = texto.match(rePassivo);
+  if (mPassivo) {
+    result.poloPassivo = mPassivo[1].split(/\s*[;,]\s*|\s+e\s+(?=[A-ZÁÉÍÓÚÂÊÔÃÕÇ])/)
+      .map(s => s.trim().replace(/\s{2,}/g, ' '))
+      .filter(s => s.length > 2 && s.length < 200);
+  }
+
+  // Advogados POLO ATIVO
+  const reAdvAtivo = /REPRESENTANTES?\s+POLO\s+ATIVO\s*:?\s*([\s\S]+?)(?=\s+POLO\s+PASSIVO|\s+REPRESENTANTES?\s+POLO|$)/i;
+  const mAdvAtivo = texto.match(reAdvAtivo);
+  if (mAdvAtivo) {
+    result.advogadosAtivo = djenParseAdvogados(mAdvAtivo[1]);
+  }
+
+  // Advogados POLO PASSIVO
+  const reAdvPassivo = /REPRESENTANTES?\s+POLO\s+PASSIVO\s*:?\s*([\s\S]+?)(?=\s+POLO\s+ATIVO|\s+REPRESENTANTES?\s+POLO|$)/i;
+  const mAdvPassivo = texto.match(reAdvPassivo);
+  if (mAdvPassivo) {
+    result.advogadosPassivo = djenParseAdvogados(mAdvPassivo[1]);
+  }
+
+  return result;
+}
+
+function djenParseAdvogados(trecho) {
+  if (!trecho) return [];
+  const advs = [];
+  // Padrão: NOME ADVOGADO - OAB/UF 12345 ou NOME - OAB UF 12345
+  const re = /([A-ZÁÉÍÓÚÂÊÔÃÕÇ][A-ZÁÉÍÓÚÂÊÔÃÕÇ\s\.]{4,80}?)\s*[\-—–]\s*(?:OAB[\s/\.\-]*|N[ºo°]\s*)?([A-Z]{2})\s*[\.\-/]?\s*(\d{2,7})/gi;
+  let m;
+  while ((m = re.exec(trecho)) !== null) {
+    const nome = m[1].trim().replace(/\s{2,}/g, ' ');
+    const uf = m[2].toUpperCase();
+    const numero = m[3];
+    if (nome.length > 5 && nome.length < 80 && /^[A-ZÁÉÍÓÚÂÊÔÃÕÇ]/.test(nome)) {
+      advs.push({ nome, oab: `OAB/${uf} ${numero}`, uf, numero });
+    }
+  }
+  return advs;
+}
+
+// Aplica os dados extraídos da publicação no processo associado, sem sobrescrever
+// dados já preenchidos manualmente
+async function djenEnrichProcessFromPublication(processId, pub) {
+  if (!processId || !pub.texto) return;
+  const proc = await DB.getProcess(processId);
+  if (!proc) return;
+
+  const partes = djenParsePartes(pub.texto);
+  if (!partes) return;
+
+  let changed = false;
+
+  // Atribui partes apenas se não houver
+  if (!proc.partes) {
+    proc.partes = {};
+  }
+  if (!proc.partes.ativo && partes.poloAtivo.length) {
+    proc.partes.ativo = partes.poloAtivo;
+    changed = true;
+  }
+  if (!proc.partes.passivo && partes.poloPassivo.length) {
+    proc.partes.passivo = partes.poloPassivo;
+    changed = true;
+  }
+
+  // Advogados — sempre acumula (set para evitar duplicatas)
+  if (!proc.advogados) {
+    proc.advogados = { ativo: [], passivo: [] };
+  }
+  const seenAtivo = new Set((proc.advogados.ativo || []).map(a => a.oab));
+  for (const adv of partes.advogadosAtivo) {
+    if (!seenAtivo.has(adv.oab)) {
+      proc.advogados.ativo.push(adv);
+      seenAtivo.add(adv.oab);
+      changed = true;
+    }
+  }
+  const seenPassivo = new Set((proc.advogados.passivo || []).map(a => a.oab));
+  for (const adv of partes.advogadosPassivo) {
+    if (!seenPassivo.has(adv.oab)) {
+      proc.advogados.passivo.push(adv);
+      seenPassivo.add(adv.oab);
+      changed = true;
+    }
+  }
+
+  // Se cliente ainda não foi preenchido, sugere a partir do polo correto
+  // (assumindo que o cliente é do polo da defesa ou ataque conforme cadastrado)
+  if (!proc.client && proc.polo) {
+    const meuPolo = proc.polo === 'Ataque' ? partes.poloAtivo : partes.poloPassivo;
+    if (meuPolo && meuPolo.length) {
+      proc.client = meuPolo[0]; // primeira parte do nosso polo
+      changed = true;
+    }
+  }
+
+  if (changed) {
+    proc.updatedAt = Date.now();
+    await DB.saveProcess(proc);
+  }
+}
+
+// Re-extrai partes/advogados de TODAS as publicações DJEN já importadas para o processo
+// Útil quando o processo foi cadastrado antes desta funcionalidade existir
+async function djenReExtractParties(processId) {
+  const proc = await DB.getProcess(processId);
+  if (!proc) return;
+
+  // Buscar todas as publicações DJEN deste processo
+  const pubs = await DB.getDjenPublicationsByProcess(processId);
+  if (!pubs || pubs.length === 0) {
+    toast('Nenhuma publicação DJEN', 'Este processo não tem publicações DJEN importadas. Importe via "Buscar DJEN" no dashboard.', 'error');
+    return;
+  }
+
+  // Limpa partes/advogados anteriores para re-extrair limpo
+  proc.partes = { ativo: [], passivo: [] };
+  proc.advogados = { ativo: [], passivo: [] };
+
+  let extraidasDe = 0;
+  for (const pub of pubs) {
+    if (pub.texto) {
+      const partes = djenParsePartes(pub.texto);
+      if (partes) {
+        // Adiciona partes (sem duplicar)
+        for (const p of partes.poloAtivo) {
+          if (!proc.partes.ativo.includes(p)) proc.partes.ativo.push(p);
+        }
+        for (const p of partes.poloPassivo) {
+          if (!proc.partes.passivo.includes(p)) proc.partes.passivo.push(p);
+        }
+        const seenA = new Set(proc.advogados.ativo.map(a => a.oab));
+        for (const adv of partes.advogadosAtivo) {
+          if (!seenA.has(adv.oab)) { proc.advogados.ativo.push(adv); seenA.add(adv.oab); }
+        }
+        const seenP = new Set(proc.advogados.passivo.map(a => a.oab));
+        for (const adv of partes.advogadosPassivo) {
+          if (!seenP.has(adv.oab)) { proc.advogados.passivo.push(adv); seenP.add(adv.oab); }
+        }
+        extraidasDe++;
+      }
+    }
+  }
+
+  // Se cliente vazio e temos polo, tenta inferir
+  if (!proc.client && proc.polo) {
+    const meuPolo = proc.polo === 'Ataque' ? proc.partes.ativo : proc.partes.passivo;
+    if (meuPolo && meuPolo.length) {
+      proc.client = meuPolo[0];
+    }
+  }
+
+  proc.updatedAt = Date.now();
+  await DB.saveProcess(proc);
+
+  const totalPartes = proc.partes.ativo.length + proc.partes.passivo.length;
+  const totalAdvs = proc.advogados.ativo.length + proc.advogados.passivo.length;
+  if (totalPartes === 0 && totalAdvs === 0) {
+    toast('Nada a extrair',
+      `Vasculhei ${pubs.length} publicação(ões) mas não encontrei "POLO ATIVO/PASSIVO" no texto delas.`,
+      'error');
+  } else {
+    toast('Partes extraídas',
+      `${totalPartes} parte(s), ${totalAdvs} advogado(s) — de ${extraidasDe} publicação(ões)`,
+      'success');
+  }
+  renderProcessDetail();
+}
+
 async function djenImportSelected(modal) {
   const classified = window._djenClassifiedCache || { matched: [], unmatched: [] };
   const allPubs = [...classified.matched, ...classified.unmatched];
@@ -4398,6 +4647,11 @@ async function djenImportSelected(modal) {
       importedAt: Date.now()
     });
     imported++;
+
+    // Enriquecer processo com partes/advogados extraídos do texto da publicação
+    if (processId && pub.texto) {
+      await djenEnrichProcessFromPublication(processId, pub);
+    }
 
     // Create deadline if linked to process
     if (processId && dataDispo) {
