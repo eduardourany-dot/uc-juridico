@@ -22,6 +22,9 @@
 <script src="https://cdn.jsdelivr.net/npm/diff@5.2.0/dist/diff.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
 <script src="https://cdn.tailwindcss.com"></script>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<script src="config.js"></script>
+<script src="api.js"></script>
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -4829,12 +4832,25 @@ function djenShowError(err) {
 // ====================================================================
 
 async function bootApp() {
+  // Auth gate: bloqueia o app até o usuário entrar com Google e estar na allowlist.
+  try {
+    await UC_Auth.requireSignIn();
+  } catch (err) {
+    document.body.innerHTML = `<div style="padding: 40px; text-align: center;"><h1>Falha de login</h1><p>${escapeHtml(err.message)}</p></div>`;
+    return;
+  }
+
+  // openDB() ainda roda — usado pelos prompts (templates de IA, kept local).
   try {
     await openDB();
   } catch(err) {
-    document.body.innerHTML = `<div style="padding: 40px; text-align: center;"><h1>Erro ao abrir banco de dados</h1><p>${escapeHtml(err.message)}</p></div>`;
+    document.body.innerHTML = `<div style="padding: 40px; text-align: center;"><h1>Erro ao abrir banco de dados local</h1><p>${escapeHtml(err.message)}</p></div>`;
     return;
   }
+
+  // Substitui as implementações IndexedDB pelas remotas (Sheets via Apps Script).
+  // O binding `const DB` permanece; só os métodos são trocados.
+  Object.assign(DB, window.UC_RemoteDB);
 
   // Load settings
   state.settings.theme = await DB.getSetting('theme', 'light');

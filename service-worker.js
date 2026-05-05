@@ -1,9 +1,11 @@
-// Service Worker — UC Jurídico v4.2.2 (Partes/advogados extraídos do DJEN + ficha completa)
-const CACHE_NAME = 'uc-juridico-v4-2-2';
+// Service Worker — UC Jurídico v5.0.3 (cleanup debug)
+const CACHE_NAME = 'uc-juridico-v5-0-3';
 const APP_SHELL = [
   './',
   './index.html',
   './manifest.json',
+  './config.js',
+  './api.js',
   './logo.png',
   './icon-192.png',
   './icon-512.png',
