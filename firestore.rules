@@ -1,0 +1,80 @@
+rules_version = '2';
+
+// UC Jurídico — Security Rules do Firestore.
+// Modelo: collection `users` é a allowlist; doc id = email do usuário (lowercase).
+// Quem está em users/{email} com ativo=true pode ler/escrever todas as outras
+// collections. Apenas admins editam users.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null
+        && request.auth.token.email != null
+        && request.auth.token.email_verified == true;
+    }
+
+    function userEmail() {
+      return request.auth.token.email.lower();
+    }
+
+    function userDoc() {
+      return get(/databases/$(database)/documents/users/$(userEmail())).data;
+    }
+
+    function isAllowed() {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/users/$(userEmail()))
+        && userDoc().ativo == true;
+    }
+
+    function isAdmin() {
+      return isAllowed() && userDoc().role == 'admin';
+    }
+
+    // ====== Allowlist ======
+    // Qualquer usuário autorizado pode ler (precisa para checar próprio acesso/role).
+    // Só admin escreve.
+    match /users/{email} {
+      allow read: if isSignedIn();
+      allow create, update, delete: if isAdmin();
+    }
+
+    // ====== Audit log ======
+    // Qualquer usuário autorizado escreve (immutable). Só admin lê histórico.
+    match /audit/{auditId} {
+      allow create: if isAllowed()
+        && request.resource.data.userEmail == userEmail();
+      allow read: if isAdmin();
+      allow update, delete: if false;
+    }
+
+    // ====== Coleções de domínio ======
+    match /processos/{id} {
+      allow read, create, update, delete: if isAllowed();
+    }
+    match /prazos/{id} {
+      allow read, create, update, delete: if isAllowed();
+    }
+    match /eventos/{id} {
+      allow read, create, update, delete: if isAllowed();
+    }
+    match /notas/{id} {
+      allow read, create, update, delete: if isAllowed();
+    }
+    match /jurisprudencia/{id} {
+      allow read, create, update, delete: if isAllowed();
+    }
+    match /djen/{hash} {
+      allow read, create, update, delete: if isAllowed();
+    }
+    match /settings/{chave} {
+      allow read, create, update, delete: if isAllowed();
+    }
+
+    // Negar tudo o que não estiver explicitamente acima.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

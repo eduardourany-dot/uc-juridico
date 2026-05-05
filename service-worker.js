@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v5.0.3 (cleanup debug)
-const CACHE_NAME = 'uc-juridico-v5-0-3';
+// Service Worker — UC Jurídico v6.0.0 (Firestore + Firebase Auth; PDFs via Drive)
+const CACHE_NAME = 'uc-juridico-v6-0-0';
 const APP_SHELL = [
   './',
   './index.html',
