@@ -33,11 +33,21 @@ service cloud.firestore {
     }
 
     // ====== Allowlist ======
-    // Qualquer usuário autorizado pode ler (precisa para checar próprio acesso/role).
-    // Só admin escreve.
+    // Qualquer usuário autenticado pode ler (precisa para checar próprio acesso/role).
+    // Só admin escreve, com uma exceção: o BOOTSTRAP_ADMIN se autocria no primeiro
+    // login se ainda não existir nenhum doc com seu email.
     match /users/{email} {
       allow read: if isSignedIn();
-      allow create, update, delete: if isAdmin();
+      allow create: if isAdmin() || (
+        // Bootstrap clause — só pega no primeiríssimo login do admin do escritório.
+        isSignedIn()
+        && email == userEmail()
+        && userEmail() == 'eduardourany@uranydecastro.com.br'
+        && request.resource.data.role == 'admin'
+        && request.resource.data.ativo == true
+        && !exists(/databases/$(database)/documents/users/$(userEmail()))
+      );
+      allow update, delete: if isAdmin();
     }
 
     // ====== Audit log ======

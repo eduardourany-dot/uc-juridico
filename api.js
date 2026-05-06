@@ -145,6 +145,8 @@ async function doSignIn(silent = false) {
   return result.user;
 }
 
+const BOOTSTRAP_ADMIN_EMAIL = 'eduardourany@uranydecastro.com.br';
+
 async function checkAllowlistAndProceed(user) {
   const email = (user.email || '').toLowerCase();
   if (!user.emailVerified) {
@@ -159,6 +161,24 @@ async function checkAllowlistAndProceed(user) {
     setLoginError('Erro ao verificar permissão: ' + err.message);
     return null;
   }
+
+  // Bootstrap: o admin do escritório se autocria no primeiro login.
+  if (!snap.exists() && email === BOOTSTRAP_ADMIN_EMAIL) {
+    try {
+      await setDoc(doc(db, 'users', email), {
+        email,
+        nome: user.displayName || 'Owner',
+        role: 'admin',
+        ativo: true,
+        criadoEm: Date.now()
+      });
+      snap = await getDoc(doc(db, 'users', email));
+    } catch (err) {
+      setLoginError('Falha no bootstrap do admin: ' + err.message);
+      return null;
+    }
+  }
+
   if (!snap.exists() || snap.data().ativo !== true) {
     await signOut(auth);
     clearStoredState();
