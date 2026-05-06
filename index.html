@@ -957,7 +957,15 @@ async function newProcessFlow() {
           <div>
             <label class="label">Advogado responsável (interno)</label>
             <p class="help-text" style="margin-bottom: 6px;">Quem na banca cuida desse processo. Pode ajustar depois.</p>
-            <input type="text" class="input" id="newProcessOwner" placeholder="email ou nome" value="${escapeHtml((window.UC_Auth?.getUser?.() || {}).email || '')}">
+            <select class="select" id="newProcessOwner">
+              ${(() => {
+                const myDefault = defaultAdvogado((window.UC_Auth?.getUser?.() || {}).email);
+                return [
+                  `<option value="" ${!myDefault ? 'selected' : ''}>— não atribuído —</option>`,
+                  ...ADVOGADOS.map(name => `<option value="${escapeHtml(name)}" ${name === myDefault ? 'selected' : ''}>${escapeHtml(name)}</option>`)
+                ].join('');
+              })()}
+            </select>
           </div>
           <div>
             <label class="label">Risco (opcional, ajustável depois)</label>
@@ -1590,6 +1598,35 @@ const AREA_OPTIONS = [
   { value: 'Outros', label: 'Outros' }
 ];
 
+// Quadro de advogados do escritório (Urany de Castro Advocacia).
+const ADVOGADOS = [
+  'EDUARDO URANY DE CASTRO',
+  'MARCELO MENDES FRANÇA',
+  'JULIANO DA COSTA FERREIRA',
+  'CLEBER RIBEIRO',
+  'MARKO ANTONIO DUARTE',
+  'SARA CAROLINA URANY DE CASTRO',
+  'MARCELO BITTAR',
+  'BRUNO NACIFF DA ROCHA',
+  'MARCOS FERNANDO SILVA'
+];
+
+const ADVOGADO_OPTIONS = [
+  { value: '', label: '— não atribuído —' },
+  ...ADVOGADOS.map(n => ({ value: n, label: n }))
+];
+
+// Mapeia email → nome do advogado para preencher default no cadastro.
+// Adicionar entradas conforme os outros usuários começarem a usar.
+const ADVOGADO_BY_EMAIL = {
+  'eduardourany@uranydecastro.com.br': 'EDUARDO URANY DE CASTRO'
+};
+
+function defaultAdvogado(email) {
+  if (!email) return '';
+  return ADVOGADO_BY_EMAIL[String(email).toLowerCase()] || '';
+}
+
 async function editProcessFlow() {
   const p = state._processView.p;
   const me = (window.UC_Auth?.getUser?.() || {}).email || '';
@@ -1644,7 +1681,7 @@ async function editProcessFlow() {
     ]},
     { label: 'Honorários — valor', default: p.honValor || '', placeholder: 'ex: R$ 5.000 · 20% · misto' },
 
-    { label: 'Advogado responsável (interno)', default: p.advogadoResponsavel || me, placeholder: 'email ou nome' }
+    { label: 'Advogado responsável (interno)', type: 'select', default: p.advogadoResponsavel || defaultAdvogado(me), options: ADVOGADO_OPTIONS }
   ];
 
   // Fase B — campos tributários, só aparecem se área é tributário/execução fiscal
