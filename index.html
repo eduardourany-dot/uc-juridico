@@ -1599,28 +1599,25 @@ const AREA_OPTIONS = [
 ];
 
 // Quadro de advogados do escritório (Urany de Castro Advocacia).
-const ADVOGADOS = [
-  'EDUARDO URANY DE CASTRO',
-  'MARCELO MENDES FRANÇA',
-  'JULIANO DA COSTA FERREIRA',
-  'CLEBER RIBEIRO',
-  'MARKO ANTONIO DUARTE',
-  'SARA CAROLINA URANY DE CASTRO',
-  'MARCELO BITTAR',
-  'BRUNO NACIFF DA ROCHA',
-  'MARCOS FERNANDO SILVA'
-];
+// ADVOGADO_BY_EMAIL é a fonte canônica; ADVOGADOS é derivado.
+const ADVOGADO_BY_EMAIL = {
+  'eduardourany@uranydecastro.com.br': 'EDUARDO URANY DE CASTRO',
+  'marcelofranca@uranydecastro.com.br': 'MARCELO MENDES FRANÇA',
+  'juliano@uranydecastro.com.br':       'JULIANO DA COSTA FERREIRA',
+  'cleber@uranydecastro.com.br':        'CLEBER RIBEIRO',
+  'markoduarte@uranydecastro.com.br':   'MARKO ANTONIO DUARTE',
+  'sara@uranydecastro.com.br':          'SARA CAROLINA URANY DE CASTRO',
+  'marcelobittar@uranydecastro.com.br': 'MARCELO BITTAR',
+  'bruno@uranydecastro.com.br':         'BRUNO NACIFF DA ROCHA',
+  'marcos@uranydecastro.com.br':        'MARCOS FERNANDO SILVA'
+};
+
+const ADVOGADOS = Object.values(ADVOGADO_BY_EMAIL);
 
 const ADVOGADO_OPTIONS = [
   { value: '', label: '— não atribuído —' },
   ...ADVOGADOS.map(n => ({ value: n, label: n }))
 ];
-
-// Mapeia email → nome do advogado para preencher default no cadastro.
-// Adicionar entradas conforme os outros usuários começarem a usar.
-const ADVOGADO_BY_EMAIL = {
-  'eduardourany@uranydecastro.com.br': 'EDUARDO URANY DE CASTRO'
-};
 
 function defaultAdvogado(email) {
   if (!email) return '';

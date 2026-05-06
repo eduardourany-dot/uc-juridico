@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.2.1 (advogados como dropdown)
-const CACHE_NAME = 'uc-juridico-v6-2-1';
+// Service Worker — UC Jurídico v6.3.0 (UC_admin + diretório completo)
+const CACHE_NAME = 'uc-juridico-v6-3-0';
 const APP_SHELL = [
   './',
   './index.html',

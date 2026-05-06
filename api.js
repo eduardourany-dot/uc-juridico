@@ -452,5 +452,49 @@ const RemoteDB = {
 
 window.UC_RemoteDB = RemoteDB;
 
+// ============================================================
+// UC_admin — utilitários de gestão de usuários (só para admins).
+// Pensado para uso no console do browser. Mais tarde vira UI.
+// ============================================================
+
+function requireAdmin_() {
+  if (!currentUserDoc || currentUserDoc.role !== 'admin') {
+    throw new Error('admin_required: faça login como admin antes de chamar UC_admin.*');
+  }
+}
+
+window.UC_admin = {
+  async addUser(email, nome, role = 'user') {
+    requireAdmin_();
+    const e = String(email || '').toLowerCase().trim();
+    if (!e) throw new Error('email_required');
+    await setDoc(doc(db, 'users', e), {
+      email: e,
+      nome: nome || '',
+      role,
+      ativo: true,
+      criadoEm: Date.now()
+    }, { merge: true });
+    return e;
+  },
+  async listUsers() {
+    requireAdmin_();
+    const snap = await getDocs(collection(db, 'users'));
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  },
+  async setActive(email, ativo) {
+    requireAdmin_();
+    const e = String(email || '').toLowerCase().trim();
+    await updateDoc(doc(db, 'users', e), { ativo: !!ativo });
+    return e;
+  },
+  async setRole(email, role) {
+    requireAdmin_();
+    const e = String(email || '').toLowerCase().trim();
+    await updateDoc(doc(db, 'users', e), { role: String(role) });
+    return e;
+  }
+};
+
 // Sinaliza para index.html que o módulo está pronto (caso ele queira esperar)
 window.dispatchEvent(new CustomEvent('uc:ready'));
