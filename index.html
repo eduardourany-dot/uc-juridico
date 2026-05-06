@@ -861,7 +861,10 @@ async function renderProcessList() {
       (p.sistema || '').toLowerCase().includes(q) ||
       (p.advogadoResponsavel || '').toLowerCase().includes(q) ||
       (p.advNome || '').toLowerCase().includes(q) ||
-      (p.advLawyer || '').toLowerCase().includes(q)
+      (p.advLawyer || '').toLowerCase().includes(q) ||
+      (p.tributoPrincipal || '').toLowerCase().includes(q) ||
+      (p.periodoBase || '').toLowerCase().includes(q) ||
+      (p.cdas || []).some(c => (c.numero || '').toLowerCase().includes(q))
     );
     $('processGrid').innerHTML = filtered.map(p => renderProcessCard(p)).join('') || `<p style="color: var(--uc-warm-gray); grid-column: 1/-1; text-align: center;">Nenhum processo encontrado.</p>`;
   });
@@ -878,6 +881,8 @@ function renderProcessCard(p) {
         <div class="process-meta">
           ${p.client ? `<span>${escapeHtml(p.client)}</span>` : ''}
           ${p.area ? `<span class="badge badge-gold">${escapeHtml(p.area)}</span>` : ''}
+          ${p.tributoPrincipal ? `<span class="badge badge-gold" style="background: var(--uc-cream); color: var(--uc-gold); border: 1px solid var(--uc-gold-soft);">${escapeHtml(p.tributoPrincipal)}</span>` : ''}
+          ${p.statusFiscal ? `<span class="badge ${statusFiscalBadge(p.statusFiscal)}" title="Status fiscal">${escapeHtml(statusFiscalLabel(p.statusFiscal))}</span>` : ''}
           ${p.risco ? `<span class="badge ${riscoBadgeClass(p.risco)}" title="${escapeHtml(riscoLabel(p.risco))}">${p.risco === 'baixo' ? '✓ baixo' : p.risco === 'medio' ? '~ médio' : '! alto'}</span>` : ''}
           ${p.status === 'archived' ? `<span class="badge badge-gray">arquivado</span>` : ''}
         </div>
@@ -1201,6 +1206,42 @@ function renderProcessOverview(p, events, deadlines, notes, jurisprudence) {
     </div>
     ` : ''}
 
+    ${(isTributario(p.area) && (p.tipoExec || p.tributoPrincipal || p.statusFiscal || p.garantia || (p.cdas && p.cdas.length))) ? `
+    <div class="card mb-4">
+      <h3 class="font-serif text-lg font-semibold smallcaps mb-3" style="color: var(--uc-black);">Detalhes tributários</h3>
+      <div class="grid gap-2" style="grid-template-columns: 160px 1fr; font-size: 13px; margin-bottom: ${p.cdas && p.cdas.length ? '16px' : '0'};">
+        ${p.tipoExec ? `<div style="color: var(--uc-warm-gray);">Tipo de execução:</div><div>${escapeHtml(tipoExecLabel(p.tipoExec))}</div>` : ''}
+        ${p.tributoPrincipal ? `<div style="color: var(--uc-warm-gray);">Tributo:</div><div><strong>${escapeHtml(p.tributoPrincipal)}</strong></div>` : ''}
+        ${p.periodoBase ? `<div style="color: var(--uc-warm-gray);">Período:</div><div>${escapeHtml(p.periodoBase)}</div>` : ''}
+        ${p.statusFiscal ? `<div style="color: var(--uc-warm-gray);">Status fiscal:</div><div><span class="badge ${statusFiscalBadge(p.statusFiscal)}">${escapeHtml(statusFiscalLabel(p.statusFiscal))}</span></div>` : ''}
+        ${p.garantia ? `<div style="color: var(--uc-warm-gray);">Garantia:</div><div>${escapeHtml(garantiaLabel(p.garantia))}${p.garantiaDetalhe ? ` <span style="color: var(--uc-warm-gray);">— ${escapeHtml(p.garantiaDetalhe)}</span>` : ''}</div>` : ''}
+      </div>
+      ${p.cdas && p.cdas.length ? `
+        <div style="border-top: 1px solid var(--uc-line-soft); padding-top: 12px;">
+          <div style="font-variant: small-caps; letter-spacing: 0.06em; color: var(--uc-warm-gray); font-size: 11px; margin-bottom: 8px;">CDAs (${p.cdas.length})</div>
+          <table style="width: 100%; font-size: 12px; border-collapse: collapse;">
+            <thead>
+              <tr style="color: var(--uc-warm-gray); text-align: left; border-bottom: 1px solid var(--uc-line-soft);">
+                <th style="padding: 4px 8px 4px 0; font-weight: 500;">Número</th>
+                <th style="padding: 4px 8px; font-weight: 500; text-align: right;">Valor</th>
+                <th style="padding: 4px 0 4px 8px; font-weight: 500;">Período</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${p.cdas.map(c => `
+                <tr style="border-bottom: 1px solid var(--uc-line-soft);">
+                  <td style="padding: 6px 8px 6px 0; font-family: monospace;">${escapeHtml(c.numero || '')}</td>
+                  <td style="padding: 6px 8px; text-align: right;">${c.valor ? escapeHtml(c.valor) : ''}</td>
+                  <td style="padding: 6px 0 6px 8px; color: var(--uc-graphite);">${escapeHtml(c.periodo || '')}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      ` : ''}
+    </div>
+    ` : ''}
+
     ${p.partes?.ativo?.length || p.partes?.passivo?.length || p.advogados?.ativo?.length || p.advogados?.passivo?.length ? `
     <div class="card mb-4">
       <div class="flex justify-between items-center mb-3">
@@ -1461,6 +1502,69 @@ function formatBRL(v) {
   return 'R$ ' + n.toLocaleString('pt-BR', { minimumFractionDigits: 2 });
 }
 
+// ====================================================================
+// Helpers tributários (Fase B)
+// ====================================================================
+
+const TIPO_EXEC_LABELS = {
+  federal: 'Execução Fiscal Federal',
+  estadual: 'Execução Fiscal Estadual',
+  municipal: 'Execução Fiscal Municipal',
+  bancaria: 'Execução Bancária / FIDC',
+  outros: 'Outros'
+};
+function tipoExecLabel(t) { return TIPO_EXEC_LABELS[t] || ''; }
+
+const STATUS_FISCAL_LABELS = {
+  ativo: 'Ativo',
+  parcelado: 'Parcelado',
+  suspenso: 'Suspenso por liminar',
+  garantido: 'Garantido (sem suspensão)',
+  baixado: 'Baixado',
+  extinto: 'Extinto'
+};
+const STATUS_FISCAL_BADGE = {
+  ativo: 'badge-red', parcelado: 'badge-amber', suspenso: 'badge-green',
+  garantido: 'badge-green', baixado: 'badge-gray', extinto: 'badge-gray'
+};
+function statusFiscalLabel(s) { return STATUS_FISCAL_LABELS[s] || ''; }
+function statusFiscalBadge(s) { return STATUS_FISCAL_BADGE[s] || 'badge-gray'; }
+
+const GARANTIA_LABELS = {
+  nenhuma: 'Sem garantia',
+  penhora: 'Penhora',
+  seguro: 'Seguro garantia',
+  fianca: 'Fiança bancária',
+  deposito: 'Depósito judicial',
+  outros: 'Outros'
+};
+function garantiaLabel(g) { return GARANTIA_LABELS[g] || ''; }
+
+function isTributario(area) {
+  return area === 'Tributário' || area === 'Execução Fiscal';
+}
+
+// CDA: cada linha "numero | valor | periodo" → { numero, valor, periodo }
+function parseCdas(text) {
+  if (!text) return [];
+  return text.split('\n')
+    .map(line => line.trim())
+    .filter(line => line.length > 0)
+    .map(line => {
+      const parts = line.split('|').map(s => s.trim());
+      return {
+        numero: parts[0] || '',
+        valor: parts[1] || '',
+        periodo: parts[2] || ''
+      };
+    })
+    .filter(c => c.numero);
+}
+function serializeCdas(cdas) {
+  if (!Array.isArray(cdas)) return '';
+  return cdas.map(c => [c.numero, c.valor, c.periodo].filter(Boolean).join(' | ')).join('\n');
+}
+
 const SISTEMA_OPTIONS = [
   { value: '', label: '— não definido —' },
   { value: 'PJe', label: 'PJe' },
@@ -1489,7 +1593,7 @@ const AREA_OPTIONS = [
 async function editProcessFlow() {
   const p = state._processView.p;
   const me = (window.UC_Auth?.getUser?.() || {}).email || '';
-  const r = await showModal('Editar processo', [
+  const baseFields = [
     { label: 'Nome', default: p.name },
     { label: 'CNJ', default: p.cnj || '' },
 
@@ -1541,7 +1645,43 @@ async function editProcessFlow() {
     { label: 'Honorários — valor', default: p.honValor || '', placeholder: 'ex: R$ 5.000 · 20% · misto' },
 
     { label: 'Advogado responsável (interno)', default: p.advogadoResponsavel || me, placeholder: 'email ou nome' }
-  ], { confirmLabel: 'Salvar' });
+  ];
+
+  // Fase B — campos tributários, só aparecem se área é tributário/execução fiscal
+  const tribFields = isTributario(p.area) ? [
+    { label: 'Tipo de execução', type: 'select', default: p.tipoExec || '', options: [
+      { value: '', label: '— não definido —' },
+      { value: 'federal', label: 'Execução Fiscal Federal (PFN)' },
+      { value: 'estadual', label: 'Execução Fiscal Estadual (PGE)' },
+      { value: 'municipal', label: 'Execução Fiscal Municipal' },
+      { value: 'bancaria', label: 'Execução Bancária / FIDC' },
+      { value: 'outros', label: 'Outros' }
+    ]},
+    { label: 'Tributo principal', default: p.tributoPrincipal || '', placeholder: 'ex: ICMS · ISS · IPTU · IR · INSS · contribuição previdenciária' },
+    { label: 'Período de competência', default: p.periodoBase || '', placeholder: 'ex: 01/2018 a 12/2020 · maio/2019' },
+    { label: 'Status fiscal', type: 'select', default: p.statusFiscal || '', options: [
+      { value: '', label: '— não definido —' },
+      { value: 'ativo', label: 'Ativo (sem suspensão)' },
+      { value: 'parcelado', label: 'Parcelado' },
+      { value: 'suspenso', label: 'Suspenso por liminar' },
+      { value: 'garantido', label: 'Garantido (sem suspensão)' },
+      { value: 'baixado', label: 'Baixado' },
+      { value: 'extinto', label: 'Extinto' }
+    ]},
+    { label: 'Garantia oferecida', type: 'select', default: p.garantia || '', options: [
+      { value: '', label: '— não definido —' },
+      { value: 'nenhuma', label: 'Sem garantia' },
+      { value: 'penhora', label: 'Penhora' },
+      { value: 'seguro', label: 'Seguro garantia' },
+      { value: 'fianca', label: 'Fiança bancária' },
+      { value: 'deposito', label: 'Depósito judicial' },
+      { value: 'outros', label: 'Outros' }
+    ]},
+    { label: 'Detalhe da garantia', default: p.garantiaDetalhe || '', placeholder: 'opcional · ex: Apólice 12345/2024 — R$ 100mil' },
+    { label: 'CDAs (uma por linha)', type: 'textarea', rows: 5, default: serializeCdas(p.cdas), help: 'Formato: <strong>número | valor | período</strong> · uma CDA por linha. Ex: 2024.01.123456 | 50000.00 | 01/2020 a 12/2020' }
+  ] : [];
+
+  const r = await showModal('Editar processo', [...baseFields, ...tribFields], { confirmLabel: 'Salvar' });
   if (!r) return;
   const [
     name, cnj,
@@ -1553,7 +1693,9 @@ async function editProcessFlow() {
     valorCausa, dataDistribuicao,
     risco,
     honTipo, honValor,
-    advogadoResponsavel
+    advogadoResponsavel,
+    // Fase B (só presentes se isTributario(p.area) era true ao abrir)
+    tipoExec, tributoPrincipal, periodoBase, statusFiscal, garantia, garantiaDetalhe, cdasRaw
   ] = r;
   Object.assign(p, {
     name,
@@ -1579,6 +1721,18 @@ async function editProcessFlow() {
     honValor: honValor || null,
     advogadoResponsavel: advogadoResponsavel || null
   });
+  // Só aplica os campos tributários se eles foram apresentados no form
+  if (isTributario(p.area) && tipoExec !== undefined) {
+    Object.assign(p, {
+      tipoExec: tipoExec || null,
+      tributoPrincipal: tributoPrincipal || null,
+      periodoBase: periodoBase || null,
+      statusFiscal: statusFiscal || null,
+      garantia: garantia || null,
+      garantiaDetalhe: garantiaDetalhe || null,
+      cdas: parseCdas(cdasRaw || '')
+    });
+  }
   await DB.saveProcess(p);
   toast('Processo atualizado', '', 'success');
   renderProcessDetail();

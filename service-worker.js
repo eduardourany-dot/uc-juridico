@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.1.0 (Fase A: gestão processual)
-const CACHE_NAME = 'uc-juridico-v6-1-0';
+// Service Worker — UC Jurídico v6.2.0 (Fase B: campos tributários + CDAs)
+const CACHE_NAME = 'uc-juridico-v6-2-0';
 const APP_SHELL = [
   './',
   './index.html',
