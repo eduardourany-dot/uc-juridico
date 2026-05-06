@@ -856,7 +856,12 @@ async function renderProcessList() {
       (p.name || '').toLowerCase().includes(q) ||
       (p.cnj || '').toLowerCase().includes(q) ||
       (p.client || '').toLowerCase().includes(q) ||
-      (p.area || '').toLowerCase().includes(q)
+      (p.area || '').toLowerCase().includes(q) ||
+      (p.comarca || '').toLowerCase().includes(q) ||
+      (p.sistema || '').toLowerCase().includes(q) ||
+      (p.advogadoResponsavel || '').toLowerCase().includes(q) ||
+      (p.advNome || '').toLowerCase().includes(q) ||
+      (p.advLawyer || '').toLowerCase().includes(q)
     );
     $('processGrid').innerHTML = filtered.map(p => renderProcessCard(p)).join('') || `<p style="color: var(--uc-warm-gray); grid-column: 1/-1; text-align: center;">Nenhum processo encontrado.</p>`;
   });
@@ -873,9 +878,11 @@ function renderProcessCard(p) {
         <div class="process-meta">
           ${p.client ? `<span>${escapeHtml(p.client)}</span>` : ''}
           ${p.area ? `<span class="badge badge-gold">${escapeHtml(p.area)}</span>` : ''}
+          ${p.risco ? `<span class="badge ${riscoBadgeClass(p.risco)}" title="${escapeHtml(riscoLabel(p.risco))}">${p.risco === 'baixo' ? '✓ baixo' : p.risco === 'medio' ? '~ médio' : '! alto'}</span>` : ''}
           ${p.status === 'archived' ? `<span class="badge badge-gray">arquivado</span>` : ''}
         </div>
-        <div class="process-meta" style="margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--uc-line-soft);">
+        <div class="process-meta" style="margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--uc-line-soft); font-size: 12px;">
+          ${p.advogadoResponsavel ? `<span style="color: var(--uc-warm-gray);">👤 ${escapeHtml(p.advogadoResponsavel.split('@')[0])}</span>` : ''}
           ${eventCount > 0 ? `<span>📑 ${eventCount} eventos</span>` : ''}
           ${noteCount > 0 ? `<span>📝 ${noteCount} notas</span>` : ''}
           <span style="margin-left: auto;">${formatDate(p.updatedAt, { relative: true })}</span>
@@ -942,6 +949,20 @@ async function newProcessFlow() {
               <option value="Ataque">Ataque (autor/exequente)</option>
             </select>
           </div>
+          <div>
+            <label class="label">Advogado responsável (interno)</label>
+            <p class="help-text" style="margin-bottom: 6px;">Quem na banca cuida desse processo. Pode ajustar depois.</p>
+            <input type="text" class="input" id="newProcessOwner" placeholder="email ou nome" value="${escapeHtml((window.UC_Auth?.getUser?.() || {}).email || '')}">
+          </div>
+          <div>
+            <label class="label">Risco (opcional, ajustável depois)</label>
+            <select class="select" id="newProcessRisk">
+              <option value="" selected>— não avaliado —</option>
+              <option value="baixo">Baixo · provável êxito</option>
+              <option value="medio">Médio · perda parcial</option>
+              <option value="alto">Alto · perda provável</option>
+            </select>
+          </div>
         </div>
         <div class="flex gap-2">
           <button class="btn btn-outline" id="_npCancel" style="flex:1">Cancelar</button>
@@ -960,6 +981,8 @@ async function newProcessFlow() {
       const area = document.getElementById('newProcessArea').value;
       const type = document.getElementById('newProcessType').value.trim();
       const polo = document.getElementById('newProcessPolo').value;
+      const advogadoResponsavel = document.getElementById('newProcessOwner').value.trim();
+      const risco = document.getElementById('newProcessRisk').value;
 
       if (!name) {
         toast('Nome obrigatório', 'Informe ao menos o nome do processo.', 'error');
@@ -975,6 +998,8 @@ async function newProcessFlow() {
         area,
         type: type || null,
         polo,
+        advogadoResponsavel: advogadoResponsavel || null,
+        risco: risco || null,
         status: 'active',
         eventCount: 0,
         noteCount: 0,
@@ -1134,22 +1159,47 @@ function renderProcessOverview(p, events, deadlines, notes, jurisprudence) {
 
     <div class="card mb-4">
       <h3 class="font-serif text-lg font-semibold smallcaps mb-3" style="color: var(--uc-black);">Identificação</h3>
-      <div class="grid gap-2" style="grid-template-columns: 140px 1fr; font-size: 13px;">
+      <div class="grid gap-2" style="grid-template-columns: 160px 1fr; font-size: 13px;">
         ${p.cnj ? `<div style="color: var(--uc-warm-gray);">CNJ:</div><div class="process-cnj">${escapeHtml(p.cnj)}</div>` : ''}
-        ${p.client ? `<div style="color: var(--uc-warm-gray);">Cliente:</div><div>${escapeHtml(p.client)}</div>` : ''}
+        ${p.client ? `<div style="color: var(--uc-warm-gray);">Cliente:</div><div>${escapeHtml(p.client)}${p.clientDoc ? ` <span style="color: var(--uc-warm-gray);">(${escapeHtml(p.clientDoc)})</span>` : ''}</div>` : ''}
+        ${p.clientContact ? `<div style="color: var(--uc-warm-gray);">Contato cliente:</div><div>${escapeHtml(p.clientContact)}</div>` : ''}
         ${p.court ? `<div style="color: var(--uc-warm-gray);">Tribunal/Vara:</div><div>${escapeHtml(p.court)}</div>` : ''}
+        ${p.comarca ? `<div style="color: var(--uc-warm-gray);">Comarca:</div><div>${escapeHtml(p.comarca)}</div>` : ''}
+        ${(p.sistema || p.datajudData?.sistema) ? `<div style="color: var(--uc-warm-gray);">Sistema:</div><div>${escapeHtml(p.sistema || p.datajudData.sistema)}${p.datajudData?.formato ? ' · ' + escapeHtml(p.datajudData.formato) : ''}</div>` : ''}
         ${p.type ? `<div style="color: var(--uc-warm-gray);">Tipo:</div><div>${escapeHtml(p.type)}</div>` : ''}
+        ${p.fase ? `<div style="color: var(--uc-warm-gray);">Fase:</div><div>${escapeHtml(faseLabel(p.fase))}</div>` : ''}
         ${p.polo ? `<div style="color: var(--uc-warm-gray);">Polo:</div><div>${escapeHtml(p.polo)}</div>` : ''}
         ${p.area ? `<div style="color: var(--uc-warm-gray);">Área:</div><div>${escapeHtml(p.area)}</div>` : ''}
-        ${p.datajudData?.dataAjuizamento ? `<div style="color: var(--uc-warm-gray);">Distribuição:</div><div>${formatDate(p.datajudData.dataAjuizamento)}</div>` : ''}
-        ${p.datajudData?.valorCausa ? `<div style="color: var(--uc-warm-gray);">Valor da causa:</div><div><strong>R$ ${Number(p.datajudData.valorCausa).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</strong></div>` : ''}
+        ${(p.dataDistribuicao || p.datajudData?.dataAjuizamento) ? `<div style="color: var(--uc-warm-gray);">Distribuição:</div><div>${formatDate(p.dataDistribuicao || p.datajudData.dataAjuizamento)}</div>` : ''}
+        ${(p.valorCausa || p.datajudData?.valorCausa) ? `<div style="color: var(--uc-warm-gray);">Valor da causa:</div><div><strong>${formatBRL(p.valorCausa || p.datajudData.valorCausa)}</strong></div>` : ''}
         ${p.datajudData?.classe ? `<div style="color: var(--uc-warm-gray);">Classe processual:</div><div>${escapeHtml(p.datajudData.classe)}</div>` : ''}
         ${p.datajudData?.assuntos?.length ? `<div style="color: var(--uc-warm-gray);">Assuntos:</div><div>${p.datajudData.assuntos.slice(0, 5).map(a => escapeHtml(a)).join(' · ')}</div>` : ''}
-        ${p.datajudData?.sistema ? `<div style="color: var(--uc-warm-gray);">Sistema:</div><div>${escapeHtml(p.datajudData.sistema)}${p.datajudData.formato ? ' · ' + escapeHtml(p.datajudData.formato) : ''}</div>` : ''}
         ${p.datajudData?.grau ? `<div style="color: var(--uc-warm-gray);">Grau:</div><div>${escapeHtml(p.datajudData.grau)}</div>` : ''}
         ${p.datajudLastSync ? `<div style="color: var(--uc-warm-gray);">Última atualização DataJud:</div><div style="color: var(--uc-warm-gray); font-size: 12px;">${formatDate(p.datajudLastSync, { relative: true })}</div>` : ''}
       </div>
     </div>
+
+    ${(p.advogadoResponsavel || p.risco || p.honTipo) ? `
+    <div class="card mb-4">
+      <h3 class="font-serif text-lg font-semibold smallcaps mb-3" style="color: var(--uc-black);">Gestão</h3>
+      <div class="grid gap-2" style="grid-template-columns: 160px 1fr; font-size: 13px;">
+        ${p.advogadoResponsavel ? `<div style="color: var(--uc-warm-gray);">Adv. responsável:</div><div>${escapeHtml(p.advogadoResponsavel)}</div>` : ''}
+        ${p.risco ? `<div style="color: var(--uc-warm-gray);">Risco:</div><div><span class="badge ${riscoBadgeClass(p.risco)}">${escapeHtml(riscoLabel(p.risco))}</span></div>` : ''}
+        ${p.honTipo ? `<div style="color: var(--uc-warm-gray);">Honorários:</div><div>${escapeHtml(honLabel(p.honTipo))}${p.honValor ? ' · ' + escapeHtml(p.honValor) : ''}</div>` : ''}
+      </div>
+    </div>
+    ` : ''}
+
+    ${(p.advNome || p.advLawyer) ? `
+    <div class="card mb-4">
+      <h3 class="font-serif text-lg font-semibold smallcaps mb-3" style="color: var(--uc-black);">Parte adversa (manual)</h3>
+      <div class="grid gap-2" style="grid-template-columns: 160px 1fr; font-size: 13px;">
+        ${p.advNome ? `<div style="color: var(--uc-warm-gray);">Nome:</div><div>${escapeHtml(p.advNome)}${p.advDoc ? ` <span style="color: var(--uc-warm-gray);">(${escapeHtml(p.advDoc)})</span>` : ''}</div>` : ''}
+        ${p.advLawyer ? `<div style="color: var(--uc-warm-gray);">Advogado:</div><div>${escapeHtml(p.advLawyer)}${p.advLawyerOab ? ` <span style="color: var(--uc-warm-gray);">(OAB ${escapeHtml(p.advLawyerOab)})</span>` : ''}</div>` : ''}
+      </div>
+      <p class="help-text" style="margin-top: 8px;">Dados informados manualmente. A extração automática do DJEN aparece em card separado.</p>
+    </div>
+    ` : ''}
 
     ${p.partes?.ativo?.length || p.partes?.passivo?.length || p.advogados?.ativo?.length || p.advogados?.passivo?.length ? `
     <div class="card mb-4">
@@ -1375,27 +1425,160 @@ function renderProcessAnalysis(p, events, deadlines, jurisprudence) {
 // === PROCESS ACTIONS ================================================
 // ====================================================================
 
+// ====================================================================
+// Helpers de gestão processual (Fase A)
+// ====================================================================
+
+const FASE_LABELS = {
+  conhecimento: 'Conhecimento',
+  recurso: 'Recurso',
+  execucao: 'Execução',
+  cumprimento: 'Cumprimento de sentença'
+};
+function faseLabel(f) { return FASE_LABELS[f] || ''; }
+
+const RISCO_LABELS = {
+  baixo: 'Baixo · provável êxito',
+  medio: 'Médio · perda parcial',
+  alto: 'Alto · perda provável'
+};
+const RISCO_BADGE = { baixo: 'badge-green', medio: 'badge-amber', alto: 'badge-red' };
+function riscoLabel(r) { return RISCO_LABELS[r] || ''; }
+function riscoBadgeClass(r) { return RISCO_BADGE[r] || 'badge-gray'; }
+
+const HON_LABELS = {
+  fixo: 'Fixo',
+  percentual: 'Percentual',
+  exito: 'Êxito',
+  misto: 'Misto'
+};
+function honLabel(t) { return HON_LABELS[t] || ''; }
+
+function formatBRL(v) {
+  if (v === null || v === undefined || v === '') return '';
+  const n = Number(v);
+  if (!isFinite(n)) return '';
+  return 'R$ ' + n.toLocaleString('pt-BR', { minimumFractionDigits: 2 });
+}
+
+const SISTEMA_OPTIONS = [
+  { value: '', label: '— não definido —' },
+  { value: 'PJe', label: 'PJe' },
+  { value: 'eproc', label: 'e-Proc' },
+  { value: 'ESAJ', label: 'ESAJ (TJSP)' },
+  { value: 'Projudi', label: 'Projudi' },
+  { value: 'SAPJES', label: 'SAPJ ES' },
+  { value: 'Outro', label: 'Outro' }
+];
+
+const AREA_OPTIONS = [
+  { value: 'Tributário', label: 'Tributário' },
+  { value: 'Cível', label: 'Cível' },
+  { value: 'Execução Fiscal', label: 'Execução Fiscal' },
+  { value: 'Recuperação Judicial', label: 'Recuperação Judicial' },
+  { value: 'Administrativo', label: 'Administrativo' },
+  { value: 'Consumidor', label: 'Consumidor' },
+  { value: 'Trabalhista', label: 'Trabalhista' },
+  { value: 'Família', label: 'Família' },
+  { value: 'Sucessões', label: 'Sucessões' },
+  { value: 'Criminal', label: 'Criminal' },
+  { value: 'Constitucional', label: 'Constitucional' },
+  { value: 'Outros', label: 'Outros' }
+];
+
 async function editProcessFlow() {
   const p = state._processView.p;
+  const me = (window.UC_Auth?.getUser?.() || {}).email || '';
   const r = await showModal('Editar processo', [
     { label: 'Nome', default: p.name },
     { label: 'CNJ', default: p.cnj || '' },
-    { label: 'Cliente', default: p.client || '' },
-    { label: 'Tribunal', default: p.court || '' },
-    { label: 'Tipo', default: p.type || '' },
-    { label: 'Área', type: 'select', default: p.area || 'Tributário', options: [
-      { value: 'Tributário', label: 'Tributário' }, { value: 'Cível', label: 'Cível' },
-      { value: 'Execução Fiscal', label: 'Execução Fiscal' }, { value: 'Recuperação Judicial', label: 'Recuperação Judicial' },
-      { value: 'Administrativo', label: 'Administrativo' }, { value: 'Consumidor', label: 'Consumidor' },
-      { value: 'Outros', label: 'Outros' }
-    ]},
+
+    { label: 'Cliente — Nome', default: p.client || '' },
+    { label: 'Cliente — CPF/CNPJ', default: p.clientDoc || '', placeholder: 'opcional' },
+    { label: 'Cliente — Contato', default: p.clientContact || '', placeholder: 'email/telefone, opcional' },
+
     { label: 'Polo', type: 'select', default: p.polo || 'Defesa', options: [
-      { value: 'Defesa', label: 'Defesa' }, { value: 'Ataque', label: 'Ataque' }
-    ]}
+      { value: 'Defesa', label: 'Defesa (executado/réu)' },
+      { value: 'Ataque', label: 'Ataque (autor/exequente)' }
+    ]},
+
+    { label: 'Parte adversa — Nome', default: p.advNome || '', placeholder: 'opcional, se DJEN não extraiu' },
+    { label: 'Parte adversa — CPF/CNPJ', default: p.advDoc || '', placeholder: 'opcional' },
+    { label: 'Advogado adverso — Nome', default: p.advLawyer || '', placeholder: 'opcional' },
+    { label: 'Advogado adverso — OAB', default: p.advLawyerOab || '', placeholder: 'ex: GO 12345' },
+
+    { label: 'Tribunal/Vara', default: p.court || '', placeholder: 'ex: TJGO 1ª Vara · TRF1 7ª Turma' },
+    { label: 'Comarca', default: p.comarca || '', placeholder: 'ex: Goiânia/GO' },
+    { label: 'Sistema', type: 'select', default: p.sistema || '', options: SISTEMA_OPTIONS },
+
+    { label: 'Área', type: 'select', default: p.area || 'Tributário', options: AREA_OPTIONS },
+    { label: 'Tipo de ação', default: p.type || '', placeholder: 'ex: Execução Fiscal · Apelação Cível · MS' },
+    { label: 'Fase processual', type: 'select', default: p.fase || '', options: [
+      { value: '', label: '— não definida —' },
+      { value: 'conhecimento', label: 'Conhecimento' },
+      { value: 'recurso', label: 'Recurso' },
+      { value: 'execucao', label: 'Execução' },
+      { value: 'cumprimento', label: 'Cumprimento de sentença' }
+    ]},
+
+    { label: 'Valor da causa (R$)', type: 'number', default: p.valorCausa ?? '', placeholder: 'opcional', min: 0, step: 0.01 },
+    { label: 'Data de distribuição', type: 'date', default: p.dataDistribuicao || '' },
+
+    { label: 'Risco', type: 'select', default: p.risco || '', options: [
+      { value: '', label: '— não avaliado —' },
+      { value: 'baixo', label: 'Baixo · provável êxito' },
+      { value: 'medio', label: 'Médio · perda parcial' },
+      { value: 'alto', label: 'Alto · perda provável' }
+    ]},
+
+    { label: 'Honorários — tipo', type: 'select', default: p.honTipo || '', options: [
+      { value: '', label: '— não definido —' },
+      { value: 'fixo', label: 'Fixo (R$)' },
+      { value: 'percentual', label: 'Percentual sobre valor da causa' },
+      { value: 'exito', label: 'Êxito (success fee)' },
+      { value: 'misto', label: 'Misto' }
+    ]},
+    { label: 'Honorários — valor', default: p.honValor || '', placeholder: 'ex: R$ 5.000 · 20% · misto' },
+
+    { label: 'Advogado responsável (interno)', default: p.advogadoResponsavel || me, placeholder: 'email ou nome' }
   ], { confirmLabel: 'Salvar' });
   if (!r) return;
-  const [name, cnj, client, court, type, area, polo] = r;
-  Object.assign(p, { name, cnj: cnj || null, client: client || null, court: court || null, type: type || null, area, polo });
+  const [
+    name, cnj,
+    client, clientDoc, clientContact,
+    polo,
+    advNome, advDoc, advLawyer, advLawyerOab,
+    court, comarca, sistema,
+    area, type, fase,
+    valorCausa, dataDistribuicao,
+    risco,
+    honTipo, honValor,
+    advogadoResponsavel
+  ] = r;
+  Object.assign(p, {
+    name,
+    cnj: cnj || null,
+    client: client || null,
+    clientDoc: clientDoc || null,
+    clientContact: clientContact || null,
+    polo,
+    advNome: advNome || null,
+    advDoc: advDoc || null,
+    advLawyer: advLawyer || null,
+    advLawyerOab: advLawyerOab || null,
+    court: court || null,
+    comarca: comarca || null,
+    sistema: sistema || null,
+    area,
+    type: type || null,
+    fase: fase || null,
+    valorCausa: valorCausa === '' ? null : Number(valorCausa),
+    dataDistribuicao: dataDistribuicao || null,
+    risco: risco || null,
+    honTipo: honTipo || null,
+    honValor: honValor || null,
+    advogadoResponsavel: advogadoResponsavel || null
+  });
   await DB.saveProcess(p);
   toast('Processo atualizado', '', 'success');
   renderProcessDetail();
