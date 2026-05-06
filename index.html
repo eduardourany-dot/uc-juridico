@@ -1772,6 +1772,16 @@ async function editProcessFlow() {
   renderProcessDetail();
 }
 
+async function logoutFlow() {
+  const ok = await confirmDialog('Sair do sistema?', 'Você precisará fazer login novamente para acessar.');
+  if (!ok) return;
+  try {
+    await window.UC_Auth.signOut();
+  } catch (err) {
+    toast('Erro ao sair', err.message || String(err), 'error');
+  }
+}
+
 async function archiveProcessFlow() {
   const p = state._processView.p;
   const ok = await confirmDialog(p.status === 'archived' ? 'Reativar processo?' : 'Arquivar processo?',
@@ -3409,14 +3419,25 @@ function renderSettingsTab(tab, prompts, defaultPromptId) {
     `;
   }
   if (tab === 'security') {
+    const u = (window.UC_Auth?.getUser?.() || {});
     return `
+      <div class="card mb-3">
+        <h3 class="font-serif text-lg font-semibold smallcaps mb-3" style="color: var(--uc-black);">Sessão atual</h3>
+        <div class="grid gap-2" style="grid-template-columns: 140px 1fr; font-size: 13px; margin-bottom: 16px;">
+          ${u.nome ? `<div style="color: var(--uc-warm-gray);">Nome:</div><div>${escapeHtml(u.nome)}</div>` : ''}
+          <div style="color: var(--uc-warm-gray);">Email:</div><div>${escapeHtml(u.email || '—')}</div>
+          ${u.role ? `<div style="color: var(--uc-warm-gray);">Permissão:</div><div><span class="badge ${u.role === 'admin' ? 'badge-gold' : 'badge-gray'}">${escapeHtml(u.role)}</span></div>` : ''}
+        </div>
+        <p class="help-text mb-3">A sessão fica salva no seu navegador. Saia ao usar dispositivo compartilhado.</p>
+        <button class="btn btn-outline btn-sm" onclick="logoutFlow()">Sair</button>
+      </div>
       <div class="card mb-3">
         <h3 class="font-serif text-lg font-semibold smallcaps mb-3" style="color: var(--uc-black);">Auditoria de privacidade</h3>
         <div style="background: var(--uc-green-soft); border: 1px solid var(--uc-green); border-radius: 6px; padding: 12px; display: flex; gap: 12px; align-items: center;">
           <span style="font-size: 24px;">✓</span>
           <div>
             <strong style="color: var(--uc-green);">Nenhum upload nesta sessão</strong>
-            <p style="font-size: 12px; color: var(--uc-graphite); margin: 2px 0 0;">Todos os PDFs processados ficaram no seu dispositivo.</p>
+            <p style="font-size: 12px; color: var(--uc-graphite); margin: 2px 0 0;">PDFs ficam em pasta Drive compartilhada. Demais dados em Firestore com regras de allowlist.</p>
           </div>
         </div>
       </div>

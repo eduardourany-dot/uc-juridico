@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.3.0 (UC_admin + diretório completo)
-const CACHE_NAME = 'uc-juridico-v6-3-0';
+// Service Worker — UC Jurídico v6.3.1 (logout button)
+const CACHE_NAME = 'uc-juridico-v6-3-1';
 const APP_SHELL = [
   './',
   './index.html',
