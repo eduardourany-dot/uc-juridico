@@ -2671,9 +2671,13 @@ ${indexed.events.map(e => `<div class="event"><strong>Evento ${e.eventNumber}</s
 // ====================================================================
 
 const _toolsState = {
-  file: null, fileBytes: null, fileName: '',
+  files: [],         // Array<{file, fileName, fileBytes}>  ← fonte canônica
+  file: null, fileBytes: null, fileName: '',  // aliases do arquivo "atual" durante o loop
   linkedProcessId: null,
-  result: null
+  result: null,
+  _batchMode: false,
+  _batchIndex: 0,
+  _batchTotal: 0
 };
 
 async function renderTools() {
@@ -2688,11 +2692,11 @@ async function renderTools() {
     </div>
 
     <div class="card mb-4">
-      <h3 class="font-serif text-lg font-semibold smallcaps mb-3" style="color: var(--uc-black);">1. Selecione o PDF</h3>
+      <h3 class="font-serif text-lg font-semibold smallcaps mb-3" style="color: var(--uc-black);">1. Selecione um ou mais PDFs</h3>
       <div id="toolDropZone" class="drop-zone">
-        <input type="file" id="toolFileInput" accept=".pdf" class="hidden">
-        <p style="font-size: 14px; color: var(--uc-graphite);"><strong>Clique ou arraste</strong> um PDF aqui</p>
-        <p class="help-text" style="margin-top: 4px;">Os arquivos não saem do seu dispositivo</p>
+        <input type="file" id="toolFileInput" accept=".pdf" multiple class="hidden">
+        <p style="font-size: 14px; color: var(--uc-graphite);"><strong>Clique ou arraste</strong> um ou mais PDFs aqui</p>
+        <p class="help-text" style="margin-top: 4px;">Você pode selecionar vários · ações abaixo processam todos em sequência</p>
       </div>
       <div id="toolFileInfo" class="hidden mt-3"></div>
     </div>
@@ -2729,18 +2733,18 @@ async function renderTools() {
     <div id="toolResultArea" class="mt-4"></div>
   `;
 
-  // Setup file input
+  // Setup file input (suporta múltiplos arquivos)
   const fi = $('toolFileInput'), dz = $('toolDropZone');
   dz.onclick = () => fi.click();
-  fi.onchange = (e) => handleToolFile(e.target.files[0]);
+  fi.onchange = (e) => handleToolFiles(e.target.files);
   dz.ondragover = (e) => { e.preventDefault(); dz.classList.add('dragover'); };
   dz.ondragleave = () => dz.classList.remove('dragover');
-  dz.ondrop = (e) => { e.preventDefault(); dz.classList.remove('dragover'); handleToolFile(e.dataTransfer.files[0]); };
+  dz.ondrop = (e) => { e.preventDefault(); dz.classList.remove('dragover'); handleToolFiles(e.dataTransfer.files); };
 
   $('toolProcessLink').onchange = (e) => { _toolsState.linkedProcessId = e.target.value || null; };
 
-  // If a file was already loaded, restore display
-  if (_toolsState.file) showToolFileInfo();
+  // If files were already loaded, restore display
+  if (_toolsState.files.length) showToolFileInfo();
 }
 
 function renderToolCard(action, icon, name, desc, gold = false) {
@@ -2753,38 +2757,114 @@ function renderToolCard(action, icon, name, desc, gold = false) {
   `;
 }
 
-async function handleToolFile(file) {
-  if (!file || file.type !== 'application/pdf') { toast('Arquivo inválido', 'Selecione um PDF.', 'error'); return; }
-  _toolsState.file = file;
-  _toolsState.fileName = file.name;
-  _toolsState.fileBytes = await file.arrayBuffer();
+async function handleToolFiles(fileList) {
+  if (!fileList || !fileList.length) return;
+  const arr = Array.from(fileList);
+  const pdfs = arr.filter(f => f && f.type === 'application/pdf');
+  const ignored = arr.length - pdfs.length;
+  if (ignored > 0) toast('Arquivos ignorados', `${ignored} item(s) não eram PDF.`, 'warning');
+  if (pdfs.length === 0) { toast('Nenhum PDF', 'Selecione ao menos um arquivo PDF.', 'error'); return; }
+  // Lê cada PDF e adiciona à lista (sem duplicar por nome+tamanho)
+  for (const file of pdfs) {
+    const dup = _toolsState.files.some(x => x.fileName === file.name && x.file.size === file.size);
+    if (dup) continue;
+    const fileBytes = await file.arrayBuffer();
+    _toolsState.files.push({ file, fileName: file.name, fileBytes });
+  }
   _toolsState.result = null;
   showToolFileInfo();
 }
 
+function removeToolFile(index) {
+  _toolsState.files.splice(index, 1);
+  showToolFileInfo();
+}
+
+function clearToolFiles() {
+  _toolsState.files = [];
+  _toolsState.file = null;
+  _toolsState.fileBytes = null;
+  _toolsState.fileName = '';
+  showToolFileInfo();
+}
+
 function showToolFileInfo() {
-  const f = _toolsState.file;
   const info = $('toolFileInfo');
+  const files = _toolsState.files;
+  if (!files.length) {
+    info.classList.add('hidden');
+    info.innerHTML = '';
+    return;
+  }
   info.classList.remove('hidden');
+  const totalBytes = files.reduce((s, x) => s + x.file.size, 0);
   info.innerHTML = `
-    <div style="background: var(--uc-cream); border: 1px solid var(--uc-line); padding: 12px; border-radius: 6px; display: flex; gap: 12px; align-items: center;">
-      <span style="font-size: 24px;">📄</span>
-      <div style="flex: 1; min-width: 0;">
-        <div style="font-weight: 600; color: var(--uc-black); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${escapeHtml(f.name)}</div>
-        <div style="font-size: 12px; color: var(--uc-warm-gray);">${formatBytes(f.size)}</div>
-      </div>
-      <button class="btn btn-ghost btn-sm" onclick="_toolsState.file=null; renderTools();">Trocar</button>
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+      <strong style="font-size: 13px;">${files.length} arquivo${files.length > 1 ? 's' : ''} selecionado${files.length > 1 ? 's' : ''} · ${formatBytes(totalBytes)}</strong>
+      <button class="btn btn-ghost btn-sm" onclick="clearToolFiles()">Limpar todos</button>
+    </div>
+    <div style="display: flex; flex-direction: column; gap: 6px;">
+      ${files.map((x, i) => `
+        <div style="background: var(--uc-cream); border: 1px solid var(--uc-line); padding: 10px 12px; border-radius: 6px; display: flex; gap: 10px; align-items: center;">
+          <span style="font-size: 20px;">📄</span>
+          <div style="flex: 1; min-width: 0;">
+            <div style="font-weight: 600; color: var(--uc-black); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 13px;">${escapeHtml(x.fileName)}</div>
+            <div style="font-size: 11px; color: var(--uc-warm-gray);">${formatBytes(x.file.size)}</div>
+          </div>
+          <button class="btn btn-ghost btn-sm" onclick="removeToolFile(${i})" title="Remover">✕</button>
+        </div>
+      `).join('')}
     </div>
   `;
 }
 
 async function runToolAction(action) {
+  // Sincroniza arquivo "atual" (compatibilidade) caso _toolsState.file esteja stale
+  if (!_toolsState.files || _toolsState.files.length === 0) {
+    if (_toolsState.file) {
+      _toolsState.files = [{ file: _toolsState.file, fileName: _toolsState.fileName, fileBytes: _toolsState.fileBytes }];
+    } else {
+      toast('Selecione pelo menos um PDF antes', '', 'error');
+      return;
+    }
+  }
+  $('toolResultArea').innerHTML = '';
+  _toolsState._batchMode = _toolsState.files.length > 1;
+  _toolsState._batchTotal = _toolsState.files.length;
+  for (let i = 0; i < _toolsState.files.length; i++) {
+    const f = _toolsState.files[i];
+    _toolsState.file = f.file;
+    _toolsState.fileName = f.fileName;
+    _toolsState.fileBytes = f.fileBytes;
+    _toolsState._batchIndex = i;
+    try {
+      await _runToolActionSingle(action);
+    } catch (err) {
+      console.error('Erro processando ' + f.fileName, err);
+      $('toolResultArea').insertAdjacentHTML('beforeend', `<div class="card mb-3" style="border-left: 3px solid var(--uc-red);"><strong style="color: var(--uc-red);">Erro em ${escapeHtml(f.fileName)}</strong><p>${escapeHtml(err.message || String(err))}</p></div>`);
+    }
+  }
+  _toolsState._batchMode = false;
+}
+
+async function _runToolActionSingle(action) {
   if (!_toolsState.file) { toast('Selecione um PDF antes', '', 'error'); return; }
   const ra = $('toolResultArea');
-  ra.innerHTML = `<div class="card"><div class="flex items-center gap-3"><div class="spinner"></div><div><strong>Processando...</strong><div id="toolProgress" class="help-text">Aguarde</div></div></div><div class="progress-wrap"><div class="progress-bar-bg"><div class="progress-bar-fg" id="toolProgressBar"></div></div></div></div>`;
+  // ID único por iteração para o loader/progresso (evita colisão em batch)
+  const idx = _toolsState._batchIndex || 0;
+  const progId = 'toolProgress_' + idx;
+  const barId = 'toolProgressBar_' + idx;
+  const headerLabel = _toolsState._batchMode
+    ? `Processando ${idx + 1}/${_toolsState._batchTotal}: ${escapeHtml(_toolsState.fileName)}`
+    : 'Processando...';
+  ra.insertAdjacentHTML('beforeend', `<div class="card mb-3 _toolLoader" data-loader-idx="${idx}"><div class="flex items-center gap-3"><div class="spinner"></div><div><strong>${headerLabel}</strong><div id="${progId}" class="help-text">Aguarde</div></div></div><div class="progress-wrap"><div class="progress-bar-bg"><div class="progress-bar-fg" id="${barId}"></div></div></div></div>`);
   const progressCb = (msg, pct = null) => {
-    $('toolProgress').textContent = msg;
-    if (pct !== null) $('toolProgressBar').style.width = (pct * 100) + '%';
+    const pe = document.getElementById(progId);
+    if (pe) pe.textContent = msg;
+    if (pct !== null) {
+      const be = document.getElementById(barId);
+      if (be) be.style.width = (pct * 100) + '%';
+    }
   };
   try {
     const bytes = _toolsState.fileBytes;
@@ -2948,27 +3028,44 @@ async function runToolAction(action) {
     }
   } catch(err) {
     console.error(err);
-    ra.innerHTML = `<div class="card" style="border-left: 3px solid var(--uc-red);"><strong style="color: var(--uc-red);">Erro</strong><p>${escapeHtml(err.message)}</p></div>`;
+    // Remove loader (batch outer rethrows, single shows error inline)
+    removeLoaderForCurrentBatch_();
+    if (_toolsState._batchMode) {
+      throw err;  // outer runToolAction handles per-file
+    }
+    ra.insertAdjacentHTML('beforeend', `<div class="card" style="border-left: 3px solid var(--uc-red);"><strong style="color: var(--uc-red);">Erro</strong><p>${escapeHtml(err.message)}</p></div>`);
     toast('Erro ao processar', err.message, 'error');
   }
 }
 
+function removeLoaderForCurrentBatch_() {
+  const idx = _toolsState._batchIndex || 0;
+  const loader = document.querySelector(`._toolLoader[data-loader-idx="${idx}"]`);
+  if (loader) loader.remove();
+}
+
 function showToolResult({ blob = null, name = '', summary = '', preview = null, custom = null, actions = [] }) {
   const ra = $('toolResultArea');
-  ra.innerHTML = `
-    <div class="card card-gold-border fade-in">
+  removeLoaderForCurrentBatch_();
+  // ID único do botão de download em batch
+  const idx = _toolsState._batchIndex || 0;
+  const dlBtnId = '_dlBtn_' + idx + '_' + Math.random().toString(36).slice(2, 7);
+  const fileLabel = _toolsState._batchMode ? `<div class="help-text" style="margin-bottom: 6px;">Arquivo ${idx + 1}/${_toolsState._batchTotal}: <strong>${escapeHtml(_toolsState.fileName)}</strong></div>` : '';
+  ra.insertAdjacentHTML('beforeend', `
+    <div class="card card-gold-border fade-in mb-3">
+      ${fileLabel}
       <h3 class="font-serif text-lg font-semibold smallcaps mb-2" style="color: var(--uc-black);">✓ Concluído</h3>
       <p style="color: var(--uc-graphite); margin-bottom: 12px;">${escapeHtml(summary)}</p>
       ${custom || ''}
       ${preview ? `<details class="mt-3"><summary style="cursor:pointer; font-weight: 500;">Pré-visualizar texto</summary><pre style="background: var(--uc-cream); padding: 12px; border-radius: 6px; max-height: 200px; overflow: auto; font-size: 12px; white-space: pre-wrap; margin-top: 8px;">${escapeHtml(preview)}...</pre></details>` : ''}
       <div class="flex gap-2 flex-wrap mt-3">
-        ${blob ? `<button class="btn btn-primary btn-sm" id="_dlBtn">⬇ Baixar ${escapeHtml(name)}</button>` : ''}
+        ${blob ? `<button class="btn btn-primary btn-sm" id="${dlBtnId}">⬇ Baixar ${escapeHtml(name)}</button>` : ''}
         ${actions.map((a, i) => `<button class="btn btn-outline btn-sm" onclick="${a.cb}">${escapeHtml(a.label)}</button>`).join('')}
       </div>
     </div>
-  `;
-  if (blob) $('_dlBtn').onclick = () => downloadBlob(blob, name);
-  ra.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  `);
+  if (blob) document.getElementById(dlBtnId).onclick = () => downloadBlob(blob, name);
+  if (!_toolsState._batchMode) ra.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
 async function saveIndexedToProcess(processId, indexed, sourceFileName, bytes) {
