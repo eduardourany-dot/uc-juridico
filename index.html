@@ -1002,6 +1002,43 @@ async function newProcessFlow() {
         return;
       }
 
+      // Prevenção de duplicata: por CNJ (se houver) ou por nome
+      const candidate = { name, cnj: cnj || null };
+      const candidateKey = processDedupKey(candidate);
+      const existing = (await DB.getAllProcesses()).find(x => processDedupKey(x) === candidateKey);
+      if (existing) {
+        const labelExist = existing.cnj
+          ? `Já existe um processo com o CNJ <strong>${escapeHtml(existing.cnj)}</strong>: <em>${escapeHtml(existing.name)}</em>.`
+          : `Já existe um processo com nome <em>${escapeHtml(existing.name)}</em>.`;
+        const action = await new Promise(resolve => {
+          const m = document.createElement('div');
+          m.className = 'modal-backdrop';
+          m.innerHTML = `
+            <div class="modal">
+              <h3 class="modal-title">Possível duplicata</h3>
+              <p style="color: var(--uc-graphite); font-size: 14px; margin-bottom: 16px;">${labelExist}</p>
+              <p class="help-text" style="margin-bottom: 16px;">O que deseja fazer?</p>
+              <div class="flex flex-col gap-2">
+                <button class="btn btn-primary" id="_dupOpen">Abrir o existente</button>
+                <button class="btn btn-outline" id="_dupCreate">Criar duplicata mesmo assim</button>
+                <button class="btn btn-ghost" id="_dupCancel">Cancelar</button>
+              </div>
+            </div>`;
+          document.body.appendChild(m);
+          m.querySelector('#_dupOpen').onclick = () => { m.remove(); resolve('open'); };
+          m.querySelector('#_dupCreate').onclick = () => { m.remove(); resolve('create'); };
+          m.querySelector('#_dupCancel').onclick = () => { m.remove(); resolve('cancel'); };
+        });
+        if (action === 'cancel') return;
+        if (action === 'open') {
+          cleanup();
+          navigate('process', { currentProcessId: existing.id });
+          resolve(existing);
+          return;
+        }
+        // 'create' segue o fluxo abaixo
+      }
+
       const p = {
         id: uid(),
         name,
@@ -1552,6 +1589,37 @@ function isTributario(area) {
   return area === 'Tributário' || area === 'Execução Fiscal';
 }
 
+// ====================================================================
+// Dedup — chaves canônicas para identificar duplicatas
+// (normalizeCnj já existe mais abaixo em forma canônica; reuso aqui)
+// ====================================================================
+
+function processDedupKey(p) {
+  if (!p) return '';
+  const cnj = String(p.cnj || '').replace(/\D/g, '');
+  if (cnj) return 'cnj:' + cnj;
+  return 'name:' + (p.name || '').toLowerCase().trim();
+}
+
+function deadlineDedupKey(d) {
+  if (!d) return '';
+  const dt = String(d.deadlineDate || '').slice(0, 10); // só YYYY-MM-DD
+  const desc = (d.description || d.type || '').toLowerCase().trim();
+  if (d.djenHash) return ['djen', d.processId || '', d.djenHash].join('|');
+  return [d.processId || '', desc, dt].join('|');
+}
+
+function groupDuplicates(records, keyFn) {
+  const groups = new Map();
+  for (const r of records) {
+    const k = keyFn(r);
+    if (!k) continue;
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k).push(r);
+  }
+  return [...groups.entries()].filter(([, g]) => g.length > 1);
+}
+
 // CDA: cada linha "numero | valor | periodo" → { numero, valor, periodo }
 function parseCdas(text) {
   if (!text) return [];
@@ -1772,6 +1840,122 @@ async function editProcessFlow() {
   renderProcessDetail();
 }
 
+// ====================================================================
+// Duplicatas — scan + merge (Settings → Manutenção)
+// ====================================================================
+
+async function scanDuplicates() {
+  const target = $('dupReport');
+  target.innerHTML = `<div class="help-text">Buscando…</div>`;
+  const procs = await DB.getAllProcesses();
+  const allDeads = await DB.getAllDeadlines();
+  const procGroups = groupDuplicates(procs, processDedupKey);
+  const deadGroups = groupDuplicates(allDeads, deadlineDedupKey);
+  const totalProcDup = procGroups.reduce((s, [, g]) => s + g.length - 1, 0);
+  const totalDeadDup = deadGroups.reduce((s, [, g]) => s + g.length - 1, 0);
+
+  window._dupGroups = { procs: procGroups, deads: deadGroups };
+
+  if (totalProcDup === 0 && totalDeadDup === 0) {
+    target.innerHTML = `<div style="background: var(--uc-green-soft); border: 1px solid var(--uc-green); border-radius: 6px; padding: 12px;"><strong style="color: var(--uc-green);">✓ Nenhuma duplicata encontrada.</strong></div>`;
+    $('mergeAllBtn').style.display = 'none';
+    return;
+  }
+
+  // Listas dos grupos
+  const renderProcGroup = ([key, g]) => {
+    const sorted = [...g].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+    return `
+      <div style="border: 1px solid var(--uc-line-soft); border-radius: 6px; padding: 10px; margin-bottom: 8px; font-size: 12px;">
+        <div style="font-family: monospace; color: var(--uc-warm-gray); margin-bottom: 6px;">${escapeHtml(key)}</div>
+        <ul style="margin: 0; padding-left: 18px;">
+          ${sorted.map((p, i) => `<li>${i === 0 ? '<strong>(manter) </strong>' : '<span style="color: var(--uc-red);">(descartar) </span>'}${escapeHtml(p.name)}${p.cnj ? ' · ' + escapeHtml(p.cnj) : ''} <span style="color: var(--uc-warm-gray);">${formatDate(p.updatedAt, { relative: true })}</span></li>`).join('')}
+        </ul>
+      </div>`;
+  };
+  const renderDeadGroup = ([key, g]) => {
+    const sorted = [...g].sort((a, b) => (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0));
+    return `
+      <div style="border: 1px solid var(--uc-line-soft); border-radius: 6px; padding: 10px; margin-bottom: 8px; font-size: 12px;">
+        <div style="font-family: monospace; color: var(--uc-warm-gray); margin-bottom: 6px;">${escapeHtml(key)}</div>
+        <ul style="margin: 0; padding-left: 18px;">
+          ${sorted.map((d, i) => `<li>${i === 0 ? '<strong>(manter) </strong>' : '<span style="color: var(--uc-red);">(descartar) </span>'}${escapeHtml(d.description || d.type || '?')} · vence ${formatDate(d.deadlineDate)} <span style="color: var(--uc-warm-gray);">${formatDate(d.updatedAt || d.createdAt, { relative: true })}</span></li>`).join('')}
+        </ul>
+      </div>`;
+  };
+
+  target.innerHTML = `
+    <div class="grid gap-2 mb-3" style="grid-template-columns: 200px 1fr; font-size: 13px;">
+      <div style="color: var(--uc-warm-gray);">Processos duplicados:</div>
+      <div><strong>${totalProcDup}</strong> em ${procGroups.length} grupo${procGroups.length !== 1 ? 's' : ''}</div>
+      <div style="color: var(--uc-warm-gray);">Prazos duplicados:</div>
+      <div><strong>${totalDeadDup}</strong> em ${deadGroups.length} grupo${deadGroups.length !== 1 ? 's' : ''}</div>
+    </div>
+    ${procGroups.length ? `<details open><summary style="cursor: pointer; font-weight: 500; margin-bottom: 8px;">Processos (${procGroups.length})</summary>${procGroups.map(renderProcGroup).join('')}</details>` : ''}
+    ${deadGroups.length ? `<details ${procGroups.length ? '' : 'open'}><summary style="cursor: pointer; font-weight: 500; margin: 8px 0;">Prazos (${deadGroups.length})</summary>${deadGroups.map(renderDeadGroup).join('')}</details>` : ''}
+  `;
+  $('mergeAllBtn').style.display = 'inline-flex';
+}
+
+async function reparentChildrenToKept(fromId, toId) {
+  const remaps = [
+    [DB.getDeadlinesByProcess, DB.saveDeadline],
+    [DB.getEventsByProcess,    DB.saveEvent],
+    [DB.getNotesByProcess,     DB.saveNote],
+    [DB.getJurisprudenceByProcess, DB.saveJurisprudence],
+    [DB.getDjenPublicationsByProcess, DB.saveDjenPublication]
+  ];
+  for (const [getter, saver] of remaps) {
+    if (typeof getter !== 'function' || typeof saver !== 'function') continue;
+    const items = await getter.call(DB, fromId);
+    for (const it of (items || [])) {
+      it.processId = toId;
+      await saver.call(DB, it);
+    }
+  }
+}
+
+async function mergeAllDuplicates() {
+  if (!window._dupGroups) {
+    toast('Rode "Buscar duplicatas" primeiro', '', 'warning');
+    return;
+  }
+  const ok = await confirmDialog(
+    'Mesclar todas as duplicatas?',
+    'Mantém o registro mais recente de cada grupo. Filhos de processos mesclados são realocados antes do soft-delete (dados preservados).',
+    true
+  );
+  if (!ok) return;
+
+  $('dupReport').innerHTML = `<div class="help-text">Mesclando…</div>`;
+  let mergedProc = 0, mergedDead = 0;
+
+  for (const [, group] of window._dupGroups.procs) {
+    const sorted = [...group].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+    const keep = sorted[0];
+    for (const drop of sorted.slice(1)) {
+      await reparentChildrenToKept(drop.id, keep.id);
+      await DB.deleteProcess(drop.id);
+      mergedProc++;
+    }
+  }
+
+  // Após realocar prazos, alguns ficaram duplicados em relação a outros do processo mantido.
+  // Re-scan + dedup independente.
+  const allDeads = await DB.getAllDeadlines();
+  const newDeadGroups = groupDuplicates(allDeads, deadlineDedupKey);
+  for (const [, group] of newDeadGroups) {
+    const sorted = [...group].sort((a, b) => (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0));
+    for (const drop of sorted.slice(1)) {
+      await DB.deleteDeadline(drop.id);
+      mergedDead++;
+    }
+  }
+
+  toast('Mesclagem concluída', `${mergedProc} processo(s) e ${mergedDead} prazo(s) duplicados removidos`, 'success');
+  await scanDuplicates();
+}
+
 async function logoutFlow() {
   const ok = await confirmDialog('Sair do sistema?', 'Você precisará fazer login novamente para acessar.');
   if (!ok) return;
@@ -1852,6 +2036,14 @@ async function addDeadlineFlow() {
     status: 'pending',
     createdAt: Date.now()
   };
+  // Prevenção: se já existe prazo idêntico (mesmo processo, descrição, data) — pergunta
+  const dupKey = deadlineDedupKey(d);
+  const existingDeadlines = await DB.getDeadlinesByProcess(state.currentProcessId);
+  const dup = existingDeadlines.find(x => deadlineDedupKey(x) === dupKey);
+  if (dup) {
+    const ok = await confirmDialog('Prazo idêntico já existe', `Já existe um prazo "${dup.description || dup.type}" com vencimento ${formatDate(dup.deadlineDate)} neste processo. Criar mesmo assim?`);
+    if (!ok) return;
+  }
   await DB.saveDeadline(d);
   toast('Prazo adicionado', formatDate(deadlineDate), 'success');
   renderProcessDetail();
@@ -3296,6 +3488,7 @@ async function renderSettings() {
       <button class="tab ${tab === 'prompts' ? 'active' : ''}" onclick="setSettingsTab('prompts')">Prompts</button>
       <button class="tab ${tab === 'backup' ? 'active' : ''}" onclick="setSettingsTab('backup')">Backup</button>
       <button class="tab ${tab === 'sync' ? 'active' : ''}" onclick="setSettingsTab('sync')">Sincronização</button>
+      <button class="tab ${tab === 'maintenance' ? 'active' : ''}" onclick="setSettingsTab('maintenance')">Manutenção</button>
       <button class="tab ${tab === 'security' ? 'active' : ''}" onclick="setSettingsTab('security')">Segurança</button>
       <button class="tab ${tab === 'about' ? 'active' : ''}" onclick="setSettingsTab('about')">Sobre</button>
     </div>
@@ -3512,6 +3705,24 @@ function renderSettingsTab(tab, prompts, defaultPromptId) {
         <p style="font-size: 13px; color: var(--uc-graphite); line-height: 1.6;">
           Manter 100% dos dados no seu dispositivo é uma escolha deliberada para preservar sigilo profissional e segredo de justiça. Nenhum dado de cliente sai do seu controle, mesmo em caso de comprometimento de servidor.
         </p>
+      </div>
+    `;
+  }
+  if (tab === 'maintenance') {
+    return `
+      <div class="card mb-3">
+        <h3 class="font-serif text-lg font-semibold smallcaps mb-3" style="color: var(--uc-black);">Limpeza de duplicatas</h3>
+        <p class="help-text mb-3">
+          Identifica processos duplicados (mesmo CNJ ou mesmo nome) e prazos duplicados
+          (mesmo processo + descrição + data, ou mesmo hash DJEN). Mantém o registro mais recente
+          de cada grupo. Filhos de processos mesclados (prazos, eventos, notas, jurisprudência, DJEN)
+          são realocados antes do soft-delete — nada se perde.
+        </p>
+        <div id="dupReport" class="mb-3"></div>
+        <div class="flex gap-2 flex-wrap">
+          <button class="btn btn-outline" onclick="scanDuplicates()">Buscar duplicatas</button>
+          <button class="btn btn-primary" onclick="mergeAllDuplicates()" id="mergeAllBtn" style="display:none">Mesclar todas</button>
+        </div>
       </div>
     `;
   }
@@ -5144,37 +5355,44 @@ async function djenImportSelected(modal) {
       await djenEnrichProcessFromPublication(processId, pub);
     }
 
-    // Create deadline if linked to process
+    // Create deadline + event if linked to process — dedupe por djenHash
     if (processId && dataDispo) {
       const calc = calcDjenDeadline(dataDispo, cfg.prazo);
-      const deadline = {
-        id: uid(),
-        processId,
-        description: `[DJEN] ${pub.tipoComunicacao || 'Intimação'} · ${pub.nomeOrgao || pub.orgao || ''}`.slice(0, 200),
-        type: 'djen',
-        intimationDate: calc.publication.toISOString(),
-        daysAllowed: cfg.prazo,
-        deadlineDate: calc.deadline.toISOString(),
-        status: 'pending',
-        djenHash: pub.hash,
-        createdAt: Date.now()
-      };
-      await DB.saveDeadline(deadline);
-      prazosCriados++;
+      const existingDeadlines = await DB.getDeadlinesByProcess(processId);
+      const dupDeadline = existingDeadlines.some(x => x.djenHash === pub.hash);
+      if (!dupDeadline) {
+        const deadline = {
+          id: uid(),
+          processId,
+          description: `[DJEN] ${pub.tipoComunicacao || 'Intimação'} · ${pub.nomeOrgao || pub.orgao || ''}`.slice(0, 200),
+          type: 'djen',
+          intimationDate: calc.publication.toISOString(),
+          daysAllowed: cfg.prazo,
+          deadlineDate: calc.deadline.toISOString(),
+          status: 'pending',
+          djenHash: pub.hash,
+          createdAt: Date.now()
+        };
+        await DB.saveDeadline(deadline);
+        prazosCriados++;
+      }
 
-      // Also create event in process timeline
-      const event = {
-        id: uid(),
-        processId,
-        eventNumber: 'DJEN-' + dataDispo,
-        type: pub.tipoComunicacao || 'Intimação DJEN',
-        date: formatDate(calc.publication),
-        startPage: 0, endPage: 0, pageCount: 0,
-        sourceFile: 'DJEN',
-        djenHash: pub.hash,
-        addedAt: Date.now()
-      };
-      await DB.saveEvent(event);
+      const existingEvents = await DB.getEventsByProcess(processId);
+      const dupEvent = existingEvents.some(x => x.djenHash === pub.hash);
+      if (!dupEvent) {
+        const event = {
+          id: uid(),
+          processId,
+          eventNumber: 'DJEN-' + dataDispo,
+          type: pub.tipoComunicacao || 'Intimação DJEN',
+          date: formatDate(calc.publication),
+          startPage: 0, endPage: 0, pageCount: 0,
+          sourceFile: 'DJEN',
+          djenHash: pub.hash,
+          addedAt: Date.now()
+        };
+        await DB.saveEvent(event);
+      }
     }
   }
 
