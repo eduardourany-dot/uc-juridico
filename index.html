@@ -1415,13 +1415,15 @@ function renderDeadlineRow(d, p) {
   else if (days === 0) { cls = 'urgent'; label = 'HOJE'; }
   else if (days <= 3) { cls = 'urgent'; label = `${days}d`; }
   else if (days <= 7) { cls = 'warning'; label = `${days}d`; }
+  const unidLabel = d.unidade === 'CORRIDOS' ? 'corridos' : 'úteis';
   return `
     <div class="deadline-row ${cls}">
       <div style="flex: 1; min-width: 0;">
-        <div style="font-weight: 600; color: var(--uc-black);">${escapeHtml(d.description || d.type)}</div>
+        <div style="font-weight: 600; color: var(--uc-black);">${escapeHtml(d.description || d.type)}${d.emDobro ? ' <span class="badge badge-amber" style="font-size: 9px;">DOBRO</span>' : ''}</div>
         <div style="font-size: 12px; color: var(--uc-warm-gray); margin-top: 2px;">
-          Vence ${formatDate(dl)}${d.intimationDate ? ' · intimação ' + formatDate(d.intimationDate) : ''}${d.daysAllowed ? ' · ' + d.daysAllowed + ' dias úteis' : ''}
+          Vence ${formatDate(dl)}${d.intimationDate ? ' · intimação ' + formatDate(d.intimationDate) : ''}${d.daysAllowed ? ' · ' + d.daysAllowed + ' dias ' + unidLabel : ''}${d.tribunal && d.tribunal !== 'NACIONAL' ? ' · ' + escapeHtml(d.tribunal) : ''}
         </div>
+        ${d.diarioCalculo ? `<details style="margin-top: 4px;"><summary style="font-size: 11px; color: var(--uc-warm-gray); cursor: pointer;">📋 diário de cálculo</summary><div style="font-size: 11px; color: var(--uc-graphite); padding: 6px 8px; background: var(--uc-cream); border-radius: 4px; margin-top: 4px; line-height: 1.5;">${escapeHtml(d.diarioCalculo)}</div></details>` : ''}
       </div>
       <div class="flex gap-2 items-center">
         <span class="badge ${cls === 'urgent' || cls === 'expired' ? 'badge-red' : cls === 'warning' ? 'badge-amber' : cls === 'done' ? 'badge-gray' : 'badge-green'}">${label}</span>
@@ -2013,20 +2015,35 @@ async function deleteNote(id) {
 }
 
 async function addDeadlineFlow() {
+  const proc = state._processView?.p;
+  const tribunalInferido = inferirTribunal(proc?.court);
   const r = await showModal('Adicionar prazo', [
     { label: 'Descrição', placeholder: 'Ex: Embargos à execução · Resposta · Recurso' },
     { label: 'Data da intimação/publicação (opcional)', type: 'date' },
-    { label: 'Prazo em dias úteis', type: 'number', default: '15', min: '1', max: '365' },
+    { label: 'Prazo', type: 'number', default: '15', min: '1', max: '365' },
+    { label: 'Unidade do prazo', type: 'select', default: 'UTEIS', options: [
+      { value: 'UTEIS', label: 'Dias úteis' },
+      { value: 'CORRIDOS', label: 'Dias corridos' }
+    ]},
+    { label: 'Prazo em dobro (Fazenda/MP/Defensoria)', type: 'checkbox', default: false },
     { label: 'OU data de vencimento direta (se preferir)', type: 'date' }
-  ], { confirmLabel: 'Adicionar', intro: 'Informe a data da intimação + dias OU diretamente a data de vencimento.' });
+  ], { confirmLabel: 'Adicionar', intro: 'Informe a data da intimação + dias OU diretamente a data de vencimento. Tribunal inferido: <strong>' + tribunalInferido + '</strong>.' });
   if (!r) return;
-  const [desc, intDate, days, directDate] = r;
+  const [desc, intDate, days, unidade, emDobro, directDate] = r;
   if (!desc?.trim()) { toast('Descrição obrigatória', '', 'error'); return; }
-  let deadlineDate;
+  let deadlineDate, diario = null;
   if (directDate) {
     deadlineDate = new Date(directDate + 'T12:00:00');
   } else if (intDate && days) {
-    deadlineDate = addBusinessDays(new Date(intDate + 'T12:00:00'), parseInt(days));
+    const calc = calcularDataFatal({
+      dataPublicacao: new Date(intDate + 'T12:00:00'),
+      prazoDias: parseInt(days),
+      unidade,
+      tribunal: tribunalInferido,
+      emDobro
+    });
+    deadlineDate = calc.dataFatal;
+    diario = gerarDiarioCalculo(calc);
   } else {
     toast('Informe pelo menos a data de vencimento', '', 'error'); return;
   }
@@ -2036,6 +2053,10 @@ async function addDeadlineFlow() {
     type: 'manual',
     intimationDate: intDate ? new Date(intDate + 'T12:00:00').toISOString() : null,
     daysAllowed: days ? parseInt(days) : null,
+    unidade,
+    emDobro: !!emDobro,
+    tribunal: tribunalInferido,
+    diarioCalculo: diario,
     deadlineDate: deadlineDate.toISOString(),
     status: 'pending',
     createdAt: Date.now()
@@ -2629,16 +2650,194 @@ function anonymizeText(text) {
     .replace(/\b\d{4}[\s-]?\d{4}[\s-]?\d{4}[\s-]?\d{4}\b/g, '[CARTÃO]');
 }
 
-// Detect deadlines from intimations
-function addBusinessDays(date, days) {
-  const result = new Date(date);
-  let added = 0;
-  while (added < days) {
-    result.setDate(result.getDate() + 1);
-    const day = result.getDay();
-    if (day !== 0 && day !== 6) added++;
+// ====================================================================
+// Engine de prazos — Sprint 2 (Módulo Prazos): feriados, recesso, dias úteis
+// ====================================================================
+
+// Computus (Anonymous Gregorian) — calcula a data da Páscoa para qualquer ano.
+function easterDate(year) {
+  const a = year % 19;
+  const b = Math.floor(year / 100);
+  const c = year % 100;
+  const d = Math.floor(b / 4);
+  const e = b % 4;
+  const f = Math.floor((b + 8) / 25);
+  const g = Math.floor((b - f + 1) / 3);
+  const h = (19 * a + b - d - g + 15) % 30;
+  const i = Math.floor(c / 4);
+  const k = c % 4;
+  const l = (32 + 2 * e + 2 * i - h - k) % 7;
+  const m = Math.floor((a + 11 * h + 22 * l) / 451);
+  const month = Math.floor((h + l - 7 * m + 114) / 31);
+  const day = ((h + l - 7 * m + 114) % 31) + 1;
+  return new Date(year, month - 1, day);
+}
+
+function _addDays(d, n) {
+  const r = new Date(d);
+  r.setDate(r.getDate() + n);
+  return r;
+}
+
+function ymdKey(d) {
+  const y = d.getFullYear();
+  const mo = String(d.getMonth() + 1).padStart(2, '0');
+  const da = String(d.getDate()).padStart(2, '0');
+  return `${y}-${mo}-${da}`;
+}
+
+const FERIADOS_NACIONAIS_FIXOS = [
+  { md: '01-01', desc: 'Confraternização Universal' },
+  { md: '04-21', desc: 'Tiradentes' },
+  { md: '05-01', desc: 'Dia do Trabalho' },
+  { md: '09-07', desc: 'Independência do Brasil' },
+  { md: '10-12', desc: 'N. S. Aparecida' },
+  { md: '11-02', desc: 'Finados' },
+  { md: '11-15', desc: 'Proclamação da República' },
+  { md: '11-20', desc: 'Consciência Negra' },
+  { md: '12-25', desc: 'Natal' }
+];
+
+const _feriadosCache = new Map();
+
+function feriadosDoAno(year) {
+  if (_feriadosCache.has(year)) return _feriadosCache.get(year);
+  const map = new Map();
+  for (const f of FERIADOS_NACIONAIS_FIXOS) {
+    map.set(`${year}-${f.md}`, { desc: f.desc, tipo: 'nacional' });
   }
-  return result;
+  const easter = easterDate(year);
+  map.set(ymdKey(_addDays(easter, -48)), { desc: 'Carnaval (segunda)', tipo: 'forense' });
+  map.set(ymdKey(_addDays(easter, -47)), { desc: 'Carnaval (terça)',   tipo: 'forense' });
+  map.set(ymdKey(_addDays(easter,  -2)), { desc: 'Sexta-Feira Santa',   tipo: 'forense' });
+  map.set(ymdKey(_addDays(easter,  60)), { desc: 'Corpus Christi',      tipo: 'forense' });
+  _feriadosCache.set(year, map);
+  return map;
+}
+
+function isFeriado(d) {
+  return feriadosDoAno(d.getFullYear()).has(ymdKey(d));
+}
+function getFeriado(d) {
+  return feriadosDoAno(d.getFullYear()).get(ymdKey(d)) || null;
+}
+// Recesso forense: 20/12 a 20/01 inclusive (Lei 5.010/66 art. 62 + CPC art. 220)
+function isRecessoForense(d) {
+  const m = d.getMonth() + 1, day = d.getDate();
+  return (m === 12 && day >= 20) || (m === 1 && day <= 20);
+}
+function isFimDeSemana(d) {
+  const w = d.getDay();
+  return w === 0 || w === 6;
+}
+function isDiaUtil(d, _tribunal) {
+  if (isFimDeSemana(d)) return false;
+  if (isFeriado(d))     return false;
+  if (isRecessoForense(d)) return false;
+  return true;
+}
+
+function proximoDiaUtil(d, tribunal) {
+  let r = new Date(d); r.setHours(12, 0, 0, 0);
+  while (!isDiaUtil(r, tribunal)) r = _addDays(r, 1);
+  return r;
+}
+
+function adicionarDiasUteis(start, dias, tribunal) {
+  let r = new Date(start); r.setHours(12, 0, 0, 0);
+  let added = 0;
+  while (added < dias) {
+    r = _addDays(r, 1);
+    if (isDiaUtil(r, tribunal)) added++;
+  }
+  return r;
+}
+
+// Heurística pra inferir tribunal a partir da string court do processo
+function inferirTribunal(court) {
+  if (!court) return 'NACIONAL';
+  const t = String(court).toUpperCase();
+  if (t.includes('TJGO') || t.includes('GOIÁS') || t.includes('GOIAS')) return 'TJGO';
+  if (t.includes('TJDFT') || t.includes('TJDF') || t.includes('DISTRITO FEDERAL') || t.includes('BRASÍLIA')) return 'TJDFT';
+  if (t.match(/TRF\s*-?\s*1/)) return 'TRF1';
+  if (t.match(/TRF\s*-?\s*2/)) return 'TRF2';
+  if (t.match(/TRF\s*-?\s*3/)) return 'TRF3';
+  if (t.match(/TRF\s*-?\s*4/)) return 'TRF4';
+  if (t.match(/TRF\s*-?\s*5/)) return 'TRF5';
+  if (t.match(/TRF\s*-?\s*6/)) return 'TRF6';
+  if (t.includes('STJ')) return 'STJ';
+  if (t.includes('STF')) return 'STF';
+  if (t.includes('TST')) return 'TST';
+  if (t.match(/TRT\s*-?\s*\d+/)) return t.match(/TRT\s*-?\s*\d+/)[0].replace(/\s|-/g, '');
+  if (t.includes('TJSP')) return 'TJSP';
+  return 'NACIONAL';
+}
+
+const _DIAS_SEMANA = ['domingo', 'segunda', 'terça', 'quarta', 'quinta', 'sexta', 'sábado'];
+function diaSemana(d) { return _DIAS_SEMANA[d.getDay()]; }
+
+// Cálculo completo aplicando art. 219 e 224 CPC
+function calcularDataFatal(opts) {
+  const dataPublicacao = opts.dataPublicacao instanceof Date ? new Date(opts.dataPublicacao) : new Date(opts.dataPublicacao);
+  dataPublicacao.setHours(12, 0, 0, 0);
+  const prazoDias = opts.emDobro ? opts.prazoDias * 2 : opts.prazoDias;
+  const unidade = opts.unidade || 'UTEIS';
+  const tribunal = opts.tribunal || 'NACIONAL';
+
+  // Marco inicial = "dia do começo" no art. 224 CPC: primeiro dia útil seguinte
+  // à publicação. ESSE DIA É EXCLUÍDO da contagem (art. 224 caput).
+  const marcoInicial = proximoDiaUtil(_addDays(dataPublicacao, 1), tribunal);
+
+  const exclusoes = [];
+  let dataFatal;
+
+  if (unidade === 'CORRIDOS') {
+    // dias corridos: marco excluído → data fatal = marco + prazoDias dias corridos
+    dataFatal = _addDays(marcoInicial, prazoDias);
+    // se cair em dia não útil, prorroga (art. 224 §1º CPC)
+    while (!isDiaUtil(dataFatal, tribunal)) dataFatal = _addDays(dataFatal, 1);
+  } else {
+    // dias úteis: marco excluído → contar prazoDias dias úteis a partir do dia seguinte
+    dataFatal = new Date(marcoInicial);
+    let contados = 0;
+    while (contados < prazoDias) {
+      dataFatal = _addDays(dataFatal, 1);
+      if (isDiaUtil(dataFatal, tribunal)) {
+        contados++;
+      } else {
+        const f = getFeriado(dataFatal);
+        if (f) exclusoes.push({ data: ymdKey(dataFatal), desc: f.desc });
+        else if (isRecessoForense(dataFatal)) exclusoes.push({ data: ymdKey(dataFatal), desc: 'Recesso forense' });
+      }
+    }
+  }
+
+  return {
+    dataPublicacao, marcoInicial, dataFatal,
+    prazoDias, unidade, tribunal, emDobro: !!opts.emDobro,
+    exclusoes
+  };
+}
+
+function gerarDiarioCalculo(calc) {
+  const partes = [];
+  partes.push(`Publicado ${formatDate(calc.dataPublicacao)} (${diaSemana(calc.dataPublicacao)}).`);
+  partes.push(`Marco inicial: ${formatDate(calc.marcoInicial)} (${diaSemana(calc.marcoInicial)}).`);
+  partes.push(`Prazo: ${calc.prazoDias} dia${calc.prazoDias !== 1 ? 's' : ''} ${calc.unidade === 'UTEIS' ? 'úteis' : 'corridos'}${calc.emDobro ? ' (em dobro)' : ''}.`);
+  if (calc.exclusoes && calc.exclusoes.length) {
+    const tipos = [...new Set(calc.exclusoes.map(e => e.desc))];
+    partes.push(`Excluídos: ${tipos.join(', ')}, sábados e domingos.`);
+  } else if (calc.unidade === 'UTEIS') {
+    partes.push('Excluídos sábados e domingos.');
+  }
+  partes.push(`Data fatal: ${formatDate(calc.dataFatal)} (${diaSemana(calc.dataFatal)}).`);
+  return partes.join(' ');
+}
+
+// Compatibilidade — código legado chama addBusinessDays(date, days).
+// Agora respeita feriados nacionais + forenses + recesso (mais correto que antes).
+function addBusinessDays(date, days) {
+  return adicionarDiasUteis(new Date(date), days, 'NACIONAL');
 }
 
 function detectDeadlines(text, events) {
@@ -4919,16 +5118,27 @@ function normalizeCnjForCompare(raw) {
   return String(raw || '').replace(/\D/g, '');
 }
 
-// Calculate prazo: publication is considered effective the next business day
-// after disponibilizacao. Prazo starts the next business day after publication.
-// We just compute deadlineDate = addBusinessDays(publicationDate + 1bd, daysAllowed)
-function calcDjenDeadline(dataDisponibilizacao, daysAllowed = 15) {
+// Cálculo de prazo DJEN usando a engine de Sprint 2.
+// Publicação = primeiro dia útil após disponibilização (art. 4º Lei 11.419/2006).
+// Marco inicial e exclusões (feriados/recesso) ficam embutidos em calcularDataFatal.
+function calcDjenDeadline(dataDisponibilizacao, daysAllowed = 15, tribunal = 'NACIONAL') {
   const dispo = new Date(dataDisponibilizacao + 'T12:00:00');
-  const publication = addBusinessDays(dispo, 1);
-  const startCount = addBusinessDays(publication, 1);
-  // startCount IS day 1 of the prazo, so we add daysAllowed-1 more business days
-  const deadline = addBusinessDays(startCount, daysAllowed - 1);
-  return { publication, startCount, deadline };
+  const publication = proximoDiaUtil(_addDays(dispo, 1), tribunal);
+  const calc = calcularDataFatal({
+    dataPublicacao: publication,
+    prazoDias: daysAllowed,
+    unidade: 'UTEIS',
+    tribunal,
+    emDobro: false
+  });
+  return {
+    publication: calc.dataPublicacao,
+    startCount: calc.marcoInicial,
+    deadline: calc.dataFatal,
+    diario: gerarDiarioCalculo(calc),
+    tribunal,
+    exclusoes: calc.exclusoes
+  };
 }
 
 // Fetch publications for all configured OABs in a date range
@@ -5361,7 +5571,9 @@ async function djenImportSelected(modal) {
 
     // Create deadline + event if linked to process — dedupe por djenHash
     if (processId && dataDispo) {
-      const calc = calcDjenDeadline(dataDispo, cfg.prazo);
+      const proc = pub._proc || await DB.getProcess(processId);
+      const tribunal = inferirTribunal(proc?.court || pub.tribunal || pub.nomeOrgao);
+      const calc = calcDjenDeadline(dataDispo, cfg.prazo, tribunal);
       const existingDeadlines = await DB.getDeadlinesByProcess(processId);
       const dupDeadline = existingDeadlines.some(x => x.djenHash === pub.hash);
       if (!dupDeadline) {
@@ -5375,6 +5587,8 @@ async function djenImportSelected(modal) {
           deadlineDate: calc.deadline.toISOString(),
           status: 'pending',
           djenHash: pub.hash,
+          tribunal,
+          diarioCalculo: calc.diario,
           createdAt: Date.now()
         };
         await DB.saveDeadline(deadline);
