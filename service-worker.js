@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.5.0 (dedup: prevenção + limpeza)
-const CACHE_NAME = 'uc-juridico-v6-5-0';
+// Service Worker — UC Jurídico v6.6.0 (Fase 1 Prazos: escritorio_id + suplente)
+const CACHE_NAME = 'uc-juridico-v6-6-0';
 const APP_SHELL = [
   './',
   './index.html',

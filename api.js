@@ -170,6 +170,7 @@ async function checkAllowlistAndProceed(user) {
         nome: user.displayName || 'Owner',
         role: 'admin',
         ativo: true,
+        escritorioId: 'UC',
         criadoEm: Date.now()
       });
       snap = await getDoc(doc(db, 'users', email));
@@ -269,6 +270,10 @@ async function upsert_(collectionName, record, idField = 'id') {
   record.updatedAt = now;
   record.updatedBy = (currentUser && currentUser.email) || null;
   if (record.deletedAt === undefined) record.deletedAt = null;
+  // Multi-tenant: todo doc carrega escritorio_id (default 'UC' por enquanto).
+  if (!record.escritorio_id) {
+    record.escritorio_id = (currentUserDoc && currentUserDoc.escritorioId) || 'UC';
+  }
   await setDoc(doc(db, collectionName, String(id)), record, { merge: true });
   return record;
 }
@@ -473,9 +478,37 @@ window.UC_admin = {
       nome: nome || '',
       role,
       ativo: true,
+      escritorioId: (currentUserDoc && currentUserDoc.escritorioId) || 'UC',
       criadoEm: Date.now()
     }, { merge: true });
     return e;
+  },
+  async backfillEscritorioId(escritorioId = 'UC') {
+    requireAdmin_();
+    const collectionsToBackfill = [
+      'processos', 'prazos', 'eventos', 'notas', 'jurisprudencia', 'djen', 'settings', 'audit'
+    ];
+    const stats = {};
+    for (const col of collectionsToBackfill) {
+      const snap = await getDocs(collection(db, col));
+      let touched = 0, alreadyOk = 0;
+      for (const d of snap.docs) {
+        if (d.data().escritorio_id) { alreadyOk++; continue; }
+        await updateDoc(d.ref, { escritorio_id: escritorioId });
+        touched++;
+      }
+      stats[col] = { touched, alreadyOk, total: snap.size };
+    }
+    // users também
+    const usersSnap = await getDocs(collection(db, 'users'));
+    let utouched = 0, ualreadyOk = 0;
+    for (const d of usersSnap.docs) {
+      if (d.data().escritorioId) { ualreadyOk++; continue; }
+      await updateDoc(d.ref, { escritorioId });
+      utouched++;
+    }
+    stats.users = { touched: utouched, alreadyOk: ualreadyOk, total: usersSnap.size };
+    return stats;
   },
   async listUsers() {
     requireAdmin_();

@@ -1229,11 +1229,12 @@ function renderProcessOverview(p, events, deadlines, notes, jurisprudence) {
       </div>
     </div>
 
-    ${(p.advogadoResponsavel || p.risco || p.honTipo) ? `
+    ${(p.advogadoResponsavel || p.advogadoSuplente || p.risco || p.honTipo) ? `
     <div class="card mb-4">
       <h3 class="font-serif text-lg font-semibold smallcaps mb-3" style="color: var(--uc-black);">Gestão</h3>
       <div class="grid gap-2" style="grid-template-columns: 160px 1fr; font-size: 13px;">
-        ${p.advogadoResponsavel ? `<div style="color: var(--uc-warm-gray);">Adv. responsável:</div><div>${escapeHtml(p.advogadoResponsavel)}</div>` : ''}
+        ${p.advogadoResponsavel ? `<div style="color: var(--uc-warm-gray);">Adv. titular:</div><div>${escapeHtml(p.advogadoResponsavel)}</div>` : ''}
+        ${p.advogadoSuplente ? `<div style="color: var(--uc-warm-gray);">Adv. suplente:</div><div>${escapeHtml(p.advogadoSuplente)}</div>` : ''}
         ${p.risco ? `<div style="color: var(--uc-warm-gray);">Risco:</div><div><span class="badge ${riscoBadgeClass(p.risco)}">${escapeHtml(riscoLabel(p.risco))}</span></div>` : ''}
         ${p.honTipo ? `<div style="color: var(--uc-warm-gray);">Honorários:</div><div>${escapeHtml(honLabel(p.honTipo))}${p.honValor ? ' · ' + escapeHtml(p.honValor) : ''}</div>` : ''}
       </div>
@@ -1746,7 +1747,8 @@ async function editProcessFlow() {
     ]},
     { label: 'Honorários — valor', default: p.honValor || '', placeholder: 'ex: R$ 5.000 · 20% · misto' },
 
-    { label: 'Advogado responsável (interno)', type: 'select', default: p.advogadoResponsavel || defaultAdvogado(me), options: ADVOGADO_OPTIONS }
+    { label: 'Advogado responsável (titular)', type: 'select', default: p.advogadoResponsavel || defaultAdvogado(me), options: ADVOGADO_OPTIONS },
+    { label: 'Advogado suplente (cobertura de ausência)', type: 'select', default: p.advogadoSuplente || '', options: ADVOGADO_OPTIONS }
   ];
 
   // Fase B — campos tributários, só aparecem se área é tributário/execução fiscal
@@ -1796,6 +1798,7 @@ async function editProcessFlow() {
     risco,
     honTipo, honValor,
     advogadoResponsavel,
+    advogadoSuplente,
     // Fase B (só presentes se isTributario(p.area) era true ao abrir)
     tipoExec, tributoPrincipal, periodoBase, statusFiscal, garantia, garantiaDetalhe, cdasRaw
   ] = r;
@@ -1821,7 +1824,8 @@ async function editProcessFlow() {
     risco: risco || null,
     honTipo: honTipo || null,
     honValor: honValor || null,
-    advogadoResponsavel: advogadoResponsavel || null
+    advogadoResponsavel: advogadoResponsavel || null,
+    advogadoSuplente: advogadoSuplente || null
   });
   // Só aplica os campos tributários se eles foram apresentados no form
   if (isTributario(p.area) && tipoExec !== undefined) {
