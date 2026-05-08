@@ -1416,10 +1416,14 @@ function renderDeadlineRow(d, p) {
   else if (days <= 3) { cls = 'urgent'; label = `${days}d`; }
   else if (days <= 7) { cls = 'warning'; label = `${days}d`; }
   const unidLabel = d.unidade === 'CORRIDOS' ? 'corridos' : 'úteis';
+  const parserBadge = d.parser && d.parser.tipo !== 'CIENCIA' ? `
+    <span class="badge ${d.parser.confianca >= 0.85 ? 'badge-green' : 'badge-amber'}" style="font-size: 9px;" title="Parser: ${escapeHtml(d.parser.fonte)} · ${(d.parser.confianca*100).toFixed(0)}% · ${escapeHtml(d.parser.baseLegal || '')}">⚙ ${escapeHtml(d.parser.label)}</span>
+  ` : '';
+  const reviewBadge = d.parser && d.parser.requerRevisao ? `<span class="badge badge-amber" style="font-size: 9px;" title="Confiança baixa — revisar manualmente">⚠ revisar</span>` : '';
   return `
     <div class="deadline-row ${cls}">
       <div style="flex: 1; min-width: 0;">
-        <div style="font-weight: 600; color: var(--uc-black);">${escapeHtml(d.description || d.type)}${d.emDobro ? ' <span class="badge badge-amber" style="font-size: 9px;">DOBRO</span>' : ''}</div>
+        <div style="font-weight: 600; color: var(--uc-black);">${escapeHtml(d.description || d.type)}${d.emDobro ? ' <span class="badge badge-amber" style="font-size: 9px;">DOBRO</span>' : ''} ${parserBadge} ${reviewBadge}</div>
         <div style="font-size: 12px; color: var(--uc-warm-gray); margin-top: 2px;">
           Vence ${formatDate(dl)}${d.intimationDate ? ' · intimação ' + formatDate(d.intimationDate) : ''}${d.daysAllowed ? ' · ' + d.daysAllowed + ' dias ' + unidLabel : ''}${d.tribunal && d.tribunal !== 'NACIONAL' ? ' · ' + escapeHtml(d.tribunal) : ''}
         </div>
@@ -2838,6 +2842,201 @@ function gerarDiarioCalculo(calc) {
 // Agora respeita feriados nacionais + forenses + recesso (mais correto que antes).
 function addBusinessDays(date, days) {
   return adicionarDiasUteis(new Date(date), days, 'NACIONAL');
+}
+
+// ====================================================================
+// Parser de Prazo — Sprint 1 / Fase 3 (tier 1 regex + tier 2 keywords)
+// ====================================================================
+
+const TIPOS_ATO = {
+  // Cível CPC
+  CONTESTACAO:        { prazo: 15, unidade: 'UTEIS',    baseLegal: 'CPC art. 335',     label: 'Contestação' },
+  REPLICA:            { prazo: 15, unidade: 'UTEIS',    baseLegal: 'CPC art. 350',     label: 'Réplica' },
+  MANIFESTACAO:       { prazo: 5,  unidade: 'UTEIS',    baseLegal: 'CPC art. 218 §3º', label: 'Manifestação' },
+  EMBARGOS_DECL:      { prazo: 5,  unidade: 'UTEIS',    baseLegal: 'CPC art. 1.023',   label: 'Embargos de declaração' },
+  APELACAO:           { prazo: 15, unidade: 'UTEIS',    baseLegal: 'CPC art. 1.003 §5º', label: 'Apelação' },
+  CONTRARRAZOES_APEL: { prazo: 15, unidade: 'UTEIS',    baseLegal: 'CPC art. 1.010 §1º', label: 'Contrarrazões à apelação' },
+  AGRAVO_INSTR:       { prazo: 15, unidade: 'UTEIS',    baseLegal: 'CPC art. 1.003 §5º', label: 'Agravo de instrumento' },
+  AGRAVO_INTERNO:     { prazo: 15, unidade: 'UTEIS',    baseLegal: 'CPC art. 1.021 §2º', label: 'Agravo interno' },
+  RESP:               { prazo: 15, unidade: 'UTEIS',    baseLegal: 'CPC art. 1.003 §5º', label: 'Recurso especial' },
+  RE:                 { prazo: 15, unidade: 'UTEIS',    baseLegal: 'CPC art. 1.003 §5º', label: 'Recurso extraordinário' },
+  AGRAVO_RESP_RE:     { prazo: 15, unidade: 'UTEIS',    baseLegal: 'CPC art. 1.042',   label: 'Agravo em REsp/RE' },
+  EMB_DIVERGENCIA:    { prazo: 15, unidade: 'UTEIS',    baseLegal: 'CPC art. 1.043',   label: 'Embargos de divergência' },
+  EMB_EXECUCAO:       { prazo: 15, unidade: 'UTEIS',    baseLegal: 'CPC art. 915',     label: 'Embargos à execução' },
+  IMPUGNACAO_CUMPR:   { prazo: 15, unidade: 'UTEIS',    baseLegal: 'CPC art. 525',     label: 'Impugnação ao cumprimento' },
+
+  // Tributário/Fiscal
+  EMB_EXEC_FISCAL:    { prazo: 30, unidade: 'CORRIDOS', baseLegal: 'LEF art. 16',      label: 'Embargos à execução fiscal' },
+  DEFESA_AI_FEDERAL:  { prazo: 30, unidade: 'CORRIDOS', baseLegal: 'Dec. 70.235/72 art. 15', label: 'Defesa em auto de infração' },
+  REC_VOL_CARF:       { prazo: 30, unidade: 'CORRIDOS', baseLegal: 'Dec. 70.235/72 art. 33', label: 'Recurso voluntário CARF' },
+  MANIF_INCONFORM:    { prazo: 30, unidade: 'CORRIDOS', baseLegal: 'Dec. 70.235/72 art. 16', label: 'Manifestação de inconformidade' },
+
+  // Trabalhista (após Lei 13.467/2017 — dias úteis)
+  DEFESA_TRAB:        { prazo: 5,  unidade: 'UTEIS',    baseLegal: 'CLT art. 847',     label: 'Defesa trabalhista' },
+  REC_ORDINARIO:      { prazo: 8,  unidade: 'UTEIS',    baseLegal: 'CLT art. 895',     label: 'Recurso ordinário' },
+  AGRAVO_INSTR_TRAB:  { prazo: 8,  unidade: 'UTEIS',    baseLegal: 'CLT art. 897',     label: 'Agravo de instrumento trabalhista' },
+  REC_REVISTA:        { prazo: 8,  unidade: 'UTEIS',    baseLegal: 'CLT art. 896 §6º', label: 'Recurso de revista' },
+  CONTRARRAZOES_TRAB: { prazo: 8,  unidade: 'UTEIS',    baseLegal: 'CLT art. 900',     label: 'Contrarrazões trabalhista' },
+
+  // Fallback
+  CIENCIA:            { prazo: null, unidade: null,    baseLegal: null,              label: 'Ciência (sem prazo)' }
+};
+
+// Tier 1 — regex de alta precisão para padrões canônicos.
+// Cada padrão captura prazoDias em $1 e (opcionalmente) unidade em $2.
+// Notas: usa quantificador lazy `[^.]{0,80}?` pra impedir greedy de
+// "comer" dígitos do prazo. Parens spelled-out via `(?:\([^)]+\))?`.
+const PARSER_REGEXES = [
+  // "embargos de declaração no prazo de 5 dias"
+  { re: /embargos?\s+de\s+declara[çc][ãa]o[^.]{0,80}?prazo\s+de\s+(\d+)\s*(?:\([^)]+\))?\s*dias?\s*(úteis|corridos)?/i, tipo: 'EMBARGOS_DECL' },
+  // "embargos à execução fiscal ... 30 dias"
+  { re: /embargos?\s+[àa]\s+execu[çc][ãa]o\s+fiscal[^.]{0,80}?(\d+)\s*(?:\([^)]+\))?\s*dias?\s*(úteis|corridos)?/i, tipo: 'EMB_EXEC_FISCAL' },
+  // "embargos à execução ... N dias"
+  { re: /embargos?\s+[àa]\s+execu[çc][ãa]o[^.]{0,80}?(\d+)\s*(?:\([^)]+\))?\s*dias?\s*(úteis|corridos)?/i, tipo: 'EMB_EXECUCAO' },
+  // "contestar em 15 dias" / "apresentar contestação no prazo de 15 dias"
+  { re: /(?:contestar|apresentar\s+(?:contesta[çc][ãa]o|resposta))[^.]{0,80}?(?:no\s+)?prazo\s+de\s+(\d+)\s*(?:\([^)]+\))?\s*dias?\s*(úteis|corridos)?/i, tipo: 'CONTESTACAO' },
+  // "réplica no prazo de 15 dias"
+  { re: /r[ée]plica[^.]{0,80}?prazo\s+de\s+(\d+)\s*(?:\([^)]+\))?\s*dias?\s*(úteis|corridos)?/i, tipo: 'REPLICA' },
+  // "apelação no prazo de"
+  { re: /apela[çc][ãa]o[^.]{0,80}?prazo\s+de\s+(\d+)\s*(?:\([^)]+\))?\s*dias?\s*(úteis|corridos)?/i, tipo: 'APELACAO' },
+  // "agravo de instrumento ... N dias"
+  { re: /agravo\s+de\s+instrumento[^.]{0,80}?(?:prazo\s+de\s+)?(\d+)\s*(?:\([^)]+\))?\s*dias?\s*(úteis|corridos)?/i, tipo: 'AGRAVO_INSTR' },
+  // "agravo interno ... N dias"
+  { re: /agravo\s+interno[^.]{0,80}?(?:prazo\s+de\s+)?(\d+)\s*(?:\([^)]+\))?\s*dias?\s*(úteis|corridos)?/i, tipo: 'AGRAVO_INTERNO' },
+  // "manifeste-se no prazo de N dias" / "manifestar-se em N dias"
+  { re: /manifest[ae][rms]?[\s-]*(?:se)?[^.]{0,80}?(?:no\s+)?prazo\s+de\s+(\d+)\s*(?:\([^)]+\))?\s*dias?\s*(úteis|corridos)?/i, tipo: 'MANIFESTACAO' },
+  // Genérico "prazo de N dias" — tipo precisa ser refinado por keyword
+  { re: /(?:no\s+)?prazo\s+de\s+(\d+)\s*(?:\([^)]+\))?\s*dias?\s+(úteis|corridos)/i, tipo: 'auto', genericPrazo: true },
+  { re: /(\d+)\s*(?:\([^)]+\))?\s*dias?\s+(úteis|corridos)/i, tipo: 'auto', genericPrazo: true }
+];
+
+// Tier 2 — keywords pra classificar tipo (quando regex não pegou prazo+tipo juntos)
+const PARSER_KEYWORDS = [
+  // Trabalhista (mais específico antes)
+  { keywords: ['recurso ordinário', 'recurso ordinario'], tipo: 'REC_ORDINARIO' },
+  { keywords: ['recurso de revista'], tipo: 'REC_REVISTA' },
+  // Tributário
+  { keywords: ['embargos à execução fiscal', 'embargos a execucao fiscal'], tipo: 'EMB_EXEC_FISCAL' },
+  { keywords: ['auto de infração', 'auto de infracao'], tipo: 'DEFESA_AI_FEDERAL' },
+  { keywords: ['recurso voluntário ao carf', 'recurso voluntario ao carf'], tipo: 'REC_VOL_CARF' },
+  { keywords: ['manifestação de inconformidade', 'manifestacao de inconformidade'], tipo: 'MANIF_INCONFORM' },
+  // Cível
+  { keywords: ['contestar', 'apresentar contestação', 'apresentar contestacao', 'apresentar resposta'], tipo: 'CONTESTACAO' },
+  { keywords: ['réplica', 'replica'], tipo: 'REPLICA' },
+  { keywords: ['embargos de declaração', 'embargos de declaracao'], tipo: 'EMBARGOS_DECL' },
+  { keywords: ['contrarrazões à apelação', 'contrarrazoes a apelacao'], tipo: 'CONTRARRAZOES_APEL' },
+  { keywords: ['apelação', 'apelacao'], tipo: 'APELACAO' },
+  { keywords: ['agravo de instrumento'], tipo: 'AGRAVO_INSTR' },
+  { keywords: ['agravo interno'], tipo: 'AGRAVO_INTERNO' },
+  { keywords: ['recurso especial'], tipo: 'RESP' },
+  { keywords: ['recurso extraordinário', 'recurso extraordinario'], tipo: 'RE' },
+  { keywords: ['agravo em recurso especial', 'agravo em recurso extraordinário'], tipo: 'AGRAVO_RESP_RE' },
+  { keywords: ['embargos de divergência', 'embargos de divergencia'], tipo: 'EMB_DIVERGENCIA' },
+  { keywords: ['embargos à execução', 'embargos a execucao'], tipo: 'EMB_EXECUCAO' },
+  { keywords: ['impugnação ao cumprimento', 'impugnacao ao cumprimento'], tipo: 'IMPUGNACAO_CUMPR' },
+  // Genérico — manifesta-se sobre algo
+  { keywords: ['manifeste-se', 'manifestar-se', 'manifestação'], tipo: 'MANIFESTACAO' }
+];
+
+// Detecção de prazo em dobro (Fazenda/MP/Defensoria, art. 180/183/186 CPC)
+const DOBRO_KEYWORDS = [
+  'fazenda pública', 'fazenda publica', 'fazenda nacional',
+  'união federal', 'uniao federal',
+  'procuradoria-geral da fazenda', 'procuradoria geral da fazenda',
+  'procuradoria da fazenda',
+  'inss', 'autarquia',
+  'ministério público', 'ministerio publico',
+  'defensoria pública', 'defensoria publica'
+];
+
+function detectarDobro(teor) {
+  const t = String(teor || '').toLowerCase();
+  return DOBRO_KEYWORDS.some(kw => t.includes(kw));
+}
+
+// Refinador: se regex retornou tipo='auto', usa keywords pra refinar
+function _refinarTipo(teor) {
+  const t = String(teor || '').toLowerCase();
+  for (const k of PARSER_KEYWORDS) {
+    if (k.keywords.some(kw => t.includes(kw))) return k.tipo;
+  }
+  return 'MANIFESTACAO'; // default conservador
+}
+
+/**
+ * Recebe o teor de uma publicação e devolve estrutura PrazoExtraido.
+ * Nunca lança — em caso de erro, retorna confianca baixa + requerRevisao.
+ */
+function parsearPublicacao(teor) {
+  if (!teor || typeof teor !== 'string') {
+    return { tipo: 'CIENCIA', label: 'Sem teor', prazoDias: null, unidade: null,
+             baseLegal: null, emDobro: false, confianca: 0, fonte: 'erro',
+             evidencia: '', requerRevisao: true };
+  }
+
+  const teorOriginal = teor;
+  const teorLower = teor.toLowerCase();
+  const emDobro = detectarDobro(teorOriginal);
+
+  // Tier 1: regex de alta precisão
+  for (const r of PARSER_REGEXES) {
+    const m = teorOriginal.match(r.re);
+    if (!m) continue;
+    const prazoDias = parseInt(m[1]);
+    if (!prazoDias || prazoDias < 1 || prazoDias > 365) continue;
+    let tipo = r.tipo === 'auto' ? _refinarTipo(teorOriginal) : r.tipo;
+    const tipoData = TIPOS_ATO[tipo] || TIPOS_ATO.MANIFESTACAO;
+    // unidade: capturada explicitamente OU inferida do tipo
+    let unidade;
+    if (m[2]) unidade = m[2].toLowerCase().includes('corrid') ? 'CORRIDOS' : 'UTEIS';
+    else unidade = tipoData.unidade || 'UTEIS';
+    return {
+      tipo,
+      label: tipoData.label,
+      prazoDias,
+      unidade,
+      baseLegal: tipoData.baseLegal,
+      emDobro,
+      confianca: r.genericPrazo ? 0.75 : 0.92,
+      fonte: r.genericPrazo ? 'regex_generico' : 'regex',
+      evidencia: m[0].slice(0, 200),
+      requerRevisao: !!r.genericPrazo
+    };
+  }
+
+  // Tier 2: keywords
+  for (const k of PARSER_KEYWORDS) {
+    const hits = k.keywords.filter(kw => teorLower.includes(kw));
+    if (!hits.length) continue;
+    const tipoData = TIPOS_ATO[k.tipo];
+    if (!tipoData || tipoData.prazo == null) continue;
+    return {
+      tipo: k.tipo,
+      label: tipoData.label,
+      prazoDias: tipoData.prazo,
+      unidade: tipoData.unidade,
+      baseLegal: tipoData.baseLegal,
+      emDobro,
+      confianca: 0.70,
+      fonte: 'keywords',
+      evidencia: hits[0],
+      requerRevisao: true
+    };
+  }
+
+  // Não conseguiu — registra como ciência
+  return {
+    tipo: 'CIENCIA',
+    label: TIPOS_ATO.CIENCIA.label,
+    prazoDias: null,
+    unidade: null,
+    baseLegal: null,
+    emDobro: false,
+    confianca: 0.5,
+    fonte: 'fallback',
+    evidencia: '',
+    requerRevisao: true
+  };
 }
 
 function detectDeadlines(text, events) {
@@ -5121,15 +5320,15 @@ function normalizeCnjForCompare(raw) {
 // Cálculo de prazo DJEN usando a engine de Sprint 2.
 // Publicação = primeiro dia útil após disponibilização (art. 4º Lei 11.419/2006).
 // Marco inicial e exclusões (feriados/recesso) ficam embutidos em calcularDataFatal.
-function calcDjenDeadline(dataDisponibilizacao, daysAllowed = 15, tribunal = 'NACIONAL') {
+function calcDjenDeadline(dataDisponibilizacao, daysAllowed = 15, tribunal = 'NACIONAL', unidade = 'UTEIS', emDobro = false) {
   const dispo = new Date(dataDisponibilizacao + 'T12:00:00');
   const publication = proximoDiaUtil(_addDays(dispo, 1), tribunal);
   const calc = calcularDataFatal({
     dataPublicacao: publication,
     prazoDias: daysAllowed,
-    unidade: 'UTEIS',
+    unidade,
     tribunal,
-    emDobro: false
+    emDobro
   });
   return {
     publication: calc.dataPublicacao,
@@ -5137,6 +5336,8 @@ function calcDjenDeadline(dataDisponibilizacao, daysAllowed = 15, tribunal = 'NA
     deadline: calc.dataFatal,
     diario: gerarDiarioCalculo(calc),
     tribunal,
+    unidade,
+    emDobro,
     exclusoes: calc.exclusoes
   };
 }
@@ -5305,12 +5506,43 @@ function djenRenderPubRow(pub, kind, idx) {
               <button class="btn btn-ghost btn-sm datajud-enrich-btn" onclick="datajudEnrichDjenPub('${pub.hash}')" style="margin-left: 12px; padding: 2px 8px; font-size: 11px; font-variant: normal;" title="Buscar dados completos do processo no DataJud antes de importar">🔍 DataJud</button>
             </div>
           ` : ''}
-          <div style="margin-top: 6px; font-size: 11px;">
-            <label style="display:inline-flex; align-items:center; gap:6px;">
-              Prazo (dias úteis):
-              <input type="number" data-djen-prazo value="15" min="1" max="365" style="width: 60px; padding: 2px 6px; border: 1px solid var(--uc-line); border-radius: 4px;">
-            </label>
-          </div>
+          ${(() => {
+            const parsed = parsearPublicacao(pub.texto || '');
+            pub._parsed = parsed; // disponível pra djenImportSelected
+            const isCiencia = parsed.tipo === 'CIENCIA';
+            const prazoDefault = parsed.prazoDias || 15;
+            const unidLabel = parsed.unidade === 'CORRIDOS' ? 'corridos' : 'úteis';
+            const confColor = parsed.confianca >= 0.85 ? 'badge-green'
+                            : parsed.confianca >= 0.60 ? 'badge-amber'
+                            : 'badge-gray';
+            return `
+              <div style="margin-top: 6px; font-size: 11px;">
+                <label style="display:inline-flex; align-items:center; gap:6px;">
+                  Prazo (dias):
+                  <input type="number" data-djen-prazo value="${prazoDefault}" min="1" max="365" style="width: 60px; padding: 2px 6px; border: 1px solid var(--uc-line); border-radius: 4px;">
+                  <select data-djen-unidade style="padding: 2px 4px; border: 1px solid var(--uc-line); border-radius: 4px; font-size: 11px;">
+                    <option value="UTEIS" ${parsed.unidade === 'UTEIS' || !parsed.unidade ? 'selected' : ''}>úteis</option>
+                    <option value="CORRIDOS" ${parsed.unidade === 'CORRIDOS' ? 'selected' : ''}>corridos</option>
+                  </select>
+                  <label style="display:inline-flex; align-items:center; gap:3px; margin-left: 8px;">
+                    <input type="checkbox" data-djen-dobro ${parsed.emDobro ? 'checked' : ''}>
+                    <span style="font-size: 10px;">em dobro</span>
+                  </label>
+                </label>
+                ${!isCiencia ? `
+                  <div style="margin-top: 4px; display:flex; gap:6px; flex-wrap: wrap; align-items:center;">
+                    <span class="badge ${confColor}" style="font-size: 10px;" title="Confiança ${(parsed.confianca*100).toFixed(0)}% · ${parsed.fonte}">⚙ ${escapeHtml(parsed.label)}</span>
+                    ${parsed.baseLegal ? `<span style="font-size: 10px; color: var(--uc-warm-gray);">${escapeHtml(parsed.baseLegal)}</span>` : ''}
+                    ${parsed.requerRevisao ? `<span class="badge badge-amber" style="font-size: 10px;" title="Confiança baixa — revisar manualmente">⚠ revisar</span>` : ''}
+                  </div>
+                ` : `
+                  <div style="margin-top: 4px;">
+                    <span class="badge badge-gray" style="font-size: 10px;">parser: ciência (sem prazo identificado)</span>
+                  </div>
+                `}
+              </div>
+            `;
+          })()}
         </div>
       </div>
     </div>
@@ -5517,16 +5749,20 @@ async function djenImportSelected(modal) {
   const allPubs = [...classified.matched, ...classified.unmatched];
   let imported = 0, processosCriados = 0, prazosCriados = 0;
 
-  // Collect selected hashes + per-row config
+  // Collect selected hashes + per-row config (Fase 3: unidade + dobro do parser)
   const rowSettings = {};
   modal.querySelectorAll('[data-djen-id]').forEach(card => {
     const hash = card.dataset.djenId;
     const checkbox = card.querySelector('[data-djen-row]');
     const prazoInput = card.querySelector('[data-djen-prazo]');
+    const unidadeSelect = card.querySelector('[data-djen-unidade]');
+    const dobroCheckbox = card.querySelector('[data-djen-dobro]');
     const createProcCheckbox = card.querySelector('[data-djen-create-process]');
     rowSettings[hash] = {
       selected: checkbox?.checked,
       prazo: parseInt(prazoInput?.value || '15'),
+      unidade: unidadeSelect?.value || 'UTEIS',
+      emDobro: !!dobroCheckbox?.checked,
       createProcess: createProcCheckbox?.checked ?? false
     };
   });
@@ -5573,22 +5809,39 @@ async function djenImportSelected(modal) {
     if (processId && dataDispo) {
       const proc = pub._proc || await DB.getProcess(processId);
       const tribunal = inferirTribunal(proc?.court || pub.tribunal || pub.nomeOrgao);
-      const calc = calcDjenDeadline(dataDispo, cfg.prazo, tribunal);
+      const calc = calcDjenDeadline(dataDispo, cfg.prazo, tribunal, cfg.unidade || 'UTEIS', !!cfg.emDobro);
       const existingDeadlines = await DB.getDeadlinesByProcess(processId);
       const dupDeadline = existingDeadlines.some(x => x.djenHash === pub.hash);
       if (!dupDeadline) {
+        // Descrição: prefere o tipo extraído pelo parser quando confiança >= 0.85
+        const parsed = pub._parsed || null;
+        const useParserLabel = parsed && parsed.confianca >= 0.85 && parsed.tipo !== 'CIENCIA';
+        const baseDesc = useParserLabel
+          ? parsed.label
+          : `${pub.tipoComunicacao || 'Intimação'}`;
         const deadline = {
           id: uid(),
           processId,
-          description: `[DJEN] ${pub.tipoComunicacao || 'Intimação'} · ${pub.nomeOrgao || pub.orgao || ''}`.slice(0, 200),
+          description: `[DJEN] ${baseDesc} · ${pub.nomeOrgao || pub.orgao || ''}`.slice(0, 200),
           type: 'djen',
           intimationDate: calc.publication.toISOString(),
           daysAllowed: cfg.prazo,
+          unidade: cfg.unidade || 'UTEIS',
+          emDobro: !!cfg.emDobro,
           deadlineDate: calc.deadline.toISOString(),
           status: 'pending',
           djenHash: pub.hash,
           tribunal,
           diarioCalculo: calc.diario,
+          // Fase 3: persiste resultado do parser pra auditoria/análise futura
+          parser: parsed ? {
+            tipo: parsed.tipo,
+            label: parsed.label,
+            baseLegal: parsed.baseLegal,
+            confianca: parsed.confianca,
+            fonte: parsed.fonte,
+            requerRevisao: !!parsed.requerRevisao
+          } : null,
           createdAt: Date.now()
         };
         await DB.saveDeadline(deadline);

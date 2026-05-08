@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.7.0 (Fase 2 Prazos: dias úteis com feriados)
-const CACHE_NAME = 'uc-juridico-v6-7-0';
+// Service Worker — UC Jurídico v6.8.0 (Fase 3 Prazos: parser tier 1+2)
+const CACHE_NAME = 'uc-juridico-v6-8-0';
 const APP_SHELL = [
   './',
   './index.html',
