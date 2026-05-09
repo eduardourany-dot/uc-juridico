@@ -261,7 +261,7 @@ body{background:var(--uc-paper);color:var(--uc-graphite);font-size:15px;-webkit-
 
     <div style="margin-top:auto;padding:16px 20px;border-top:1px solid var(--uc-line-soft);font-size:11px;color:var(--uc-warm-gray);text-align:center;">
       <p class="smallcaps font-serif" style="margin:0 0 4px;">Urany de Castro · 30 anos</p>
-      <p style="margin:0;">100% local · v6.9.0</p>
+      <p style="margin:0;">100% local · v6.10.0</p>
     </div>
   </aside>
 
@@ -402,8 +402,14 @@ const DB = {
   async deleteEvent(id) { await dbPromise('events', 'readwrite', s => s.delete(id)); },
 
   // Deadlines
-  async getAllDeadlines() { return await dbPromise('deadlines', 'readonly', s => new Promise(res => { const r = s.getAll(); r.onsuccess = () => res(r.result); })); },
-  async getDeadlinesByProcess(pid) { return await dbPromise('deadlines', 'readonly', s => new Promise(res => { const r = s.index('processId').getAll(pid); r.onsuccess = () => res(r.result); })); },
+  async getAllDeadlines() {
+    const all = await dbPromise('deadlines', 'readonly', s => new Promise(res => { const r = s.getAll(); r.onsuccess = () => res(r.result); }));
+    return all.map(migrarPrazoLegacy);
+  },
+  async getDeadlinesByProcess(pid) {
+    const all = await dbPromise('deadlines', 'readonly', s => new Promise(res => { const r = s.index('processId').getAll(pid); r.onsuccess = () => res(r.result); }));
+    return all.map(migrarPrazoLegacy);
+  },
   async saveDeadline(d) { await dbPromise('deadlines', 'readwrite', s => s.put(d)); return d; },
   async deleteDeadline(id) { await dbPromise('deadlines', 'readwrite', s => s.delete(id)); },
 
@@ -668,7 +674,7 @@ function applyTheme(theme) {
 async function renderDashboard() {
   const processes = await DB.getAllProcesses();
   const deadlines = await DB.getAllDeadlines();
-  const activeDeadlines = deadlines.filter(d => d.status !== 'done');
+  const activeDeadlines = deadlines.filter(d => prazoEstaAtivo(d));
   const today = new Date(); today.setHours(0,0,0,0);
   const urgentDeadlines = activeDeadlines.filter(d => {
     const diff = Math.ceil((new Date(d.deadlineDate) - today) / 86400000);
@@ -803,7 +809,7 @@ function updateNavBadges() {
 
   const today = new Date(); today.setHours(0,0,0,0);
   const urgent = state.deadlines.filter(d => {
-    if (d.status === 'done') return false;
+    if (prazoEstaResolvido(d)) return false;
     const diff = Math.ceil((new Date(d.deadlineDate) - today) / 86400000);
     return diff <= 5;
   }).length;
@@ -1146,7 +1152,7 @@ async function renderProcessDetail() {
     <div class="detail-tabs scroll-thin">
       <button class="detail-tab ${state._processView.activeTab === 'overview' ? 'active' : ''}" onclick="setProcessTab('overview')">Visão geral</button>
       <button class="detail-tab ${state._processView.activeTab === 'events' ? 'active' : ''}" onclick="setProcessTab('events')">Eventos · ${events.length}</button>
-      <button class="detail-tab ${state._processView.activeTab === 'deadlines' ? 'active' : ''}" onclick="setProcessTab('deadlines')">Prazos · ${deadlines.filter(d => d.status !== 'done').length}</button>
+      <button class="detail-tab ${state._processView.activeTab === 'deadlines' ? 'active' : ''}" onclick="setProcessTab('deadlines')">Prazos · ${deadlines.filter(d => prazoEstaAtivo(d)).length}</button>
       <button class="detail-tab ${state._processView.activeTab === 'jurisprudence' ? 'active' : ''}" onclick="setProcessTab('jurisprudence')">Jurisprudência · ${jurisprudence.length}</button>
       <button class="detail-tab ${state._processView.activeTab === 'notes' ? 'active' : ''}" onclick="setProcessTab('notes')">Notas · ${notes.length}</button>
       <button class="detail-tab ${state._processView.activeTab === 'analysis' ? 'active' : ''}" onclick="setProcessTab('analysis')">Análise IA</button>
@@ -1178,7 +1184,7 @@ function renderProcessTabContent() {
 }
 
 function renderProcessOverview(p, events, deadlines, notes, jurisprudence) {
-  const activeDeadlines = deadlines.filter(d => d.status !== 'done');
+  const activeDeadlines = deadlines.filter(d => prazoEstaAtivo(d));
   const today = new Date(); today.setHours(0,0,0,0);
   const nextDeadline = activeDeadlines
     .map(d => ({ ...d, days: Math.ceil((new Date(d.deadlineDate) - today) / 86400000) }))
@@ -1387,11 +1393,14 @@ function renderProcessEvents(p, events, notes) {
 }
 
 function renderProcessDeadlines(p, deadlines) {
-  const active = deadlines.filter(d => d.status !== 'done');
-  const done = deadlines.filter(d => d.status === 'done');
+  const active = deadlines.filter(d => prazoEstaAtivo(d));
+  const resolvidos = deadlines.filter(d => prazoEstaResolvido(d));
+  const labelHist = resolvidos.length > 0
+    ? `${resolvidos.length} resolvido(s) [cumpridos · cancelados · perdidos]`
+    : '';
   return `
     <div class="flex justify-between items-center mb-3">
-      <p class="text-sm" style="color: var(--uc-warm-gray);">${active.length} ativo(s) · ${done.length} concluído(s)</p>
+      <p class="text-sm" style="color: var(--uc-warm-gray);">${active.length} ativo(s)${labelHist ? ' · ' + labelHist : ''}</p>
       <button class="btn btn-primary btn-sm" onclick="addDeadlineFlow()">+ Adicionar prazo</button>
     </div>
     ${deadlines.length === 0 ? `
@@ -1400,8 +1409,8 @@ function renderProcessDeadlines(p, deadlines) {
       </div>
     ` : ''}
     ${active.sort((a,b) => new Date(a.deadlineDate) - new Date(b.deadlineDate)).map(d => renderDeadlineRow(d, p)).join('')}
-    ${done.length > 0 ? `<h4 class="smallcaps text-xs mt-6 mb-2" style="color: var(--uc-warm-gray);">Concluídos</h4>` : ''}
-    ${done.sort((a,b) => b.completedAt - a.completedAt).map(d => renderDeadlineRow(d, p)).join('')}
+    ${resolvidos.length > 0 ? `<h4 class="smallcaps text-xs mt-6 mb-2" style="color: var(--uc-warm-gray);">Histórico (resolvidos)</h4>` : ''}
+    ${resolvidos.sort((a,b) => (b.updatedAt || b.completedAt || 0) - (a.updatedAt || a.completedAt || 0)).map(d => renderDeadlineRow(d, p)).join('')}
   `;
 }
 
@@ -1409,30 +1418,66 @@ function renderDeadlineRow(d, p) {
   const today = new Date(); today.setHours(0,0,0,0);
   const dl = new Date(d.deadlineDate);
   const days = Math.ceil((dl - today) / 86400000);
-  let cls = 'safe', label = `${days}d`;
-  if (d.status === 'done') { cls = 'done'; label = '✓ feito'; }
-  else if (days < 0) { cls = 'expired'; label = `vencido ${Math.abs(days)}d atrás`; }
-  else if (days === 0) { cls = 'urgent'; label = 'HOJE'; }
-  else if (days <= 3) { cls = 'urgent'; label = `${days}d`; }
-  else if (days <= 7) { cls = 'warning'; label = `${days}d`; }
+  const visual = recomputarStatusVisual(d, today);
+
+  // visual → cls (CSS) + label do badge + cor
+  const visualMap = {
+    cumprido:  { cls: 'done',    label: '✓ cumprido',                       badge: 'badge-gray'  },
+    cancelado: { cls: 'done',    label: '⊘ cancelado',                      badge: 'badge-gray'  },
+    perdido:   { cls: 'expired', label: '✗ perdido',                        badge: 'badge-red'   },
+    suspenso:  { cls: 'warning', label: '⏸ suspenso',                       badge: 'badge-amber' },
+    expirado:  { cls: 'expired', label: `vencido ${Math.abs(days)}d atrás`, badge: 'badge-red'   },
+    iminente:  { cls: 'urgent',  label: days === 0 ? 'HOJE' : `${days}d`,   badge: 'badge-red'   },
+    vincendo:  { cls: 'warning', label: `${days}d`,                         badge: 'badge-amber' },
+    pendente:  { cls: 'safe',    label: `${days}d`,                         badge: 'badge-green' }
+  };
+  const v = visualMap[visual] || visualMap.pendente;
+
   const unidLabel = d.unidade === 'CORRIDOS' ? 'corridos' : 'úteis';
   const parserBadge = d.parser && d.parser.tipo !== 'CIENCIA' ? `
     <span class="badge ${d.parser.confianca >= 0.85 ? 'badge-green' : 'badge-amber'}" style="font-size: 9px;" title="Parser: ${escapeHtml(d.parser.fonte)} · ${(d.parser.confianca*100).toFixed(0)}% · ${escapeHtml(d.parser.baseLegal || '')}">⚙ ${escapeHtml(d.parser.label)}</span>
   ` : '';
   const reviewBadge = d.parser && d.parser.requerRevisao ? `<span class="badge badge-amber" style="font-size: 9px;" title="Confiança baixa — revisar manualmente">⚠ revisar</span>` : '';
+
+  // Botões contextuais ao status
+  let acoes = '';
+  if (visual === 'suspenso') {
+    acoes += `<button class="btn btn-ghost btn-sm" onclick="reabrirPrazo('${d.id}')" title="Reabrir prazo">▶</button>`;
+    acoes += `<button class="btn btn-ghost btn-sm" onclick="abrirModalCancelar('${d.id}')" title="Cancelar com motivo">⊘</button>`;
+  } else if (prazoEstaAtivo(d)) {
+    acoes += `<button class="btn btn-ghost btn-sm" onclick="abrirModalCumprimento('${d.id}')" title="Marcar como cumprido (data + protocolo)">✓</button>`;
+    acoes += `<button class="btn btn-ghost btn-sm" onclick="abrirModalSuspender('${d.id}')" title="Suspender (pausa lembretes)">⏸</button>`;
+    acoes += `<button class="btn btn-ghost btn-sm" onclick="abrirModalCancelar('${d.id}')" title="Cancelar com motivo">⊘</button>`;
+  }
+  acoes += `<button class="btn btn-ghost btn-sm" onclick="deleteDeadline('${d.id}')" title="Remover do registro">🗑</button>`;
+
+  // Detalhes complementares por status
+  let detalhesStatus = '';
+  if (visual === 'cumprido' && d.cumprimento) {
+    const c = d.cumprimento;
+    detalhesStatus = `<div style="font-size: 11px; color: var(--uc-warm-gray); margin-top: 4px;">✓ Cumprido em ${formatDate(c.dataCumprimento)} · protocolo ${escapeHtml(c.numeroProtocolo)}${c.advogadoOab ? ' · ' + escapeHtml(c.advogadoOab) : ''}${c.observacoes ? '<br>' + escapeHtml(c.observacoes) : ''}</div>`;
+  } else if (visual === 'suspenso' && d.suspensao) {
+    const s = d.suspensao;
+    detalhesStatus = `<div style="font-size: 11px; color: var(--uc-warm-gray); margin-top: 4px;">⏸ Suspenso: ${escapeHtml(s.motivo)}${s.suspensoAte ? ' · até ' + formatDate(s.suspensoAte) : ''}</div>`;
+  } else if (visual === 'cancelado' && d.cancelamento) {
+    detalhesStatus = `<div style="font-size: 11px; color: var(--uc-warm-gray); margin-top: 4px;">⊘ Cancelado: ${escapeHtml(d.cancelamento.motivo)}</div>`;
+  } else if (visual === 'perdido') {
+    detalhesStatus = `<div style="font-size: 11px; color: var(--uc-red); margin-top: 4px; font-weight: 600;">✗ PRAZO PERDIDO — investigar e regularizar</div>`;
+  }
+
   return `
-    <div class="deadline-row ${cls}">
+    <div class="deadline-row ${v.cls}">
       <div style="flex: 1; min-width: 0;">
         <div style="font-weight: 600; color: var(--uc-black);">${escapeHtml(d.description || d.type)}${d.emDobro ? ' <span class="badge badge-amber" style="font-size: 9px;">DOBRO</span>' : ''} ${parserBadge} ${reviewBadge}</div>
         <div style="font-size: 12px; color: var(--uc-warm-gray); margin-top: 2px;">
           Vence ${formatDate(dl)}${d.intimationDate ? ' · intimação ' + formatDate(d.intimationDate) : ''}${d.daysAllowed ? ' · ' + d.daysAllowed + ' dias ' + unidLabel : ''}${d.tribunal && d.tribunal !== 'NACIONAL' ? ' · ' + escapeHtml(d.tribunal) : ''}
         </div>
+        ${detalhesStatus}
         ${d.diarioCalculo ? `<details style="margin-top: 4px;"><summary style="font-size: 11px; color: var(--uc-warm-gray); cursor: pointer;">📋 diário de cálculo</summary><div style="font-size: 11px; color: var(--uc-graphite); padding: 6px 8px; background: var(--uc-cream); border-radius: 4px; margin-top: 4px; line-height: 1.5;">${escapeHtml(d.diarioCalculo)}</div></details>` : ''}
       </div>
       <div class="flex gap-2 items-center">
-        <span class="badge ${cls === 'urgent' || cls === 'expired' ? 'badge-red' : cls === 'warning' ? 'badge-amber' : cls === 'done' ? 'badge-gray' : 'badge-green'}">${label}</span>
-        ${d.status !== 'done' ? `<button class="btn btn-ghost btn-sm" onclick="markDeadlineDone('${d.id}')" title="Marcar como concluído">✓</button>` : ''}
-        <button class="btn btn-ghost btn-sm" onclick="deleteDeadline('${d.id}')" title="Remover">🗑</button>
+        <span class="badge ${v.badge}">${v.label}</span>
+        ${acoes}
       </div>
     </div>
   `;
@@ -1501,7 +1546,7 @@ function renderProcessAnalysis(p, events, deadlines, jurisprudence) {
         <button class="btn btn-outline" onclick="downloadProcessPackage()">⬇ Baixar como .md</button>
       </div>
       <p class="help-text" style="margin-top: 12px;">
-        ${events.length} evento(s) · ${jurisprudence.length} jurisprudência(s) · ${deadlines.filter(d => d.status !== 'done').length} prazo(s) ativo(s) serão incluídos no pacote.
+        ${events.length} evento(s) · ${jurisprudence.length} jurisprudência(s) · ${deadlines.filter(d => prazoEstaAtivo(d)).length} prazo(s) ativo(s) serão incluídos no pacote.
       </p>
     </div>
     <div class="card mt-4">
@@ -2078,18 +2123,113 @@ async function addDeadlineFlow() {
   renderProcessDetail();
 }
 
+// Compat — clique direto no ✓ chama o modal completo de cumprimento.
 async function markDeadlineDone(id) {
-  const d = state._processView.deadlines.find(x => x.id === id);
+  return abrirModalCumprimento(id);
+}
+
+// Marcar como cumprido — exige data + número de protocolo (princípio reitor:
+// nenhum prazo é considerado cumprido até confirmação explícita).
+async function abrirModalCumprimento(id) {
+  const d = state._processView?.deadlines?.find(x => x.id === id);
   if (!d) return;
-  d.status = 'done';
-  d.completedAt = Date.now();
+  if (prazoEstaResolvido(d)) { toast('Prazo já está resolvido', '', 'info'); return; }
+  const hojeISO = new Date().toISOString().slice(0,10);
+  const r = await showModal('Marcar como cumprido', [
+    { label: 'Data do cumprimento', type: 'date', default: hojeISO },
+    { label: 'Número de protocolo (obrigatório)', placeholder: 'Ex: 12345678' },
+    { label: 'Advogado responsável (OAB, opcional)', placeholder: 'GO-16539' },
+    { label: 'Observações (opcional)' }
+  ], { confirmLabel: 'Confirmar cumprimento', intro: `Prazo: <strong>${escapeHtml(d.description || d.type)}</strong> · Vence ${formatDate(d.deadlineDate)}` });
+  if (!r) return;
+  const [dataCumprimento, numeroProtocolo, oab, obs] = r;
+  if (!numeroProtocolo?.trim()) { toast('Número de protocolo é obrigatório', '', 'error'); return; }
+  d.status = STATUS_PRAZO.CUMPRIDO;
+  d.cumprimento = {
+    dataCumprimento: dataCumprimento || hojeISO,
+    numeroProtocolo: numeroProtocolo.trim(),
+    advogadoOab: oab?.trim() || null,
+    observacoes: obs?.trim() || '',
+    registradoEm: Date.now()
+  };
+  d.completedAt = Date.now();   // mantém pra retrocompat de sort/render legado
+  d.updatedAt = Date.now();
+  appendLogPrazo(d, 'cumprido', {
+    dataCumprimento: d.cumprimento.dataCumprimento,
+    numeroProtocolo: d.cumprimento.numeroProtocolo,
+    oab: d.cumprimento.advogadoOab
+  });
   await DB.saveDeadline(d);
-  toast('Prazo concluído', '', 'success');
+  toast('Prazo cumprido', `Protocolo ${d.cumprimento.numeroProtocolo}`, 'success');
+  renderProcessDetail();
+}
+
+// Suspender — pausa lembretes. Reabre via reabrirPrazo() ou (futuro) pela suspensoAte.
+async function abrirModalSuspender(id) {
+  const d = state._processView?.deadlines?.find(x => x.id === id);
+  if (!d) return;
+  if (d.status === STATUS_PRAZO.SUSPENSO) { toast('Já está suspenso', '', 'info'); return; }
+  if (prazoEstaResolvido(d)) { toast('Prazo já resolvido', '', 'error'); return; }
+  const r = await showModal('Suspender prazo', [
+    { label: 'Motivo (obrigatório)', placeholder: 'Ex: aguardando juntada de documentos' },
+    { label: 'Suspenso até (opcional)', type: 'date' }
+  ], { confirmLabel: 'Suspender', intro: 'Suspensão pausa lembretes. Use Reabrir para retomar manualmente.' });
+  if (!r) return;
+  const [motivo, suspensoAte] = r;
+  if (!motivo?.trim()) { toast('Motivo obrigatório', '', 'error'); return; }
+  d.suspensao = {
+    motivo: motivo.trim(),
+    suspensoAte: suspensoAte || null,
+    statusAnterior: d.status,
+    suspensoEm: Date.now()
+  };
+  d.status = STATUS_PRAZO.SUSPENSO;
+  d.updatedAt = Date.now();
+  appendLogPrazo(d, 'suspenso', { motivo: d.suspensao.motivo, ate: d.suspensao.suspensoAte });
+  await DB.saveDeadline(d);
+  toast('Prazo suspenso', '', 'success');
+  renderProcessDetail();
+}
+
+async function reabrirPrazo(id) {
+  const d = state._processView?.deadlines?.find(x => x.id === id);
+  if (!d) return;
+  if (d.status !== STATUS_PRAZO.SUSPENSO) { toast('Só prazos suspensos podem ser reabertos', '', 'info'); return; }
+  const anterior = d.suspensao?.statusAnterior || STATUS_PRAZO.PENDENTE;
+  d.status = STATUS_TERMINAIS.has(anterior) ? STATUS_PRAZO.PENDENTE : anterior;
+  appendLogPrazo(d, 'reaberto', { suspensaoAnterior: d.suspensao });
+  delete d.suspensao;
+  d.updatedAt = Date.now();
+  await DB.saveDeadline(d);
+  toast('Prazo reaberto', '', 'success');
+  renderProcessDetail();
+}
+
+// Cancelar — anula com motivo. Diferente de Remover: prazo cancelado fica no histórico.
+async function abrirModalCancelar(id) {
+  const d = state._processView?.deadlines?.find(x => x.id === id);
+  if (!d) return;
+  if (prazoEstaResolvido(d)) { toast('Prazo já resolvido', '', 'error'); return; }
+  const r = await showModal('Cancelar prazo', [
+    { label: 'Motivo do cancelamento (obrigatório)' }
+  ], { confirmLabel: 'Cancelar prazo', intro: '⚠ Cancelado é diferente de Removido. Cancelado fica no histórico marcado como anulado, com motivo. Removido apaga o registro.' });
+  if (!r) return;
+  const [motivo] = r;
+  if (!motivo?.trim()) { toast('Motivo obrigatório', '', 'error'); return; }
+  d.cancelamento = {
+    motivo: motivo.trim(),
+    canceladoEm: Date.now()
+  };
+  d.status = STATUS_PRAZO.CANCELADO;
+  d.updatedAt = Date.now();
+  appendLogPrazo(d, 'cancelado', { motivo: d.cancelamento.motivo });
+  await DB.saveDeadline(d);
+  toast('Prazo cancelado', '', 'success');
   renderProcessDetail();
 }
 
 async function deleteDeadline(id) {
-  const ok = await confirmDialog('Remover prazo?', '', true);
+  const ok = await confirmDialog('Remover prazo?', 'O prazo será apagado do registro. Para apenas anular mantendo histórico, use Cancelar.', true);
   if (!ok) return;
   await DB.deleteDeadline(id);
   renderProcessDetail();
@@ -2143,9 +2283,9 @@ function buildProcessClaudePackage(p, events, deadlines, notes, jurisprudence, p
     });
   }
 
-  if (deadlines.filter(d => d.status !== 'done').length > 0) {
+  if (deadlines.filter(d => prazoEstaAtivo(d)).length > 0) {
     md += `\n---\n\n## Prazos ativos\n\n`;
-    deadlines.filter(d => d.status !== 'done').sort((a,b) => new Date(a.deadlineDate) - new Date(b.deadlineDate)).forEach(d => {
+    deadlines.filter(d => prazoEstaAtivo(d)).sort((a,b) => new Date(a.deadlineDate) - new Date(b.deadlineDate)).forEach(d => {
       const dl = new Date(d.deadlineDate);
       const today = new Date(); today.setHours(0,0,0,0);
       const days = Math.ceil((dl - today) / 86400000);
@@ -2227,8 +2367,8 @@ async function renderDeadlines() {
     const days = Math.ceil((dl - today) / 86400000);
     return { ...d, processName: proc?.name || 'Processo removido', processCnj: proc?.cnj, days };
   });
-  const active = enriched.filter(d => d.status !== 'done');
-  const done = enriched.filter(d => d.status === 'done');
+  const active = enriched.filter(d => prazoEstaAtivo(d));
+  const done = enriched.filter(d => prazoEstaResolvido(d));
   const expired = active.filter(d => d.days < 0);
   const urgent = active.filter(d => d.days >= 0 && d.days <= 5);
   const warning = active.filter(d => d.days > 5 && d.days <= 14);
@@ -2309,7 +2449,10 @@ async function exportDeadlinesCsv() {
     const p = processes.find(x => x.id === d.processId);
     const dl = new Date(d.deadlineDate);
     const days = Math.ceil((dl - today) / 86400000);
-    csv += `"${(p?.name || '').replace(/"/g,'""')}","${p?.cnj || ''}","${(d.description || d.type).replace(/"/g,'""')}","${formatDate(dl)}","${d.status === 'done' ? 'concluído' : days}","${d.status === 'done' ? 'concluído' : days < 0 ? 'vencido' : 'pendente'}"\n`;
+    const visual = recomputarStatusVisual(d, today);
+    const statusLabel = prazoEstaResolvido(d) ? visual : (days < 0 ? 'expirado' : visual);
+    const diasCol = prazoEstaResolvido(d) ? visual : days;
+    csv += `"${(p?.name || '').replace(/"/g,'""')}","${p?.cnj || ''}","${(d.description || d.type).replace(/"/g,'""')}","${formatDate(dl)}","${diasCol}","${statusLabel}"\n`;
   });
   downloadBlob(new Blob([csv], { type: 'text/csv;charset=utf-8' }), `prazos_${new Date().toISOString().slice(0,10)}.csv`);
   toast('Exportado', '', 'success');
@@ -2992,6 +3135,84 @@ function __testarCalculo() {
 }
 // Expõe globalmente pra rodar no DevTools sem ter que cavar escopo
 if (typeof window !== 'undefined') window.__testarCalculo = __testarCalculo;
+
+// ====================================================================
+// State machine de prazos — Sprint 3 Fase A (Módulo Prazos)
+// ====================================================================
+// Estados persistidos:
+//   pendente   — prazo ativo, ainda não resolvido
+//   cumprido   — TERMINAL: advogado confirmou (data + protocolo obrigatórios)
+//   perdido    — TERMINAL: data fatal expirou sem cumprimento (auto T+1)
+//   suspenso   — pausa; reabre por data ou ação manual
+//   cancelado  — TERMINAL: anulado com justificativa (não some do registro)
+//
+// Status visual derivado em recomputarStatusVisual(d, today):
+//   pendente  + days <  0  → 'expirado' (auto-perdido pega depois)
+//   pendente  + days <= 1  → 'iminente'
+//   pendente  + days <= 7  → 'vincendo'
+//
+// Vincendo/iminente/expirado NUNCA são persistidos — derivam de deadlineDate.
+const STATUS_PRAZO = Object.freeze({
+  PENDENTE:  'pendente',
+  CUMPRIDO:  'cumprido',
+  PERDIDO:   'perdido',
+  SUSPENSO:  'suspenso',
+  CANCELADO: 'cancelado'
+});
+
+const STATUS_TERMINAIS = new Set([STATUS_PRAZO.CUMPRIDO, STATUS_PRAZO.PERDIDO, STATUS_PRAZO.CANCELADO]);
+
+// Migração lazy: normaliza prazos antigos (status 'done'/'pending') em leitura.
+// Idempotente — chamar quantas vezes precisar sem efeito colateral.
+function migrarPrazoLegacy(d) {
+  if (!d) return d;
+  if (d.status === 'done') {
+    d.status = STATUS_PRAZO.CUMPRIDO;
+    if (d.completedAt && !d.cumprimento) {
+      d.cumprimento = {
+        dataCumprimento: new Date(d.completedAt).toISOString().slice(0,10),
+        numeroProtocolo: '(legado — não registrado)',
+        registradoEm: d.completedAt
+      };
+    }
+  } else if (d.status === 'pending' || d.status == null) {
+    d.status = STATUS_PRAZO.PENDENTE;
+  }
+  if (!Array.isArray(d.logs)) d.logs = [];
+  return d;
+}
+
+function prazoEstaResolvido(d) {
+  return STATUS_TERMINAIS.has(d.status);
+}
+function prazoEstaAtivo(d) {
+  return !prazoEstaResolvido(d);
+}
+
+function recomputarStatusVisual(d, today) {
+  if (!today) { today = new Date(); today.setHours(0,0,0,0); }
+  if (d.status === STATUS_PRAZO.CUMPRIDO)  return 'cumprido';
+  if (d.status === STATUS_PRAZO.CANCELADO) return 'cancelado';
+  if (d.status === STATUS_PRAZO.PERDIDO)   return 'perdido';
+  if (d.status === STATUS_PRAZO.SUSPENSO)  return 'suspenso';
+  // pendente — deriva pela proximidade
+  const dl = new Date(d.deadlineDate);
+  const days = Math.ceil((dl - today) / 86400000);
+  if (days < 0)  return 'expirado';
+  if (days <= 1) return 'iminente';
+  if (days <= 7) return 'vincendo';
+  return 'pendente';
+}
+
+function appendLogPrazo(d, evento, payload, ator) {
+  if (!Array.isArray(d.logs)) d.logs = [];
+  d.logs.push({
+    evento,
+    payload: payload || {},
+    ator: ator || 'sistema',
+    timestamp: Date.now()
+  });
+}
 
 // ====================================================================
 // Parser de Prazo — Sprint 1 / Fase 3 (tier 1 regex + tier 2 keywords)
@@ -4677,10 +4898,10 @@ ${events.length > 0 ? `<h2>Cronologia processual</h2>
 ${[...events].sort((a,b) => parseInt(a.eventNumber) - parseInt(b.eventNumber)).map(e => `<tr><td>${escapeHtml(e.eventNumber)}</td><td>${escapeHtml(e.date || '—')}</td><td>${escapeHtml(e.type)}</td><td>${e.startPage}–${e.endPage}</td></tr>`).join('')}
 </table>` : ''}
 
-${deadlines.filter(d => d.status !== 'done').length > 0 ? `<h2>Prazos pendentes</h2>
+${deadlines.filter(d => prazoEstaAtivo(d)).length > 0 ? `<h2>Prazos pendentes</h2>
 <table>
 <tr><th>Descrição</th><th>Vencimento</th></tr>
-${deadlines.filter(d => d.status !== 'done').sort((a,b) => new Date(a.deadlineDate) - new Date(b.deadlineDate)).map(d => `<tr><td>${escapeHtml(d.description || d.type)}</td><td>${formatDate(d.deadlineDate)}</td></tr>`).join('')}
+${deadlines.filter(d => prazoEstaAtivo(d)).sort((a,b) => new Date(a.deadlineDate) - new Date(b.deadlineDate)).map(d => `<tr><td>${escapeHtml(d.description || d.type)}</td><td>${formatDate(d.deadlineDate)}</td></tr>`).join('')}
 </table>` : ''}
 
 ${jurisprudence.length > 0 ? `<h2>Jurisprudência catalogada</h2>
