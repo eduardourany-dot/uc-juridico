@@ -261,7 +261,7 @@ body{background:var(--uc-paper);color:var(--uc-graphite);font-size:15px;-webkit-
 
     <div style="margin-top:auto;padding:16px 20px;border-top:1px solid var(--uc-line-soft);font-size:11px;color:var(--uc-warm-gray);text-align:center;">
       <p class="smallcaps font-serif" style="margin:0 0 4px;">Urany de Castro · 30 anos</p>
-      <p style="margin:0;">100% local · v4.0</p>
+      <p style="margin:0;">100% local · v6.9.0</p>
     </div>
   </aside>
 
@@ -2845,6 +2845,155 @@ function addBusinessDays(date, days) {
 }
 
 // ====================================================================
+// Suite de validação do cálculo de data fatal — Sprint 2 / Fase 4
+// ====================================================================
+// Chamar no console: __testarCalculo()
+// Imprime tabela com cada caso, esperado vs. calculado, e um veredito final.
+// Briefing pede 100% de acerto neste módulo — qualquer divergência precisa
+// ser investigada antes de seguir para Sprint 3 (motor de lembretes).
+//
+// Nota técnica sobre CORRIDOS atravessando recesso forense (caso 14):
+// O comportamento implementado prorroga a data fatal para o próximo dia
+// útil quando ela cai dentro do recesso (art. 224 §1º CPC), mas NÃO suspende
+// a contagem durante o intervalo 20/12–20/01. Essa é a interpretação
+// dominante em executiva fiscal (LEF 16: 30 d.c. contínuos, sem suspensão
+// pelo recesso forense — STJ AgRg no REsp 1.401.412/SC e correlatos).
+// Para cíveis (UTEIS) a questão não se coloca: dias dentro do recesso já são
+// não-úteis. Se algum tribunal vier a entender que CORRIDOS suspendem,
+// criaremos flag por tipo de ato.
+function __testarCalculo() {
+  const casos = [
+    {
+      n: 1,
+      desc: 'CPC 15 d.ú. — caso clássico (publicação numa segunda)',
+      input: { dataPublicacao: '2026-05-04', prazoDias: 15, unidade: 'UTEIS', tribunal: 'TJGO' },
+      esperado: '2026-05-26'
+    },
+    {
+      n: 2,
+      desc: 'CPC 15 d.ú. + dobro Fazenda → 30 d.ú. (cruza Corpus Christi 04/06/2026)',
+      input: { dataPublicacao: '2026-05-04', prazoDias: 15, unidade: 'UTEIS', tribunal: 'TJGO', emDobro: true },
+      esperado: '2026-06-17'
+    },
+    {
+      n: 3,
+      desc: 'Tributário 30 d.c. cruzando recesso (data fatal cairia em 15/01/2027 → prorroga)',
+      input: { dataPublicacao: '2026-12-15', prazoDias: 30, unidade: 'CORRIDOS', tribunal: 'NACIONAL' },
+      esperado: '2027-01-21'
+    },
+    {
+      n: 4,
+      desc: 'Cruza Corpus Christi (UTEIS, publicação 28/05/2026)',
+      input: { dataPublicacao: '2026-05-28', prazoDias: 15, unidade: 'UTEIS', tribunal: 'TJGO' },
+      esperado: '2026-06-22'
+    },
+    {
+      n: 5,
+      desc: 'Cruza Carnaval 2026 (16-17/02), prazo 5 d.ú. publicado 12/02',
+      input: { dataPublicacao: '2026-02-12', prazoDias: 5, unidade: 'UTEIS', tribunal: 'TJGO' },
+      esperado: '2026-02-24'
+    },
+    {
+      n: 6,
+      desc: 'Trabalhista 8 d.ú. (Recurso Ordinário)',
+      input: { dataPublicacao: '2026-05-04', prazoDias: 8, unidade: 'UTEIS', tribunal: 'TRT18' },
+      esperado: '2026-05-15'
+    },
+    {
+      n: 7,
+      desc: 'Apelação 15 d.ú. publicada numa sexta (08/05/2026)',
+      input: { dataPublicacao: '2026-05-08', prazoDias: 15, unidade: 'UTEIS', tribunal: 'TJGO' },
+      esperado: '2026-06-01'
+    },
+    {
+      n: 8,
+      desc: 'Marco atravessa recesso E Carnaval 2027 (08-09/02): pub 15/12/2026, prazo 15 d.ú.',
+      input: { dataPublicacao: '2026-12-15', prazoDias: 15, unidade: 'UTEIS', tribunal: 'TJGO' },
+      esperado: '2027-02-10'
+    },
+    {
+      n: 9,
+      desc: 'Art. 224 §1º — CORRIDO 1 dia: marco numa sexta, +1 cai no sábado → prorroga p/ segunda',
+      input: { dataPublicacao: '2026-05-07', prazoDias: 1, unidade: 'CORRIDOS', tribunal: 'NACIONAL' },
+      esperado: '2026-05-11'
+    },
+    {
+      n: 10,
+      desc: 'Feriado nacional fixo no meio (Tiradentes 21/04/2026), prazo 5 d.ú.',
+      input: { dataPublicacao: '2026-04-16', prazoDias: 5, unidade: 'UTEIS', tribunal: 'TJGO' },
+      esperado: '2026-04-27'
+    },
+    {
+      n: 11,
+      desc: 'Embargos de declaração trabalhistas — 5 d.ú. CLT art. 897-A',
+      input: { dataPublicacao: '2026-05-04', prazoDias: 5, unidade: 'UTEIS', tribunal: 'TRT18' },
+      esperado: '2026-05-12'
+    },
+    {
+      n: 12,
+      desc: 'Pub na sexta antes do recesso (18/12/2026), 5 d.ú. → marco salta para 21/01/2027',
+      input: { dataPublicacao: '2026-12-18', prazoDias: 5, unidade: 'UTEIS', tribunal: 'TJGO' },
+      esperado: '2027-01-28'
+    },
+    {
+      n: 13,
+      desc: 'Pub dentro do recesso (28/12/2026), 15 d.ú. → cruza Carnaval 2027 (08-09/02)',
+      input: { dataPublicacao: '2026-12-28', prazoDias: 15, unidade: 'UTEIS', tribunal: 'TJGO' },
+      esperado: '2027-02-15'
+    },
+    {
+      n: 14,
+      desc: 'CORRIDO cruzando recesso — 30 d.c. de 11/12/2026 cai 10/01/2027 (dom, recesso) → prorroga 21/01',
+      input: { dataPublicacao: '2026-12-10', prazoDias: 30, unidade: 'CORRIDOS', tribunal: 'NACIONAL' },
+      esperado: '2027-01-21'
+    },
+    {
+      n: 15,
+      desc: 'Dobro Defensoria + Carnaval 2026: 5 d.ú. × 2 = 10, pub 02/02/2026',
+      input: { dataPublicacao: '2026-02-02', prazoDias: 5, unidade: 'UTEIS', tribunal: 'TJGO', emDobro: true },
+      esperado: '2026-02-19'
+    }
+  ];
+
+  const linhas = [];
+  let acertos = 0;
+  for (const c of casos) {
+    let calculado, erro = null;
+    try {
+      const r = calcularDataFatal({
+        dataPublicacao: new Date(c.input.dataPublicacao + 'T12:00:00'),
+        prazoDias: c.input.prazoDias,
+        unidade: c.input.unidade,
+        tribunal: c.input.tribunal,
+        emDobro: !!c.input.emDobro
+      });
+      calculado = ymdKey(r.dataFatal);
+    } catch (e) {
+      erro = e.message;
+      calculado = '(erro)';
+    }
+    const ok = calculado === c.esperado;
+    if (ok) acertos++;
+    linhas.push({
+      '#': c.n,
+      caso: c.desc,
+      esperado: c.esperado,
+      calculado,
+      ok: ok ? '✓' : '✗',
+      erro: erro || ''
+    });
+  }
+  console.table(linhas);
+  const total = casos.length;
+  const pct = ((acertos / total) * 100).toFixed(1);
+  const veredito = acertos === total ? '✓ TODOS PASSARAM' : `✗ ${total - acertos} FALHA(S)`;
+  console.log(`\n${veredito}  (${acertos}/${total} = ${pct}%)`);
+  return { total, acertos, falhas: total - acertos, pct: parseFloat(pct), linhas };
+}
+// Expõe globalmente pra rodar no DevTools sem ter que cavar escopo
+if (typeof window !== 'undefined') window.__testarCalculo = __testarCalculo;
+
+// ====================================================================
 // Parser de Prazo — Sprint 1 / Fase 3 (tier 1 regex + tier 2 keywords)
 // ====================================================================
 
@@ -2876,6 +3025,7 @@ const TIPOS_ATO = {
   REC_ORDINARIO:      { prazo: 8,  unidade: 'UTEIS',    baseLegal: 'CLT art. 895',     label: 'Recurso ordinário' },
   AGRAVO_INSTR_TRAB:  { prazo: 8,  unidade: 'UTEIS',    baseLegal: 'CLT art. 897',     label: 'Agravo de instrumento trabalhista' },
   REC_REVISTA:        { prazo: 8,  unidade: 'UTEIS',    baseLegal: 'CLT art. 896 §6º', label: 'Recurso de revista' },
+  EMB_DECL_TRAB:      { prazo: 5,  unidade: 'UTEIS',    baseLegal: 'CLT art. 897-A',   label: 'Embargos de declaração trabalhistas' },
   CONTRARRAZOES_TRAB: { prazo: 8,  unidade: 'UTEIS',    baseLegal: 'CLT art. 900',     label: 'Contrarrazões trabalhista' },
 
   // Fallback
@@ -2913,6 +3063,7 @@ const PARSER_REGEXES = [
 // Tier 2 — keywords pra classificar tipo (quando regex não pegou prazo+tipo juntos)
 const PARSER_KEYWORDS = [
   // Trabalhista (mais específico antes)
+  { keywords: ['embargos de declaração trabalhistas', 'embargos de declaracao trabalhistas', 'embargos declaratórios trabalhistas', 'embargos declaratorios trabalhistas'], tipo: 'EMB_DECL_TRAB' },
   { keywords: ['recurso ordinário', 'recurso ordinario'], tipo: 'REC_ORDINARIO' },
   { keywords: ['recurso de revista'], tipo: 'REC_REVISTA' },
   // Tributário

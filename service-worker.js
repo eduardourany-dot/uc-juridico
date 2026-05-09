@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.8.0 (Fase 3 Prazos: parser tier 1+2)
-const CACHE_NAME = 'uc-juridico-v6-8-0';
+// Service Worker — UC Jurídico v6.9.0 (Fase 4 Prazos: suite de validação do cálculo + EMB_DECL_TRAB)
+const CACHE_NAME = 'uc-juridico-v6-9-0';
 const APP_SHELL = [
   './',
   './index.html',
