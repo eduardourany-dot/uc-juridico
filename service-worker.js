@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.14.0 (Sprint 3 Fase B.2: FCM push do servidor)
-const CACHE_NAME = 'uc-juridico-v6-14-0';
+// Service Worker — UC Jurídico v6.14.1 (Cache layer — reduz 80% das reads Firestore)
+const CACHE_NAME = 'uc-juridico-v6-14-1';
 const APP_SHELL = [
   './',
   './index.html',

@@ -262,7 +262,7 @@ body{background:var(--uc-paper);color:var(--uc-graphite);font-size:15px;-webkit-
 
     <div style="margin-top:auto;padding:16px 20px;border-top:1px solid var(--uc-line-soft);font-size:11px;color:var(--uc-warm-gray);text-align:center;">
       <p class="smallcaps font-serif" style="margin:0 0 4px;">Urany de Castro · 30 anos</p>
-      <p style="margin:0;">100% local · v6.14.0</p>
+      <p style="margin:0;">100% local · v6.14.1</p>
     </div>
   </aside>
 
@@ -7027,13 +7027,104 @@ async function bootApp() {
   // O binding `const DB` permanece; só os métodos são trocados.
   Object.assign(DB, window.UC_RemoteDB);
 
-  // Wrapper de migração: o RemoteDB acabou de sobrescrever os getters de prazo.
-  // Sem isso, prazos antigos (status: 'done'/'pending') voltam crus e o state
-  // machine novo não os reconhece. Aplica migrarPrazoLegacy de forma transparente.
+  // ============================================================
+  // Camada de cache em memória — Sprint 3 Fase B.2 (v6.14.1)
+  // ============================================================
+  // Motivação: cada navegação no app fazia getAllProcesses + getAllDeadlines
+  // do Firestore, multiplicado por dezenas de chamadas em hot paths
+  // (dashboard, listas, badges). Em uso intenso, app consumia ~285K reads/dia,
+  // estourando o free tier Spark (50K). Cache TTL 5 min com invalidação
+  // automática em saves/deletes mata a redundância sem mudar call sites.
+
+  const CACHE_MS = 5 * 60 * 1000;
+
+  // ----- getAllProcesses -----
+  const _remoteGetAllProcesses = DB.getAllProcesses.bind(DB);
+  let _procCache = null, _procCacheAt = 0;
+  DB.getAllProcesses = async () => {
+    if (_procCache && (Date.now() - _procCacheAt < CACHE_MS)) return _procCache;
+    _procCache = await _remoteGetAllProcesses();
+    _procCacheAt = Date.now();
+    return _procCache;
+  };
+
+  // ----- getAllDeadlines (com migração lazy + cache) -----
   const _remoteGetAllDeadlines = DB.getAllDeadlines.bind(DB);
   const _remoteGetDeadlinesByProcess = DB.getDeadlinesByProcess.bind(DB);
-  DB.getAllDeadlines = async () => (await _remoteGetAllDeadlines()).map(migrarPrazoLegacy);
-  DB.getDeadlinesByProcess = async (pid) => (await _remoteGetDeadlinesByProcess(pid)).map(migrarPrazoLegacy);
+  let _deadCache = null, _deadCacheAt = 0;
+  DB.getAllDeadlines = async () => {
+    if (_deadCache && (Date.now() - _deadCacheAt < CACHE_MS)) return _deadCache;
+    _deadCache = (await _remoteGetAllDeadlines()).map(migrarPrazoLegacy);
+    _deadCacheAt = Date.now();
+    return _deadCache;
+  };
+  // getDeadlinesByProcess: filtra do cache global se disponível, evitando
+  // novo fetch. Se não há cache, usa endpoint dedicado (sem cachear por id).
+  DB.getDeadlinesByProcess = async (pid) => {
+    if (_deadCache && (Date.now() - _deadCacheAt < CACHE_MS)) {
+      return _deadCache.filter(d => d.processId === pid);
+    }
+    return (await _remoteGetDeadlinesByProcess(pid)).map(migrarPrazoLegacy);
+  };
+
+  // ----- getSetting (cache por chave) -----
+  const _remoteGetSetting = DB.getSetting.bind(DB);
+  const _settingsCache = new Map();
+  const _settingsCacheAt = new Map();
+  DB.getSetting = async (key, defaultVal) => {
+    const at = _settingsCacheAt.get(key) || 0;
+    if (_settingsCache.has(key) && (Date.now() - at < CACHE_MS)) {
+      const v = _settingsCache.get(key);
+      return v !== undefined && v !== null ? v : (defaultVal !== undefined ? defaultVal : null);
+    }
+    const v = await _remoteGetSetting(key, defaultVal);
+    _settingsCache.set(key, v);
+    _settingsCacheAt.set(key, Date.now());
+    return v;
+  };
+
+  // ----- Invalidação automática em mutações -----
+  const _remoteSaveProcess = DB.saveProcess.bind(DB);
+  DB.saveProcess = async (p) => {
+    const r = await _remoteSaveProcess(p);
+    _procCache = null; _procCacheAt = 0;
+    return r;
+  };
+  const _remoteDeleteProcess = DB.deleteProcess.bind(DB);
+  DB.deleteProcess = async (id) => {
+    const r = await _remoteDeleteProcess(id);
+    _procCache = null; _procCacheAt = 0;
+    _deadCache = null; _deadCacheAt = 0;
+    return r;
+  };
+  const _remoteSaveDeadline = DB.saveDeadline.bind(DB);
+  DB.saveDeadline = async (d) => {
+    const r = await _remoteSaveDeadline(d);
+    _deadCache = null; _deadCacheAt = 0;
+    return r;
+  };
+  const _remoteDeleteDeadline = DB.deleteDeadline.bind(DB);
+  DB.deleteDeadline = async (id) => {
+    const r = await _remoteDeleteDeadline(id);
+    _deadCache = null; _deadCacheAt = 0;
+    return r;
+  };
+  const _remoteSetSetting = DB.setSetting.bind(DB);
+  DB.setSetting = async (key, value) => {
+    const r = await _remoteSetSetting(key, value);
+    _settingsCache.set(key, value);
+    _settingsCacheAt.set(key, Date.now());
+    return r;
+  };
+
+  // Helper exposto pra invalidar manualmente (DJEN sync, refresh do user, etc)
+  window._ucInvalidateCaches = () => {
+    _procCache = null; _procCacheAt = 0;
+    _deadCache = null; _deadCacheAt = 0;
+    _settingsCache.clear();
+    _settingsCacheAt.clear();
+    console.log('[cache] invalidado manualmente');
+  };
 
   // Auto-marca como "perdido" prazos pendentes cuja data fatal já passou
   // (princípio reitor §10.3 do briefing — fail-safe). Roda em background;
