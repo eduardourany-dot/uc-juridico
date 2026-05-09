@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.12.0 (Sprint 3 Fase A.3: suplente + sócio padrão + ausências + roteamento)
-const CACHE_NAME = 'uc-juridico-v6-12-0';
+// Service Worker — UC Jurídico v6.13.0 (Sprint 3 Fase B.1: lembretes via Web Notifications)
+const CACHE_NAME = 'uc-juridico-v6-13-0';
 const APP_SHELL = [
   './',
   './index.html',

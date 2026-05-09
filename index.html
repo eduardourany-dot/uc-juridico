@@ -261,7 +261,7 @@ body{background:var(--uc-paper);color:var(--uc-graphite);font-size:15px;-webkit-
 
     <div style="margin-top:auto;padding:16px 20px;border-top:1px solid var(--uc-line-soft);font-size:11px;color:var(--uc-warm-gray);text-align:center;">
       <p class="smallcaps font-serif" style="margin:0 0 4px;">Urany de Castro · 30 anos</p>
-      <p style="margin:0;">100% local · v6.12.0</p>
+      <p style="margin:0;">100% local · v6.13.0</p>
     </div>
   </aside>
 
@@ -1844,6 +1844,10 @@ async function obterDestinatariosPrazo(processo, marco, hoje) {
   return rotearDestinatarios({ titular, suplente, socio, marco, titularAusente });
 }
 
+// O bloco de lembretes (Sprint 3 Fase B.1) vive depois da state machine
+// — ver após appendLogPrazo. Foi movido pra lá pra que marcoDoPrazo possa
+// referenciar STATUS_PRAZO sem TDZ.
+
 async function editProcessFlow() {
   const p = state._processView.p;
   const me = (window.UC_Auth?.getUser?.() || {}).email || '';
@@ -3416,6 +3420,172 @@ function renderBannerPrazos() {
 }
 
 // ====================================================================
+// Lembretes in-app via Web Notifications API — Sprint 3 Fase B.1
+// ====================================================================
+// Estratégia: o próprio cliente verifica periodicamente (boot + a cada 15min)
+// quais prazos entraram em marco T-7..T+1, mapeia destinatários via
+// rotearDestinatarios() e dispara Notification do navegador para o usuário
+// logado APENAS se ele aparecer na lista de destinatários daquele marco.
+// Anti-spam: prazo carrega d.notificado = { 'T-7': { email: timestamp } }.
+// Cada email só notifica 1x por marco. Persistido via saveDeadline.
+//
+// Limitação reconhecida: só funciona com o app aberto OU com PWA instalado
+// (browser rodando em background no celular). Sprint B.2 fechará esse gap
+// com FCM real (servidor disparando, mesmo com app fechado).
+
+// Função pura — retorna o marco atual do prazo ou null.
+// Faixas exclusivas (sem sobreposição):
+//   T-7  : 4–7 dias
+//   T-3  : 3 dias exatos
+//   T-2  : 2 dias exatos
+//   T-1  : 1 dia
+//   T-0  : hoje
+//   T+1  : 1 dia depois (auto_perdido pega depois mas notifica antes)
+function marcoDoPrazo(d, hoje) {
+  if (!d || !d.deadlineDate) return null;
+  if (!prazoEstaAtivo(d)) return null;
+  if (d.status === STATUS_PRAZO.SUSPENSO) return null;
+  const today = hoje ? new Date(hoje) : (() => { const t = new Date(); t.setHours(0,0,0,0); return t; })();
+  if (hoje) today.setHours(0,0,0,0);
+  const dl = new Date(d.deadlineDate);
+  const days = Math.ceil((dl - today) / 86400000);
+  if (days >= 4 && days <= 7) return 'T-7';
+  if (days === 3) return 'T-3';
+  if (days === 2) return 'T-2';
+  if (days === 1) return 'T-1';
+  if (days === 0) return 'T-0';
+  if (days === -1) return 'T+1';
+  return null;
+}
+
+const MARCO_LABELS = {
+  'T-7': '⏰ Prazo em ≤7 dias',
+  'T-3': '⏰ Prazo em 3 dias',
+  'T-2': '⚠ Prazo em 2 dias',
+  'T-1': '🚨 Prazo AMANHÃ',
+  'T-0': '🚨🚨 Prazo HOJE',
+  'T+1': '✗ Prazo VENCEU'
+};
+
+// Verifica se o usuário/email já foi notificado pra este marco.
+function jaNotificadoNesteMarco(d, marco, email) {
+  return !!(d.notificado && d.notificado[marco] && d.notificado[marco][email]);
+}
+
+// Pede permissão de notificação ao navegador. Retorna true se concedida.
+async function solicitarPermissaoNotificacoes() {
+  if (typeof Notification === 'undefined') {
+    toast('Notificações não suportadas neste navegador', '', 'error');
+    return false;
+  }
+  if (Notification.permission === 'granted') {
+    state.settings.notificacoesAtivas = true;
+    await DB.setSetting('notificacoesAtivas', true);
+    toast('Notificações já permitidas', '', 'success');
+    if (state.currentRoute === 'settings') renderSettings();
+    return true;
+  }
+  if (Notification.permission === 'denied') {
+    toast('Notificações bloqueadas', 'Reabilite manualmente em Configurações do navegador → Notificações.', 'error');
+    return false;
+  }
+  const result = await Notification.requestPermission();
+  if (result === 'granted') {
+    state.settings.notificacoesAtivas = true;
+    await DB.setSetting('notificacoesAtivas', true);
+    toast('Notificações ativadas', 'Você receberá lembretes em T-7 → T+1', 'success');
+    if (state.currentRoute === 'settings') renderSettings();
+    // Roda imediatamente uma checagem após ativar
+    verificarLembretesPendentes().catch(err => console.warn(err));
+    return true;
+  }
+  toast('Permissão negada', '', 'info');
+  return false;
+}
+
+async function alternarNotificacoes(ativo) {
+  state.settings.notificacoesAtivas = !!ativo;
+  await DB.setSetting('notificacoesAtivas', !!ativo);
+  toast(ativo ? 'Notificações ativadas' : 'Notificações pausadas neste dispositivo', '', 'success');
+}
+
+// Roda no boot e a cada 15min. Idempotente — anti-spam por marco/email.
+async function verificarLembretesPendentes() {
+  if (typeof Notification === 'undefined') return 0;
+  if (Notification.permission !== 'granted') return 0;
+  if (state.settings.notificacoesAtivas === false) return 0;
+
+  const me = (window.UC_Auth?.getUser?.() || {}).email;
+  if (!me) return 0;
+  const meuNome = defaultAdvogado(me);
+  if (!meuNome) return 0; // usuário fora do diretório
+
+  const today = new Date(); today.setHours(0,0,0,0);
+  const ausencias = await obterAusencias();
+  const socio = await obterSocioPadrao();
+
+  const procById = new Map((state.processes || []).map(p => [p.id, p]));
+  const prazos = state.deadlines || [];
+  let disparados = 0;
+
+  for (const d of prazos) {
+    const marco = marcoDoPrazo(d, today);
+    if (!marco) continue;
+    if (jaNotificadoNesteMarco(d, marco, me)) continue;
+
+    const proc = procById.get(d.processId);
+    if (!proc) continue;
+
+    const titular = proc.advogadoResponsavel;
+    const suplente = proc.advogadoSuplente;
+    const ausenciaTitular = titular ? ausencias[titular] : null;
+    const titularAusente = !!ausenciaTitular &&
+      (!ausenciaTitular.ate || new Date(ausenciaTitular.ate + 'T23:59:59') >= today);
+    const destinatarios = rotearDestinatarios({ titular, suplente, socio, marco, titularAusente });
+    if (!destinatarios.includes(meuNome)) continue;
+
+    // Dispara Notification
+    try {
+      const title = MARCO_LABELS[marco] || `Prazo · ${marco}`;
+      const dl = new Date(d.deadlineDate);
+      const body = `${d.description || d.type} · vence ${formatDate(dl)} · ${proc.client || proc.name}`;
+      const noti = new Notification(title, {
+        body,
+        icon: 'icon-192.png',
+        tag: `prazo-${d.id}-${marco}`,
+        requireInteraction: marco === 'T-1' || marco === 'T-0' || marco === 'T+1',
+        data: { processId: proc.id, prazoId: d.id }
+      });
+      noti.onclick = () => {
+        try { window.focus(); } catch(e) {}
+        navigate('process', { currentProcessId: proc.id });
+        noti.close();
+      };
+
+      // Marca notificado por (marco, email)
+      d.notificado = d.notificado || {};
+      d.notificado[marco] = d.notificado[marco] || {};
+      d.notificado[marco][me] = Date.now();
+      d.updatedAt = Date.now();
+      appendLogPrazo(d, 'lembrete_enviado', { marco, canal: 'web-notification', destinatario: meuNome });
+      try {
+        await DB.saveDeadline(d);
+      } catch (e) {
+        console.warn('saveDeadline pós-notificação falhou', d.id, e);
+      }
+      disparados++;
+    } catch (e) {
+      console.warn('Falha ao notificar prazo', d.id, marco, e);
+    }
+  }
+
+  if (disparados > 0) {
+    console.log(`[lembretes] ${disparados} notificação(ões) disparadas`);
+  }
+  return disparados;
+}
+
+// ====================================================================
 // Parser de Prazo — Sprint 1 / Fase 3 (tier 1 regex + tier 2 keywords)
 // ====================================================================
 
@@ -4504,6 +4674,50 @@ function renderSettingsTab(tab, prompts, defaultPromptId) {
           ${ADVOGADOS.map(n => `<option value="${escapeHtml(n)}" ${n === socio ? 'selected' : ''}>${escapeHtml(n)}</option>`).join('')}
         </select>
         <button class="btn btn-primary btn-sm" onclick="salvarSocioPadrao()" style="margin-left:8px;">Salvar</button>
+      </div>
+
+      <div class="card mb-3">
+        <h3 class="font-serif text-lg font-semibold smallcaps mb-3" style="color: var(--uc-black);">Notificações neste dispositivo</h3>
+        <p class="help-text mb-3">
+          Quando o app está aberto (ou PWA instalado), recebe lembretes via notificação do sistema operacional.
+          Marcos cobertos: <strong>T-7</strong> · T-3 · T-2 · <strong>T-1</strong> · <strong>T-0</strong> (vence hoje) · T+1.
+          Cada marco notifica 1× por dispositivo. Anti-spam por advogado.
+        </p>
+        ${(() => {
+          const sup = (typeof Notification !== 'undefined');
+          const perm = sup ? Notification.permission : 'unsupported';
+          const ativo = state.settings?.notificacoesAtivas !== false;
+          if (!sup) {
+            return `<p style="color: var(--uc-warm-gray);">Este navegador não suporta Web Notifications. Em Sprint 3 B.2 vamos cobrir esse caso com Firebase Cloud Messaging.</p>`;
+          }
+          if (perm === 'default') {
+            return `
+              <button class="btn btn-primary" onclick="solicitarPermissaoNotificacoes()">🔔 Permitir notificações</button>
+              <p class="help-text" style="margin-top: 8px;">Você verá um pop-up do navegador. Aceite para ativar.</p>
+            `;
+          }
+          if (perm === 'denied') {
+            return `
+              <div style="background: var(--uc-amber-soft, #fff7e6); border: 1px solid var(--uc-amber); border-radius: 6px; padding: 12px;">
+                <strong style="color: var(--uc-red);">Notificações bloqueadas pelo navegador.</strong>
+                <p class="help-text" style="margin-top: 4px;">
+                  Para reabilitar: clique no cadeado/ⓘ ao lado do endereço → Permissões do site → Notificações → Permitir.
+                  Depois recarregue a página.
+                </p>
+              </div>
+            `;
+          }
+          // granted
+          return `
+            <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+              <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+                <input type="checkbox" id="notiToggle" ${ativo ? 'checked' : ''} onchange="alternarNotificacoes(this.checked)" style="margin:0;">
+                <span><strong>Ativo</strong> neste dispositivo</span>
+              </label>
+              <button class="btn btn-ghost btn-sm" onclick="verificarLembretesPendentes().then(n => toast(n + ' notificação(ões) disparadas', 'verificação manual', n ? 'success' : 'info'))">▶ Testar agora</button>
+            </div>
+          `;
+        })()}
       </div>
 
       <div class="card mb-3">
@@ -6709,7 +6923,21 @@ async function bootApp() {
   state.settings.theme = await DB.getSetting('theme', 'light');
   state.settings.backupReminder = await DB.getSetting('backupReminder', true);
   state.settings.lastBackupAt = await DB.getSetting('lastBackupAt', null);
+  state.settings.notificacoesAtivas = await DB.getSetting('notificacoesAtivas', true);
   applyTheme(state.settings.theme);
+
+  // Lembretes via Web Notifications (Sprint 3 Fase B.1).
+  // Roda 1x agora (após state estar carregado abaixo) + a cada 15 min.
+  // setInterval só é registrado uma vez por sessão.
+  if (!window._ucLembretesInterval) {
+    window._ucLembretesInterval = setInterval(() => {
+      verificarLembretesPendentes().catch(err => console.warn('verificarLembretesPendentes:', err));
+    }, 15 * 60 * 1000);
+    // Boot inicial: roda após 5s pra dar tempo de state.deadlines/processes carregarem
+    setTimeout(() => {
+      verificarLembretesPendentes().catch(err => console.warn('verificarLembretesPendentes:', err));
+    }, 5000);
+  }
 
   // Seed default prompt if none exists
   const prompts = (await DB.getAllPrompts()) || [];
