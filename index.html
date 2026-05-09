@@ -261,7 +261,7 @@ body{background:var(--uc-paper);color:var(--uc-graphite);font-size:15px;-webkit-
 
     <div style="margin-top:auto;padding:16px 20px;border-top:1px solid var(--uc-line-soft);font-size:11px;color:var(--uc-warm-gray);text-align:center;">
       <p class="smallcaps font-serif" style="margin:0 0 4px;">Urany de Castro · 30 anos</p>
-      <p style="margin:0;">100% local · v6.11.0</p>
+      <p style="margin:0;">100% local · v6.12.0</p>
     </div>
   </aside>
 
@@ -970,8 +970,8 @@ async function newProcessFlow() {
             </select>
           </div>
           <div>
-            <label class="label">Advogado responsável (interno)</label>
-            <p class="help-text" style="margin-bottom: 6px;">Quem na banca cuida desse processo. Pode ajustar depois.</p>
+            <label class="label">Advogado responsável (titular)</label>
+            <p class="help-text" style="margin-bottom: 6px;">Quem na banca cuida desse processo. Recebe lembretes em primeiro lugar.</p>
             <select class="select" id="newProcessOwner">
               ${(() => {
                 const myDefault = defaultAdvogado((window.UC_Auth?.getUser?.() || {}).email);
@@ -980,6 +980,14 @@ async function newProcessFlow() {
                   ...ADVOGADOS.map(name => `<option value="${escapeHtml(name)}" ${name === myDefault ? 'selected' : ''}>${escapeHtml(name)}</option>`)
                 ].join('');
               })()}
+            </select>
+          </div>
+          <div>
+            <label class="label">Advogado suplente (cobertura de ausência)</label>
+            <p class="help-text" style="margin-bottom: 6px;">Quem cobre quando o titular estiver ausente. Recebe lembretes em T-1 e T+0.</p>
+            <select class="select" id="newProcessSuplente">
+              <option value="" selected>— não atribuído —</option>
+              ${ADVOGADOS.map(name => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join('')}
             </select>
           </div>
           <div>
@@ -1010,6 +1018,7 @@ async function newProcessFlow() {
       const type = document.getElementById('newProcessType').value.trim();
       const polo = document.getElementById('newProcessPolo').value;
       const advogadoResponsavel = document.getElementById('newProcessOwner').value.trim();
+      const advogadoSuplente = document.getElementById('newProcessSuplente').value.trim();
       const risco = document.getElementById('newProcessRisk').value;
 
       if (!name) {
@@ -1064,6 +1073,7 @@ async function newProcessFlow() {
         type: type || null,
         polo,
         advogadoResponsavel: advogadoResponsavel || null,
+        advogadoSuplente: advogadoSuplente || null,
         risco: risco || null,
         status: 'active',
         eventCount: 0,
@@ -1765,6 +1775,73 @@ const ADVOGADO_OPTIONS = [
 function defaultAdvogado(email) {
   if (!email) return '';
   return ADVOGADO_BY_EMAIL[String(email).toLowerCase()] || '';
+}
+
+// Email reverso (nome → email canônico). Cache lazy.
+let _ADVOGADO_BY_NAME = null;
+function advogadoEmailPorNome(nome) {
+  if (!_ADVOGADO_BY_NAME) {
+    _ADVOGADO_BY_NAME = {};
+    for (const [email, nm] of Object.entries(ADVOGADO_BY_EMAIL)) _ADVOGADO_BY_NAME[nm] = email;
+  }
+  return _ADVOGADO_BY_NAME[nome] || null;
+}
+
+// Status de ausência por advogado — usado para roteamento de lembretes
+// (Sprint 3 §6.5 do briefing). Persistido em settings.advogadosAusencias
+// como objeto { 'NOME ADVOGADO': { ate: 'YYYY-MM-DD', motivo: '…' } }.
+async function obterAusencias() {
+  return (await DB.getSetting('advogadosAusencias', {})) || {};
+}
+
+async function advogadoEstaAusente(nome, hoje) {
+  if (!nome) return false;
+  const ausencias = await obterAusencias();
+  const a = ausencias[nome];
+  if (!a) return false;
+  if (!a.ate) return true;   // ausência indefinida
+  const fim = new Date(a.ate + 'T23:59:59');
+  const ref = hoje ? new Date(hoje) : new Date();
+  return ref <= fim;
+}
+
+async function obterSocioPadrao() {
+  return await DB.getSetting('socioPadraoNome', null);
+}
+
+// Roteamento de destinatários por marco (T-7, T-3, T-2, T-1, T-0, T+1).
+// Antecipa contrato de §7.3 do briefing. Não envia notificação ainda
+// (Sprint 3 B/C trata FCM/SES); apenas resolve a lista.
+//   T-7..T-2: titular  (suplente se titular ausente)
+//   T-1     : titular + suplente
+//   T-0/T+1 : titular + suplente + sócio padrão
+//
+// Versão pura — todos os inputs explicitos. Testável sem mock do DB.
+function rotearDestinatarios({ titular, suplente, socio, marco, titularAusente }) {
+  const principal = (titularAusente && suplente) ? suplente : titular;
+  const cobertura = (titularAusente && suplente) ? titular : suplente;
+
+  let lista = [];
+  if (['T-7','T-3','T-2'].includes(marco)) {
+    lista = [principal];
+  } else if (marco === 'T-1') {
+    lista = [principal, cobertura];
+  } else if (marco === 'T-0' || marco === 'T+1') {
+    lista = [principal, cobertura, socio];
+  } else {
+    lista = [principal];
+  }
+  // Dedup + remove vazios
+  return [...new Set(lista.filter(Boolean))];
+}
+
+// Wrapper assíncrono — carrega ausência e sócio do DB e chama rotearDestinatarios
+async function obterDestinatariosPrazo(processo, marco, hoje) {
+  const titular = processo?.advogadoResponsavel || null;
+  const suplente = processo?.advogadoSuplente || null;
+  const socio = await obterSocioPadrao();
+  const titularAusente = await advogadoEstaAusente(titular, hoje);
+  return rotearDestinatarios({ titular, suplente, socio, marco, titularAusente });
 }
 
 async function editProcessFlow() {
@@ -4382,6 +4459,7 @@ async function renderSettings() {
 
     <div class="tabs">
       <button class="tab ${tab === 'appearance' ? 'active' : ''}" onclick="setSettingsTab('appearance')">Aparência</button>
+      <button class="tab ${tab === 'equipe' ? 'active' : ''}" onclick="setSettingsTab('equipe')">Equipe</button>
       <button class="tab ${tab === 'djen' ? 'active' : ''}" onclick="setSettingsTab('djen')">DJEN</button>
       <button class="tab ${tab === 'prompts' ? 'active' : ''}" onclick="setSettingsTab('prompts')">Prompts</button>
       <button class="tab ${tab === 'backup' ? 'active' : ''}" onclick="setSettingsTab('backup')">Backup</button>
@@ -4410,6 +4488,44 @@ function renderSettingsTab(tab, prompts, defaultPromptId) {
           <button class="btn ${state.settings.theme === 'light' ? 'btn-primary' : 'btn-outline'}" onclick="setTheme('light')">☀ Claro</button>
           <button class="btn ${state.settings.theme === 'dark' ? 'btn-primary' : 'btn-outline'}" onclick="setTheme('dark')">🌙 Escuro</button>
         </div>
+      </div>
+    `;
+  }
+  if (tab === 'equipe') {
+    const cache = state._equipeCache || {};
+    const socio = cache.socioPadraoNome || '';
+    const ausencias = cache.ausencias || {};
+    return `
+      <div class="card mb-3">
+        <h3 class="font-serif text-lg font-semibold smallcaps mb-3" style="color: var(--uc-black);">Sócio padrão</h3>
+        <p class="help-text mb-2">Recebe o escalonamento final (T+0 às 17h e T+1 manhã) quando titular e suplente estiverem indisponíveis. Veja §6.5 do briefing do Módulo Prazos.</p>
+        <select class="select" id="socioPadraoSelect" style="max-width: 360px;">
+          <option value="" ${!socio ? 'selected' : ''}>— não definido —</option>
+          ${ADVOGADOS.map(n => `<option value="${escapeHtml(n)}" ${n === socio ? 'selected' : ''}>${escapeHtml(n)}</option>`).join('')}
+        </select>
+        <button class="btn btn-primary btn-sm" onclick="salvarSocioPadrao()" style="margin-left:8px;">Salvar</button>
+      </div>
+
+      <div class="card mb-3">
+        <h3 class="font-serif text-lg font-semibold smallcaps mb-3" style="color: var(--uc-black);">Status da equipe</h3>
+        <p class="help-text mb-3">Marque advogados ausentes (férias, afastamento, licença). Nos processos cujo titular estiver ausente, o suplente assume papel primário nos lembretes. Indefinido = ativo.</p>
+        ${ADVOGADOS.map(nome => {
+          const a = ausencias[nome];
+          const ausente = !!a;
+          return `
+            <div class="card" style="background: ${ausente ? 'var(--uc-amber-soft, #fff7e6)' : 'var(--uc-cream)'}; border: 1px solid ${ausente ? 'var(--uc-amber)' : 'var(--uc-line-soft)'}; padding: 10px; margin-bottom: 6px;">
+              <div class="flex items-center" style="gap: 12px; flex-wrap: wrap;">
+                <strong style="flex: 1; min-width: 200px;">${escapeHtml(nome)}</strong>
+                ${ausente
+                  ? `<span class="badge badge-amber">⏸ ausente${a.ate ? ' até ' + formatDate(a.ate) : ' (indefinida)'}</span>
+                     <button class="btn btn-ghost btn-sm" onclick="reativarAdvogado('${escapeHtml(nome).replace(/'/g, '&#39;')}')">↻ reativar</button>`
+                  : `<button class="btn btn-outline btn-sm" onclick="marcarAdvogadoAusenteFlow('${escapeHtml(nome).replace(/'/g, '&#39;')}')">⏸ marcar ausente</button>`
+                }
+              </div>
+              ${ausente && a.motivo ? `<div style="font-size: 12px; color: var(--uc-warm-gray); margin-top: 4px;">${escapeHtml(a.motivo)}</div>` : ''}
+            </div>
+          `;
+        }).join('')}
       </div>
     `;
   }
@@ -4684,6 +4800,16 @@ function renderSettingsTab(tab, prompts, defaultPromptId) {
 }
 
 function setupSettingsHandlers(tab) {
+  if (tab === 'equipe') {
+    // Carrega cache lazy (mesma estratégia do djen)
+    (async () => {
+      const socioPadraoNome = await DB.getSetting('socioPadraoNome', null);
+      const ausencias = await DB.getSetting('advogadosAusencias', {});
+      const fresh = !state._equipeCache;
+      state._equipeCache = { socioPadraoNome, ausencias };
+      if (fresh) renderSettings();
+    })();
+  }
   if (tab === 'backup') {
     const cb = $('backupReminderToggle');
     if (cb) cb.onchange = async (e) => {
@@ -4830,6 +4956,45 @@ async function djenViewHistory() {
 async function setTheme(theme) {
   applyTheme(theme);
   await DB.setSetting('theme', theme);
+  renderSettings();
+}
+
+// === Configurações > Equipe ===========================================
+async function salvarSocioPadrao() {
+  const sel = document.getElementById('socioPadraoSelect');
+  if (!sel) return;
+  const nome = sel.value || null;
+  await DB.setSetting('socioPadraoNome', nome);
+  state._equipeCache = { ...(state._equipeCache || {}), socioPadraoNome: nome };
+  toast('Sócio padrão salvo', nome || '— nenhum —', 'success');
+}
+
+async function marcarAdvogadoAusenteFlow(nome) {
+  const r = await showModal('Marcar ausência', [
+    { label: 'Ausente até (opcional — em branco = indefinida)', type: 'date' },
+    { label: 'Motivo (opcional)', placeholder: 'Ex: férias · licença · afastamento médico' }
+  ], { confirmLabel: 'Marcar', intro: `<strong>${escapeHtml(nome)}</strong>` });
+  if (!r) return;
+  const [ate, motivo] = r;
+  const ausencias = await DB.getSetting('advogadosAusencias', {}) || {};
+  ausencias[nome] = {
+    ate: ate || null,
+    motivo: motivo?.trim() || '',
+    marcadoEm: Date.now()
+  };
+  await DB.setSetting('advogadosAusencias', ausencias);
+  state._equipeCache = { ...(state._equipeCache || {}), ausencias };
+  toast('Ausência registrada', nome, 'success');
+  renderSettings();
+}
+
+async function reativarAdvogado(nome) {
+  const ausencias = await DB.getSetting('advogadosAusencias', {}) || {};
+  if (!ausencias[nome]) return;
+  delete ausencias[nome];
+  await DB.setSetting('advogadosAusencias', ausencias);
+  state._equipeCache = { ...(state._equipeCache || {}), ausencias };
+  toast('Reativado', nome, 'success');
   renderSettings();
 }
 

@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.11.0 (Sprint 3 Fase A.2: auto-perdido + banner iminente + auditoria + hotfix migração)
-const CACHE_NAME = 'uc-juridico-v6-11-0';
+// Service Worker — UC Jurídico v6.12.0 (Sprint 3 Fase A.3: suplente + sócio padrão + ausências + roteamento)
+const CACHE_NAME = 'uc-juridico-v6-12-0';
 const APP_SHELL = [
   './',
   './index.html',
