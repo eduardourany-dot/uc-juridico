@@ -261,7 +261,7 @@ body{background:var(--uc-paper);color:var(--uc-graphite);font-size:15px;-webkit-
 
     <div style="margin-top:auto;padding:16px 20px;border-top:1px solid var(--uc-line-soft);font-size:11px;color:var(--uc-warm-gray);text-align:center;">
       <p class="smallcaps font-serif" style="margin:0 0 4px;">Urany de Castro · 30 anos</p>
-      <p style="margin:0;">100% local · v6.10.0</p>
+      <p style="margin:0;">100% local · v6.11.0</p>
     </div>
   </aside>
 
@@ -808,19 +808,28 @@ function updateNavBadges() {
   if (pCount > 0) { navP.textContent = pCount; navP.classList.remove('hidden'); }
 
   const today = new Date(); today.setHours(0,0,0,0);
-  const urgent = state.deadlines.filter(d => {
-    if (prazoEstaResolvido(d)) return false;
-    const diff = Math.ceil((new Date(d.deadlineDate) - today) / 86400000);
-    return diff <= 5;
+  const ativos = (state.deadlines || []).filter(prazoEstaAtivo);
+  const iminentes = ativos.filter(d => {
+    const v = recomputarStatusVisual(d, today);
+    return v === 'iminente' || v === 'expirado';
   }).length;
+  const vincendos = ativos.filter(d => recomputarStatusVisual(d, today) === 'vincendo').length;
+  const urgentes = iminentes + vincendos;
   const navD = $('navDeadlineCount');
-  if (urgent > 0) {
-    navD.textContent = urgent;
+  if (urgentes > 0) {
+    navD.textContent = urgentes;
     navD.classList.remove('hidden');
-    navD.classList.toggle('amber', urgent > 0);
+    // .nav-badge é vermelho por default; .amber é override.
+    // Iminente/expirado → vermelho; só vincendo → âmbar.
+    navD.classList.toggle('amber', iminentes === 0 && vincendos > 0);
   } else {
     navD.classList.add('hidden');
+    navD.classList.remove('amber');
   }
+
+  // Banner sticky no topo — única atualização de UI fora do conteúdo principal.
+  // Roda em try/catch porque o banner é UX, não funcionalidade.
+  try { renderBannerPrazos(); } catch (err) { console.warn('renderBannerPrazos:', err); }
 }
 
 // ====================================================================
@@ -1474,6 +1483,20 @@ function renderDeadlineRow(d, p) {
         </div>
         ${detalhesStatus}
         ${d.diarioCalculo ? `<details style="margin-top: 4px;"><summary style="font-size: 11px; color: var(--uc-warm-gray); cursor: pointer;">📋 diário de cálculo</summary><div style="font-size: 11px; color: var(--uc-graphite); padding: 6px 8px; background: var(--uc-cream); border-radius: 4px; margin-top: 4px; line-height: 1.5;">${escapeHtml(d.diarioCalculo)}</div></details>` : ''}
+        ${Array.isArray(d.logs) && d.logs.length > 0 ? `
+          <details style="margin-top: 4px;">
+            <summary style="font-size: 11px; color: var(--uc-warm-gray); cursor: pointer;">🕒 histórico (${d.logs.length})</summary>
+            <div style="font-size: 11px; color: var(--uc-graphite); padding: 6px 8px; background: var(--uc-cream); border-radius: 4px; margin-top: 4px;">
+              ${[...d.logs].sort((a,b) => b.timestamp - a.timestamp).map(l => `
+                <div style="padding: 2px 0; border-bottom: 1px dashed var(--uc-line-soft);">
+                  <span style="color: var(--uc-warm-gray);">${formatDateTime(l.timestamp)}</span>
+                  · ${escapeHtml(descreverLogEntry(l))}
+                  ${l.ator && l.ator !== 'sistema' ? ` · <em>${escapeHtml(l.ator)}</em>` : ''}
+                </div>
+              `).join('')}
+            </div>
+          </details>
+        ` : ''}
       </div>
       <div class="flex gap-2 items-center">
         <span class="badge ${v.badge}">${v.label}</span>
@@ -2107,9 +2130,11 @@ async function addDeadlineFlow() {
     tribunal: tribunalInferido,
     diarioCalculo: diario,
     deadlineDate: deadlineDate.toISOString(),
-    status: 'pending',
+    status: STATUS_PRAZO.PENDENTE,
+    logs: [],
     createdAt: Date.now()
   };
+  appendLogPrazo(d, 'criado', { origem: 'manual', deadlineDate: d.deadlineDate, prazoDias: d.daysAllowed, unidade: d.unidade, emDobro: d.emDobro });
   // Prevenção: se já existe prazo idêntico (mesmo processo, descrição, data) — pergunta
   const dupKey = deadlineDedupKey(d);
   const existingDeadlines = await DB.getDeadlinesByProcess(state.currentProcessId);
@@ -3212,6 +3237,105 @@ function appendLogPrazo(d, evento, payload, ator) {
     ator: ator || 'sistema',
     timestamp: Date.now()
   });
+}
+
+// Mapeia evento técnico → label humano (para o histórico expansível na linha do prazo).
+const LOG_EVENTO_LABEL = {
+  criado:        '📝 criado',
+  cumprido:      '✓ cumprido',
+  suspenso:      '⏸ suspenso',
+  reaberto:      '▶ reaberto',
+  cancelado:     '⊘ cancelado',
+  auto_perdido:  '✗ perdido (auto)',
+  perdido:       '✗ perdido',
+  status_alterado: '↻ alterado'
+};
+
+function descreverLogEntry(entry) {
+  const label = LOG_EVENTO_LABEL[entry.evento] || entry.evento;
+  const partes = [label];
+  if (entry.payload?.numeroProtocolo) partes.push('protocolo ' + entry.payload.numeroProtocolo);
+  if (entry.payload?.motivo)          partes.push('"' + entry.payload.motivo + '"');
+  if (entry.payload?.dataFatal)       partes.push('data fatal ' + entry.payload.dataFatal);
+  if (entry.payload?.ate)             partes.push('até ' + entry.payload.ate);
+  return partes.join(' · ');
+}
+
+// Auto-marca como "perdido" todo prazo pendente cuja data fatal já passou.
+// Idempotente — prazos suspensos/cumpridos/cancelados/perdidos não são tocados.
+async function autoMarcarPerdidos() {
+  const today = new Date(); today.setHours(0,0,0,0);
+  const all = await DB.getAllDeadlines();
+  const expirados = all.filter(d =>
+    d.status === STATUS_PRAZO.PENDENTE &&
+    new Date(d.deadlineDate) < today
+  );
+  let marcados = 0;
+  for (const d of expirados) {
+    d.status = STATUS_PRAZO.PERDIDO;
+    d.updatedAt = Date.now();
+    appendLogPrazo(d, 'auto_perdido', { dataFatal: d.deadlineDate });
+    try {
+      await DB.saveDeadline(d);
+      marcados++;
+    } catch (e) {
+      console.warn('Falha ao marcar perdido', d.id, e);
+    }
+  }
+  if (marcados > 0) {
+    // Atualiza state em memória se já tiver carregado
+    if (Array.isArray(state.deadlines)) {
+      state.deadlines.forEach(sd => {
+        const m = expirados.find(e => e.id === sd.id);
+        if (m) Object.assign(sd, m);
+      });
+    }
+    if (typeof toast === 'function') {
+      toast(`${marcados} prazo(s) marcado(s) como perdido(s)`, 'data fatal expirou sem cumprimento', 'error');
+    }
+  }
+  return marcados;
+}
+
+// Renderiza banner sticky no topo do app quando há prazos iminentes ou perdidos.
+// Chamado por updateNavBadges() — único ponto de orquestração da UI dos prazos.
+function renderBannerPrazos() {
+  let banner = document.getElementById('uc-banner-prazos');
+  const today = new Date(); today.setHours(0,0,0,0);
+  const ativos = (state.deadlines || []).filter(prazoEstaAtivo);
+  const iminentes = ativos.filter(d => recomputarStatusVisual(d, today) === 'iminente');
+  const expirados = ativos.filter(d => recomputarStatusVisual(d, today) === 'expirado');
+  const perdidos = (state.deadlines || []).filter(d => d.status === STATUS_PRAZO.PERDIDO);
+
+  // Suprime banner se usuário fechou nesta sessão E nada novo apareceu
+  const fechadoNestaSessao = sessionStorage.getItem('uc-banner-prazos-fechado') === '1';
+  const totalUrgente = iminentes.length + expirados.length;
+  if ((totalUrgente === 0 && perdidos.length === 0) || fechadoNestaSessao) {
+    if (banner) banner.remove();
+    return;
+  }
+
+  if (!banner) {
+    banner = document.createElement('div');
+    banner.id = 'uc-banner-prazos';
+    banner.style.cssText = 'position:sticky;top:0;z-index:50;background:var(--uc-red,#a82a2a);color:white;padding:10px 16px;font-size:13px;display:flex;align-items:center;gap:12px;box-shadow:0 2px 6px rgba(0,0,0,.18);';
+    const main = document.querySelector('.main-content');
+    if (main) main.insertBefore(banner, main.firstChild);
+    else document.body.insertBefore(banner, document.body.firstChild);
+  }
+
+  const partes = [];
+  if (expirados.length) partes.push(`<strong>${expirados.length}</strong> expirado(s)`);
+  if (iminentes.length) partes.push(`<strong>${iminentes.length}</strong> iminente(s) (≤1d)`);
+  if (perdidos.length)  partes.push(`<strong>${perdidos.length}</strong> perdido(s)`);
+
+  banner.innerHTML = `
+    <span style="font-size:18px;">⚠</span>
+    <span style="flex:1;">${partes.join(' · ')} — clique pra abrir o painel de Prazos</span>
+    <button onclick="navigate('deadlines')" style="background:white;color:var(--uc-red,#a82a2a);border:0;padding:4px 12px;border-radius:4px;font-weight:600;cursor:pointer;font-size:12px;">Ver prazos</button>
+    <button onclick="(function(){sessionStorage.setItem('uc-banner-prazos-fechado','1');document.getElementById('uc-banner-prazos').remove();})()" title="Esconder até próxima recarga" style="background:transparent;color:white;border:1px solid rgba(255,255,255,.4);padding:4px 8px;border-radius:4px;cursor:pointer;font-size:12px;">×</button>
+  `;
+  banner.style.cursor = 'default';
 }
 
 // ====================================================================
@@ -6201,7 +6325,8 @@ async function djenImportSelected(modal) {
           unidade: cfg.unidade || 'UTEIS',
           emDobro: !!cfg.emDobro,
           deadlineDate: calc.deadline.toISOString(),
-          status: 'pending',
+          status: STATUS_PRAZO.PENDENTE,
+          logs: [],
           djenHash: pub.hash,
           tribunal,
           diarioCalculo: calc.diario,
@@ -6216,6 +6341,7 @@ async function djenImportSelected(modal) {
           } : null,
           createdAt: Date.now()
         };
+        appendLogPrazo(deadline, 'criado', { origem: 'djen', djenHash: pub.hash, deadlineDate: deadline.deadlineDate, parserConfianca: parsed?.confianca, parserFonte: parsed?.fonte });
         await DB.saveDeadline(deadline);
         prazosCriados++;
       }
@@ -6400,6 +6526,19 @@ async function bootApp() {
   // Substitui as implementações IndexedDB pelas remotas (Sheets via Apps Script).
   // O binding `const DB` permanece; só os métodos são trocados.
   Object.assign(DB, window.UC_RemoteDB);
+
+  // Wrapper de migração: o RemoteDB acabou de sobrescrever os getters de prazo.
+  // Sem isso, prazos antigos (status: 'done'/'pending') voltam crus e o state
+  // machine novo não os reconhece. Aplica migrarPrazoLegacy de forma transparente.
+  const _remoteGetAllDeadlines = DB.getAllDeadlines.bind(DB);
+  const _remoteGetDeadlinesByProcess = DB.getDeadlinesByProcess.bind(DB);
+  DB.getAllDeadlines = async () => (await _remoteGetAllDeadlines()).map(migrarPrazoLegacy);
+  DB.getDeadlinesByProcess = async (pid) => (await _remoteGetDeadlinesByProcess(pid)).map(migrarPrazoLegacy);
+
+  // Auto-marca como "perdido" prazos pendentes cuja data fatal já passou
+  // (princípio reitor §10.3 do briefing — fail-safe). Roda em background;
+  // falha aqui não impede o boot.
+  autoMarcarPerdidos().catch(err => console.warn('autoMarcarPerdidos:', err));
 
   // Load settings
   state.settings.theme = await DB.getSetting('theme', 'light');

@@ -1,6 +1,6 @@
-# UC Jurídico v6.10.0 · Instalação e atualização
+# UC Jurídico v6.11.0 · Instalação e atualização
 
-> ⚠️ Este documento descreve a v4.0 e está desatualizado. Migrações desde v4.x→v6 (Firestore + Firebase Auth na v3, gestão processual nas v4-5, Módulo Prazos nas v6.7-v6.10) ainda precisam ser documentadas. Para atualizar agora, basta `git pull` + recarregar — o service-worker (`uc-juridico-v6-10-0`) força refresh nos clientes.
+> ⚠️ Este documento descreve a v4.0 e está desatualizado. Migrações desde v4.x→v6 (Firestore + Firebase Auth na v3, gestão processual nas v4-5, Módulo Prazos nas v6.7-v6.11) ainda precisam ser documentadas. Para atualizar agora, basta `git pull` + recarregar — o service-worker (`uc-juridico-v6-11-0`) força refresh nos clientes.
 
 ---
 
