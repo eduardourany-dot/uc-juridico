@@ -24,6 +24,7 @@
 <script src="https://cdn.tailwindcss.com"></script>
 <script src="config.js"></script>
 <script type="module" src="api.js"></script>
+<script type="module" src="messaging.js"></script>
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -261,7 +262,7 @@ body{background:var(--uc-paper);color:var(--uc-graphite);font-size:15px;-webkit-
 
     <div style="margin-top:auto;padding:16px 20px;border-top:1px solid var(--uc-line-soft);font-size:11px;color:var(--uc-warm-gray);text-align:center;">
       <p class="smallcaps font-serif" style="margin:0 0 4px;">Urany de Castro · 30 anos</p>
-      <p style="margin:0;">100% local · v6.13.0</p>
+      <p style="margin:0;">100% local · v6.14.0</p>
     </div>
   </aside>
 
@@ -3495,7 +3496,10 @@ async function solicitarPermissaoNotificacoes() {
     await DB.setSetting('notificacoesAtivas', true);
     toast('Notificações ativadas', 'Você receberá lembretes em T-7 → T+1', 'success');
     if (state.currentRoute === 'settings') renderSettings();
-    // Roda imediatamente uma checagem após ativar
+    // Registra token FCM no backend (push do servidor) + handler foreground
+    registrarFcmTokenSeNecessario().catch(err => console.warn('[FCM] registro falhou', err));
+    setupFcmForegroundHandler();
+    // Roda imediatamente uma checagem após ativar (B.1 in-app)
     verificarLembretesPendentes().catch(err => console.warn(err));
     return true;
   }
@@ -3583,6 +3587,108 @@ async function verificarLembretesPendentes() {
     console.log(`[lembretes] ${disparados} notificação(ões) disparadas`);
   }
   return disparados;
+}
+
+// ====================================================================
+// FCM — push notifications via Firebase (Sprint 3 Fase B.2)
+// ====================================================================
+// Complementa a B.1 cobrindo o caso de app fechado:
+// - Cliente pega token FCM e salva em settings/fcmTokens (Firestore)
+// - Backend (Apps Script) lê esses tokens e dispara push via FCM HTTP v1
+//   numa rotina horária (trigger time-driven)
+// - Service worker dedicado (firebase-messaging-sw.js) recebe o push
+//   quando a página está em background e mostra Notification
+
+// Registra/atualiza o token FCM do usuário logado neste dispositivo.
+// Idempotente: chamar múltiplas vezes só atualiza lastSeen ou salva
+// novo token se o navegador retornou um diferente.
+async function registrarFcmTokenSeNecessario() {
+  if (typeof Notification === 'undefined') return null;
+  if (Notification.permission !== 'granted') return null;
+  if (!window.UC_Messaging) {
+    console.warn('[FCM] UC_Messaging ainda não carregou');
+    return null;
+  }
+  const supported = await window.UC_Messaging.isSupported();
+  if (!supported) {
+    console.warn('[FCM] Browser não suporta FCM (Web Push API)');
+    return null;
+  }
+
+  const me = (window.UC_Auth?.getUser?.() || {}).email;
+  if (!me) return null;
+
+  const token = await window.UC_Messaging.getFcmToken();
+  if (!token) return null;
+
+  const ua = (navigator.userAgent || '').slice(0, 200);
+  const fcmTokens = (await DB.getSetting('fcmTokens', {})) || {};
+  const existing = fcmTokens[me];
+
+  if (existing && existing.token === token) {
+    // Mesmo token — só atualiza lastSeen (sem flush se diferença <1h)
+    if (!existing.lastSeen || Date.now() - existing.lastSeen > 3600 * 1000) {
+      fcmTokens[me] = { ...existing, lastSeen: Date.now(), ua };
+      await DB.setSetting('fcmTokens', fcmTokens);
+    }
+  } else {
+    fcmTokens[me] = { token, ua, lastSeen: Date.now(), registeredAt: Date.now() };
+    await DB.setSetting('fcmTokens', fcmTokens);
+    console.log('[FCM] Token registrado/atualizado para', me);
+  }
+  return token;
+}
+
+// Configura handler de mensagem em foreground (app aberto e visível).
+// Quando chega um push e o usuário está na aba, mostra notificação local.
+// O firebase-messaging-sw.js cuida de quando a aba está em background.
+async function setupFcmForegroundHandler() {
+  if (!window.UC_Messaging) return;
+  try {
+    const unsub = await window.UC_Messaging.onForegroundMessage((payload) => {
+      const data = payload.data || {};
+      const title = data.title || 'UC Jurídico — Prazo';
+      const body = data.body || '';
+      try {
+        const noti = new Notification(title, {
+          body,
+          icon: 'icon-192.png',
+          tag: data.tag || ('fcm-' + Date.now()),
+          requireInteraction: data.requireInteraction === 'true',
+          data: { url: data.url, processId: data.processId }
+        });
+        noti.onclick = () => {
+          try { window.focus(); } catch(e) {}
+          if (data.processId) navigate('process', { currentProcessId: data.processId });
+          noti.close();
+        };
+      } catch (e) {
+        console.warn('[FCM] erro ao mostrar notificação foreground', e);
+      }
+    });
+    state._fcmUnsub = typeof unsub === 'function' ? unsub : null;
+  } catch (e) {
+    console.warn('[FCM] setupFcmForegroundHandler falhou', e);
+  }
+}
+
+// Recebe mensagens vindas do firebase-messaging-sw.js (notification click
+// quando o app já está aberto). Navega pro processo solicitado.
+if (typeof navigator !== 'undefined' && navigator.serviceWorker) {
+  navigator.serviceWorker.addEventListener('message', (event) => {
+    const msg = event.data;
+    if (!msg || msg.type !== 'uc-navigate') return;
+    try {
+      const m = String(msg.url || '').match(/#process\/([^/?&#]+)/);
+      if (m) {
+        navigate('process', { currentProcessId: m[1] });
+      } else if (msg.url && msg.url.includes('#')) {
+        location.hash = msg.url.split('#')[1];
+      }
+    } catch (e) {
+      console.warn('[FCM] navegação pelo SW falhou', e);
+    }
+  });
 }
 
 // ====================================================================
@@ -4708,14 +4814,26 @@ function renderSettingsTab(tab, prompts, defaultPromptId) {
             `;
           }
           // granted
+          const fcmInfo = cache.fcmTokenInfo;
+          let fcmStatusHtml = '';
+          if (fcmInfo === undefined) {
+            fcmStatusHtml = `<div style="font-size:12px;color:var(--uc-warm-gray);margin-top:8px;">Carregando status FCM…</div>`;
+          } else if (!fcmInfo) {
+            fcmStatusHtml = `<div style="font-size:12px;color:var(--uc-warm-gray);margin-top:8px;">⚠ Token FCM não registrado neste dispositivo. Push do servidor (com app fechado) não funciona ainda.</div>`;
+          } else {
+            const lastSeenStr = fcmInfo.lastSeen ? formatDate(fcmInfo.lastSeen, { relative: true }) : 'desconhecido';
+            fcmStatusHtml = `<div style="font-size:12px;color:var(--uc-green);margin-top:8px;">✓ Push do servidor ativo · token registrado ${lastSeenStr}</div>`;
+          }
           return `
             <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
               <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
                 <input type="checkbox" id="notiToggle" ${ativo ? 'checked' : ''} onchange="alternarNotificacoes(this.checked)" style="margin:0;">
                 <span><strong>Ativo</strong> neste dispositivo</span>
               </label>
-              <button class="btn btn-ghost btn-sm" onclick="verificarLembretesPendentes().then(n => toast(n + ' notificação(ões) disparadas', 'verificação manual', n ? 'success' : 'info'))">▶ Testar agora</button>
+              <button class="btn btn-ghost btn-sm" onclick="verificarLembretesPendentes().then(n => toast(n + ' notificação(ões) disparadas', 'verificação manual', n ? 'success' : 'info'))">▶ Testar agora (in-app)</button>
+              <button class="btn btn-ghost btn-sm" onclick="registrarFcmTokenSeNecessario().then(t => toast(t ? 'Token FCM atualizado' : 'Falha — ver console', '', t ? 'success' : 'error')).then(() => renderSettings())">🔄 Re-registrar push</button>
             </div>
+            ${fcmStatusHtml}
           `;
         })()}
       </div>
@@ -5019,8 +5137,11 @@ function setupSettingsHandlers(tab) {
     (async () => {
       const socioPadraoNome = await DB.getSetting('socioPadraoNome', null);
       const ausencias = await DB.getSetting('advogadosAusencias', {});
+      const fcmTokens = (await DB.getSetting('fcmTokens', {})) || {};
+      const me = (window.UC_Auth?.getUser?.() || {}).email;
+      const fcmTokenInfo = me ? (fcmTokens[me] || null) : null;
       const fresh = !state._equipeCache;
-      state._equipeCache = { socioPadraoNome, ausencias };
+      state._equipeCache = { socioPadraoNome, ausencias, fcmTokenInfo };
       if (fresh) renderSettings();
     })();
   }
@@ -6937,6 +7058,16 @@ async function bootApp() {
     setTimeout(() => {
       verificarLembretesPendentes().catch(err => console.warn('verificarLembretesPendentes:', err));
     }, 5000);
+  }
+
+  // FCM (Sprint 3 Fase B.2) — registra token e handler foreground se já há
+  // permissão concedida. setTimeout pra dar tempo do messaging.js carregar
+  // (script type=module roda async).
+  if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+    setTimeout(() => {
+      registrarFcmTokenSeNecessario().catch(err => console.warn('[FCM] registro inicial falhou', err));
+      setupFcmForegroundHandler();
+    }, 3000);
   }
 
   // Seed default prompt if none exists

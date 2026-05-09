@@ -1,17 +1,21 @@
-// Service Worker — UC Jurídico v6.13.0 (Sprint 3 Fase B.1: lembretes via Web Notifications)
-const CACHE_NAME = 'uc-juridico-v6-13-0';
+// Service Worker — UC Jurídico v6.14.0 (Sprint 3 Fase B.2: FCM push do servidor)
+const CACHE_NAME = 'uc-juridico-v6-14-0';
 const APP_SHELL = [
   './',
   './index.html',
   './manifest.json',
   './config.js',
   './api.js',
+  './messaging.js',
   './logo.png',
   './icon-192.png',
   './icon-512.png',
   './icon-maskable-512.png',
   './favicon-32.png'
 ];
+
+// firebase-messaging-sw.js NÃO entra no APP_SHELL nem é interceptado por
+// este SW — o Firebase SDK gerencia o registro/atualização separadamente.
 
 const CDN_HOSTS = [
   'cdnjs.cloudflare.com',
@@ -40,6 +44,10 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
   if (event.request.method !== 'GET') return;
+
+  // firebase-messaging-sw.js é gerenciado pelo Firebase SDK — NÃO interceptar
+  // (sempre buscar fresh, sem cachear) pra evitar versão antiga colada.
+  if (url.pathname.endsWith('/firebase-messaging-sw.js')) return;
 
   // App shell — cache first
   if (url.origin === location.origin) {
