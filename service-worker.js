@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.14.1 (Cache layer — reduz 80% das reads Firestore)
-const CACHE_NAME = 'uc-juridico-v6-14-1';
+// Service Worker — UC Jurídico v6.14.2 (Saneamento: dead libs removidas + INSTALACAO reescrito)
+const CACHE_NAME = 'uc-juridico-v6-14-2';
 const APP_SHELL = [
   './',
   './index.html',

@@ -1,119 +1,216 @@
-# UC Jurídico v6.14.1 · Instalação e atualização
+# UC Jurídico — Instalação e operação
 
-> ⚠️ Este documento descreve a v4.0 e está desatualizado. Migrações desde v4.x→v6 (Firestore + Firebase Auth na v3, gestão processual nas v4-5, Módulo Prazos nas v6.7-v6.14) ainda precisam ser documentadas. Para atualizar agora, basta `git pull` + recarregar — o service-worker (`uc-juridico-v6-14-1`) força refresh nos clientes.
+Versão atual: **v6.14.2**
+URL pública: https://eduardourany-dot.github.io/uc-juridico/
+Repositório: https://github.com/eduardourany-dot/uc-juridico
 
 ---
 
-## ⚠️ Migração desde v3.x
+## O que é
 
-A versão 4.0 traz **mudança arquitetural completa**: agora há banco de dados local (IndexedDB) com persistência entre sessões. Os dados de carteira (processos, prazos, notas) são novos — **não havia equivalente na v3**, então não há migração necessária. O que existir em PDFs processados antigamente continua disponível através das ferramentas.
+Plataforma interna de gestão jurídica do escritório **Urany de Castro Advocacia** (Anápolis/GO + Goiânia/GO). PWA estático servido via GitHub Pages, com backend gerenciado em Firestore + Apps Script.
 
-## Atualizando o GitHub Pages
+**Funcionalidades principais (v6.14.x):**
 
-Os arquivos a substituir no repositório `eduardourany-dot/pdf-juridico` são:
+| Módulo | O que faz |
+|---|---|
+| **Processos** | Cadastro completo (CNJ, cliente, parte adversa, tribunal, advogado titular, suplente, risco, honorários, área tributária com CDAs) |
+| **Prazos** | Captura via DJEN + cálculo de data fatal (art. 224 CPC, dias úteis, recesso forense, prazo em dobro) + cumprimento explícito (data + protocolo) + auto-perdido + push 24/7 |
+| **Eventos** | Timeline de movimentações (DataJud / DJEN / manual) |
+| **Notas** | Anotações livres por processo, vinculáveis a eventos |
+| **Jurisprudência** | Catalogação por tipo (REsp, Tema, Súmula…) |
+| **PDFs** | 12 ferramentas (extração, dividir, juntar, OCR via Tesseract, indexar autos…) |
+| **Diligência rápida** | Modo otimizado mobile pra audiência/fórum |
+| **DJEN** | Monitoramento automático via API CNJ pelas OABs do escritório |
+| **DataJud** | Sincronização de movimentos por CNJ |
+| **Configurações > Equipe** | Sócio padrão, status de ausência, sub-aba de notificações neste dispositivo |
 
+---
+
+## Stack técnica
+
+| Camada | Tecnologia |
+|---|---|
+| Frontend | HTML/CSS/JS monolítico (`index.html`, ~330KB) + PWA service worker |
+| Auth | Firebase Authentication (Google OAuth) |
+| Banco | Firestore (collections: `processos`, `prazos`, `eventos`, `notas`, `jurisprudencia`, `djen`, `settings`, `users`, `audit`) |
+| Push notifications | Firebase Cloud Messaging (FCM) |
+| Backend (PDFs) | Google Apps Script (Drive API) + Sheets como fallback histórico |
+| Backend (cron lembretes) | Apps Script com trigger time-driven 30min, FCM HTTP v1 + JWT manual |
+| OCR | Tesseract.js |
+| PDF | pdf.js + pdf-lib |
+| Estilo | Tailwind CSS (CDN) + EB Garamond + Inter |
+
+---
+
+## Como atualizar
+
+### Para usuários do escritório (10 advogados + staff)
+
+Nada manual. O service worker (`uc-juridico-v6-X-Y`) detecta versão nova ao recarregar e força refresh em ~5s.
+
+Se algo não atualizar:
+1. `Ctrl+Shift+R` (hard refresh)
+2. Se persistir: DevTools (`F12`) → Application → Storage → "Clear site data" → recarregar
+
+### Para o admin (Eduardo)
+
+```bash
+# 1. Edita o código localmente
+git pull
+# ... faz alterações em index.html / api.js / etc ...
+
+# 2. Bump de versão em três lugares:
+#    - index.html linha do rodapé (v6.X.Y)
+#    - service-worker.js linhas 1 e 2 (uc-juridico-v6-X-Y)
+#    - INSTALACAO.md (este arquivo, no topo)
+
+# 3. Commit + push
+git add -A
+git commit -m "vX.Y.Z: descrição"
+git push origin main
+
+# 4. GitHub Pages redeploya em 1–2 min
+# 5. Service worker força refresh nos clientes ao recarregar
 ```
-index.html        ← novo (3.077 linhas, 161 KB)
-manifest.json     ← atualizado (nome, atalhos novos)
-service-worker.js ← v4.0 cache (força atualização nos clientes)
-```
 
-Os arquivos abaixo permanecem iguais:
-```
-logo.png · logo-white.png · icon-192.png · icon-512.png · icon-maskable-512.png · favicon-32.png
-```
+---
 
-### Passos
+## Setup de novo dispositivo (advogado novo)
 
-1. **Backup recomendado:** abra o app atual (v3.x) no Chrome/Edge desktop. Como na v3.x não havia banco de dados, não há nada para exportar — apenas garanta que a primeira coisa que fará na v4 é criar processos.
+1. Receber convite da admin (Eduardo) — sua conta Google é adicionada à allowlist (`users/{email}` no Firestore)
+2. Acessar https://eduardourany-dot.github.io/uc-juridico/
+3. Login com Google da conta `@uranydecastro.com.br`
+4. Para receber push de prazo: **Configurações → Equipe → Notificações → 🔔 Permitir**
 
-2. **Subir os arquivos:** vá em https://github.com/eduardourany-dot/pdf-juridico, clique em cada arquivo (index.html, manifest.json, service-worker.js), use "Edit this file" ou "Upload files" e suba a versão nova.
+### Adicionar advogado à allowlist (admin)
 
-3. **Forçar atualização:** após o GitHub Actions republicar (1-2 min), abra o app, **feche todas as abas**, e reabra https://eduardourany-dot.github.io/pdf-juridico/ — o service worker v4.0 detecta a versão antiga e atualiza automaticamente.
+Tem três caminhos:
 
-4. **Em dispositivos onde já está instalado como PWA:** abra o app, ele atualiza sozinho ao detectar nova versão.
+**A. Bootstrap (primeiro admin do escritório):** auto-cria-se no primeiríssimo login se o email for `eduardourany@uranydecastro.com.br` (regra hardcoded em `firestore.rules`).
 
-## O que há de novo na v4
+**B. Console Firebase (recomendado):**
+1. https://console.firebase.google.com/project/uc-juridico/firestore/data
+2. Coleção `users` → "+ Adicionar documento"
+3. ID do doc = email lowercase
+4. Campos: `nome` (string), `role` (`'admin'` ou `'user'`), `ativo` (boolean true), `criadoEm` (timestamp)
 
-### 🎯 Banco de dados local (IndexedDB)
-Pela primeira vez o app **lembra** dos seus dados entre sessões: processos, eventos, prazos, jurisprudência, notas, prompts personalizados. Tudo armazenado **apenas no seu dispositivo**, sem nuvem.
+**C. Apps Script:**
+- `addUsuario('email@x.com', 'Nome Completo', 'user')` no editor (`UC Jurídico Backend` → `Codigo.gs`)
 
-### 📊 Dashboard
-Tela inicial com visão consolidada da carteira:
-- Total de processos · prazos ativos · prazos urgentes · vencidos
-- Próximos 5 prazos com cores (vermelho ≤3d, âmbar ≤7d, verde >7d)
-- 5 processos mais recentes
-- Banner discreto de backup recomendado a cada 7 dias
+---
 
-### 🗂 Gestão de processos
-Cada processo é uma "ficha digital" com 6 abas:
-1. **Visão geral** — identificação CNJ, cliente, área, tribunal, próximo prazo destacado
-2. **Eventos** — timeline com todos os eventos detectados, vinculados a notas
-3. **Prazos** — pendentes e concluídos, com cálculo automático
-4. **Jurisprudência** — citações catalogadas por tipo (REsp, Tema, Súmula...)
-5. **Notas** — anotações livres, podem ser vinculadas a eventos específicos
-6. **Análise IA** — gerar pacote pronto para Claude
+## Setup de admin (do zero, em outro projeto Firebase)
 
-### ⏰ Painel de prazos
-Agenda consolidada da carteira inteira, agrupada por urgência. Exporta como CSV. Marca como concluído com um clique.
+> Caso precise replicar o app para outro escritório no futuro.
 
-### 🛠 Ferramentas PDF (todas as 12)
-Mesmas funções da v3, agora com **vínculo opcional ao processo**: ao indexar autos com um processo selecionado, os eventos detectados são salvos automaticamente nele. Idem para jurisprudência.
+### 1. Firebase Project
+1. Console Firebase → criar projeto novo
+2. Habilitar **Authentication** (Google provider) + **Firestore Database** (modo produção, região `nam5` ou `southamerica-east1` se Blaze)
+3. **Cloud Messaging** habilitado por default no Spark
+4. Em **Project Settings → Geral**: registrar app Web
+5. Em **Cloud Messaging**: gerar **VAPID Web Push Certificate**
+6. Em **Service Accounts**: gerar nova chave privada (JSON)
 
-### ⚡ Diligência rápida (mobile)
-Modo otimizado para audiência/fórum:
-- Calcular prazo (data + dias úteis)
-- Foto + OCR (com câmera do celular)
-- Nota rápida em processo
-- Buscar jurisprudência salva
-- Achar processo
+### 2. `config.js`
+- Atualizar `firebaseConfig` com as chaves do app Web
+- Atualizar `FCM_VAPID_PUBLIC_KEY`
+- `OAUTH_CLIENT_ID` deve bater com o do projeto Cloud (não Firebase)
 
-### 🤖 Pacote para Claude
-Botão **"Copiar para área de transferência"** que monta:
-- Identificação do processo
-- Cronologia de eventos
-- Prazos ativos
-- Jurisprudência catalogada
-- Notas
-- Prompt sênior pré-preenchido com sua área e nº CNJ
+### 3. Firestore Security Rules
+- Subir `firestore.rules` via Firebase CLI: `firebase deploy --only firestore:rules`
+- Ajustar email do bootstrap admin se for outro escritório
 
-Cole direto no chat do Claude — sem download intermediário.
+### 4. Apps Script Backend
+- Criar projeto Apps Script "UC Jurídico Backend"
+- Copiar `backend/Codigo.gs`, `backend/Bootstrap.gs`, `backend/Lembretes.gs`
+- Em ⚙ Script Properties cadastrar:
+  - `OAUTH_CLIENT_ID` (mesmo do Firebase Auth)
+  - `DRIVE_FOLDER_ID` (pasta Drive pra PDFs)
+  - `SPREADSHEET_ID` (planilha de auditoria/legado, opcional)
+  - `FCM_SERVICE_ACCOUNT_JSON` (Service Account JSON inteiro, do passo 1.6)
+- Rodar `_testarFCMConfig`, `_testarFcmAccessToken`, `_testarFirestoreList` pra validar
+- **Acionadores**: criar trigger time-driven 30min em `cron_lembretesDePrazo`
 
-### 📜 Geração de ficha processual
-Botão **"Gerar ficha"** produz documento HTML formatado (EB Garamond, smallCaps, padrão Urany de Castro) com toda informação do processo, pronto para imprimir como PDF e entregar ao cliente.
+### 5. GitHub Pages
+- Push do repositório
+- Settings → Pages → branch `main` → `/`
+- Adicionar origem JS no OAuth Client (Cloud Console) com a URL
 
-### 💾 Backup e sincronização
-Em **Configurações → Backup**:
-- Exportar todos os dados como `.uc-backup.json`
-- Importar de outro dispositivo
+---
 
-Sincronização desktop ↔ celular: exporte no desktop, envie o arquivo (Drive, e-mail, WhatsApp), importe no celular. Sem servidor central.
+## Backend Apps Script
 
-### 🌙 Modo escuro
-Em **Configurações → Aparência**. Identidade visual mantida (preto, dourado, creme).
+| Arquivo | Função |
+|---|---|
+| `backend/Codigo.gs` | doGet/doPost legacy — só PDFs via Drive (a maioria das collections migrou pra Firestore) |
+| `backend/Bootstrap.gs` | Setup inicial da planilha de allowlist (legado) |
+| `backend/Lembretes.gs` | Cron horário de envio FCM (Sprint 3 B.2) — JWT manual + Firestore REST API + FCM HTTP v1 |
 
-### 🔒 Segurança
-- Apagar todos os dados (com confirmação dupla)
-- Auditoria visível de "nenhum upload nesta sessão"
-- Senha mestra (em desenvolvimento para v4.1)
+Funções de teste manual em `Lembretes.gs`:
+- `_testarFcmAccessToken()` — confirma JWT/OAuth2
+- `_testarFirestoreList()` — confirma leitura Firestore via REST
+- `_testarFcmEnvio()` — envia push de teste (cole token na constante)
+- `_previewLembretesDePrazo()` — varre prazos sem enviar
 
-## Estrutura de dados (técnico)
+---
 
-Todos os dados ficam no IndexedDB do navegador, banco `uc-juridico`, com 9 stores:
-- `processes` · processos cadastrados
-- `events` · eventos PJe/eSAJ vinculados a processos
-- `deadlines` · prazos calculados ou manuais
-- `notes` · anotações livres
-- `jurisprudence` · citações catalogadas
-- `pdfs` · PDFs originais (Blob)
-- `prompts` · templates personalizados de análise
-- `settings` · preferências (tema, lembretes)
-- `history` · log de operações recentes
+## Operação rotineira
 
-## Suporte
+### Monitorar consumo Firestore (Spark plan)
 
-Bugs ou sugestões: clique no botão "thumbs down" abaixo de qualquer resposta do Claude que tenha gerado este código.
+https://console.firebase.google.com/project/uc-juridico/usage
+
+Limites diários:
+- **Reads**: 50K/dia
+- **Writes**: 20K/dia
+
+Otimizações em vigor (v6.14.1+):
+- Cache em memória de 5min nos métodos `DB.getAll*` / `DB.getSetting`
+- `cron_lembretesDePrazo` usa `:runQuery` filtrado por janela [hoje-2, hoje+8]
+
+Se passar de 30K reads em poucas horas, investigar antes de estourar.
+
+### Monitorar cron de lembretes
+
+https://script.google.com → projeto **UC Jurídico Backend** → ⏰ Acionadores
+
+Verificar:
+- Última execução recente (a cada 30 min)
+- Taxa de erros próxima de zero
+- Logs em "Execuções" (menu lateral)
+
+---
+
+## Bugs históricos pra não repetir
+
+1. **Apps Script `CacheService.put`** quebra com key > 250 chars → sempre hashear (`tokenHash_()` em `Codigo.gs`)
+2. **Firebase Auth allowlist** vive em **dois lugares**: Firebase Console (Auth → Settings → Authorized domains) **e** Cloud Console (OAuth Client → Origens JS). Adicionar nos dois ao adicionar domínio novo
+3. **Firestore region `nam5`** é definida no primeiro deploy e não muda. Spark fica preso em US. Pra mudar pra `southamerica-east1` precisa Blaze + recriar projeto
+4. **Service Worker não atualiza** se o cache name não mudar entre versões. Sempre bumpar `CACHE_NAME` no `service-worker.js` ao publicar
+5. **`firebase-messaging-sw.js`** precisa de `skipWaiting()` + `clients.claim()` ou fica preso em "installed" e não recebe pushes em background
+
+---
+
+## Roadmap
+
+| Versão | Estado | Conteúdo |
+|---|---|---|
+| v6.7–v6.10 | ✅ entregue | Módulo Prazos: state machine completo + cumprimento explícito + auto-perdido + UI de Equipe |
+| v6.11–v6.13 | ✅ entregue | Lembretes via Web Notifications in-app (B.1) |
+| v6.14 | ✅ em produção | FCM real (B.2) — push 24/7 com app fechado + cache em memória |
+| **v6.15** | **próxima** | Módulo Financeiro: receitas, despesas, bancos, cartões, parcelamento de honorários, balancete |
+| v6.16+ | planejado | CRM de clientes (Cliente vira entidade), agenda unificada, tarefas/projetos, formulário de atendimento |
+| v7.x | futuro | Módulo Petições com integração Claude API |
+
+Pendências menores:
+- Reescrita do `INSTALACAO.md` (este documento — feita em v6.14.2)
+- Corpus de validação do parser (50 publicações com gabarito) — coleta incremental
+- Tier 3 LLM no parser (após corpus mostrar acerto baixo) — não bloqueia
+- Sprint 3 C: Email via SES (canal redundante) — adiado, push cobre 95%+
 
 ---
 
 **Eduardo Urany de Castro · OAB/GO 16.539 · OAB/DF 87.243**
+Goiânia · Av. Deputado Jamel Cecílio, 2690 · Ed. Metropolitan Mall · sala 2903 · Jardim Goiás · CEP 74.810-100
+Anápolis · Rua Conde Afonso Celso, 557 · Centro · CEP 75.025-030
