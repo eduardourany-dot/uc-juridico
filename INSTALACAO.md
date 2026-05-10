@@ -1,6 +1,6 @@
 # UC Jurídico — Instalação e operação
 
-Versão atual: **v6.32.0**
+Versão atual: **v6.33.0**
 URL pública: https://eduardourany-dot.github.io/uc-juridico/
 Repositório: https://github.com/eduardourany-dot/uc-juridico
 
@@ -268,7 +268,8 @@ Verificar:
 | v6.29.0 | ✅ entregue | Ações inline de prazo na agenda — botões ✓ cumprir · ⏸ suspender · ⊘ cancelar · ▶ reabrir direto no card. Funções de ação agnósticas ao contexto. |
 | v6.30.0 | ✅ entregue | Calendário visual mensal — toggle 📋 Lista / 📅 Calendário no header de `/agenda`. Grid 7×N + chips por dia. |
 | v6.31.0 | ✅ entregue | Petições Pet.1 — versionamento + aba "Petições" no processo + editor com "+ Nova versão" / status / arquivar. |
-| **v6.32.0** | ✅ em produção | **Indicadores por advogado** — rota `/equipe` com picker de advogado + seletor de mês. 8 cards de stats: carga atual, vencidos, urgentes (≤3d), cumpridos no mês (vs anterior · Δ%), perdidos no mês, compromissos, comunicações, processos como titular/suplente. Lista destacada de **prazos vencidos não-cumpridos** com botão ✓ inline pra cumprir. Listas: próximos prazos, próximos compromissos, processos como titular, processos como suplente. Default abre no advogado logado. |
+| v6.32.0 | ✅ entregue | Indicadores por advogado — rota `/equipe` com picker + 8 cards + listas (próximos prazos, vencidos não-cumpridos, próximos compromissos, processos por papel). |
+| **v6.33.0** | ✅ em produção | **Modo escuro completo** — 3 opções (☀ Claro / 🌙 Escuro / 🖥 Auto). Modo Auto segue preferência do SO via `matchMedia('(prefers-color-scheme)')` e reage em tempo real quando você muda nas Configurações do sistema. Toggle rápido no rodapé da sidebar (cicla light → dark → auto) sem precisar ir em Configurações. Correções de inline backgrounds que não respeitavam tema (células do calendário, chips de placeholder em /modelos). |
 | v6.22+ | planejado | Retomada Financeiro A.4 (Recorrências + Balancete) → A.5 → Agenda unificada |
 | v7.x | planejado | Módulo Petições com Claude API (briefing em [docs/BRIEFING_Peticoes.md](docs/BRIEFING_Peticoes.md)) |
 

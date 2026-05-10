@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.32.0 (Equipe: rota /equipe com indicadores individuais por advogado + drill-down de prazos vencidos)
-const CACHE_NAME = 'uc-juridico-v6-32-0';
+// Service Worker — UC Jurídico v6.33.0 (Modo escuro + auto: toggle na sidebar + segue preferência do SO + correções de backgrounds inline)
+const CACHE_NAME = 'uc-juridico-v6-33-0';
 const APP_SHELL = [
   './',
   './index.html',
