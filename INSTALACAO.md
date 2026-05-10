@@ -1,6 +1,6 @@
 # UC Jurídico — Instalação e operação
 
-Versão atual: **v6.22.0**
+Versão atual: **v6.23.0**
 URL pública: https://eduardourany-dot.github.io/uc-juridico/
 Repositório: https://github.com/eduardourany-dot/uc-juridico
 
@@ -207,8 +207,9 @@ Verificar:
 | v6.19 | ✅ entregue | Sprint Cli.1 — Cliente vira entidade dedicada (rota /clientes + CRUD + migração lazy de processos) |
 | v6.20 | ✅ entregue | Sprint Cli.2 — Honorário vinculado a Cliente + `processosCobertos[]` (multi-vinculação) |
 | v6.21 | ✅ entregue | Sprint Cli.3 — aba "Cliente" no processo + dashboard `/clientes/{id}` + dropdown de cliente nos forms de processo |
-| v6.22 | ✅ em produção | **Financeiro A.4** — Recorrências mensais + Balancete por mês/ano + exportações CSV |
-| **v6.23** | **próxima** | Financeiro A.5 — push/email de parcela vencendo (reusa FCM Sprint 3) |
+| v6.22 | ✅ entregue | Financeiro A.4 — Recorrências mensais + Balancete por mês/ano + exportações CSV |
+| v6.23 | ✅ em produção | **Sprint Cli.4** — Comunicações com cliente (email/telefone/WhatsApp/reunião/visita) + follow-ups com destaque |
+| **v6.24** | **próxima** | Financeiro A.5 — push/email de parcela vencendo (reusa FCM Sprint 3) |
 | v6.22+ | planejado | Retomada Financeiro A.4 (Recorrências + Balancete) → A.5 → Agenda unificada |
 | v7.x | planejado | Módulo Petições com Claude API (briefing em [docs/BRIEFING_Peticoes.md](docs/BRIEFING_Peticoes.md)) |
 

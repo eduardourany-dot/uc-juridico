@@ -380,6 +380,14 @@ const RemoteDB = {
   async saveCliente(c) { return await upsert_('clientes', c); },
   async deleteCliente(id) { return await softDelete_('clientes', id); },
 
+  // ====== Comunicações (v6.23 — Cli.4) ======
+  async getAllComunicacoes() { return await getAll_('comunicacoes'); },
+  async getComunicacoesByCliente(cid) {
+    return (await getAll_('comunicacoes')).filter(c => c.clienteId === cid);
+  },
+  async saveComunicacao(c) { return await upsert_('comunicacoes', c); },
+  async deleteComunicacao(id) { return await softDelete_('comunicacoes', id); },
+
   // Jurisprudência
   async getJurisprudenceByProcess(pid) {
     return (await getAll_('jurisprudencia')).filter(j => j.processId === pid);
