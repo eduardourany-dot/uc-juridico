@@ -288,7 +288,7 @@ body{background:var(--uc-paper);color:var(--uc-graphite);font-size:15px;-webkit-
         <span id="themeQuickToggleLabel">☀ Claro</span>
       </button>
       <p class="smallcaps font-serif" style="margin:0 0 4px;">Urany de Castro · 30 anos</p>
-      <p style="margin:0;">100% local · v6.33.0</p>
+      <p style="margin:0;">100% local · v6.34.0</p>
     </div>
   </aside>
 
@@ -9200,7 +9200,11 @@ async function renderModelosPeticao() {
       <div class="card empty-state">
         <h3 class="empty-state-title">Nenhum modelo cadastrado</h3>
         <p class="empty-state-msg">Cadastre templates de petição com placeholders tipo <code>{{cliente.nome}}</code>, <code>{{processo.cnj}}</code>. Use no processo via "Gerar petição" — o app substitui automaticamente os placeholders pelos dados reais.</p>
-        <button class="btn btn-primary" onclick="novoModeloPeticaoFlow()">+ Cadastrar primeiro modelo</button>
+        <div class="flex gap-2 flex-wrap" style="justify-content: center; margin-top: 12px;">
+          <button class="btn btn-primary" onclick="instalarTemplatesPadrao()">⭐ Instalar 5 templates padrão</button>
+          <button class="btn btn-outline" onclick="novoModeloPeticaoFlow()">+ Cadastrar do zero</button>
+        </div>
+        <p class="help-text" style="margin-top: 12px;">Templates padrão: Contestação · Manifestação · Apelação · Embargos exec. fiscal · Exceção de pré-executividade. Todos com placeholders prontos — editáveis depois.</p>
       </div>
     ` : Object.keys(porTipo).sort().map(tipo => {
       const tipoLabel = (PETICAO_TIPOS.find(t => t.value === tipo) || {}).label || tipo;
@@ -9430,9 +9434,10 @@ function _abrirModalPeticaoGerada(opts) {
       <div class="flex gap-2 flex-wrap">
         <button class="btn btn-primary" id="_pgSalvar" style="flex: 1; min-width: 160px;">${isExistente ? '💾 Salvar alterações' : '💾 Salvar versão'}</button>
         ${isExistente ? `<button class="btn btn-secondary" id="_pgNovaVersao" style="min-width: 140px;">+ Nova versão</button>` : ''}
-        <button class="btn btn-secondary" id="_pgCopiar" style="min-width: 130px;">📋 Copiar</button>
-        <button class="btn btn-secondary" id="_pgMd" style="min-width: 110px;">⬇ .md</button>
-        <button class="btn btn-secondary" id="_pgTxt" style="min-width: 110px;">⬇ .txt</button>
+        <button class="btn btn-secondary" id="_pgCopiar" style="min-width: 120px;">📋 Copiar</button>
+        <button class="btn btn-secondary" id="_pgDocx" style="min-width: 110px;" title="Word (.docx) com formatação Garamond + cabeçalho">⬇ .docx</button>
+        <button class="btn btn-secondary" id="_pgMd" style="min-width: 90px;">⬇ .md</button>
+        <button class="btn btn-secondary" id="_pgTxt" style="min-width: 90px;">⬇ .txt</button>
         <button class="btn btn-outline" id="_pgFechar" style="min-width: 90px;">Fechar</button>
       </div>
     </div>
@@ -9455,6 +9460,19 @@ function _abrirModalPeticaoGerada(opts) {
   };
   document.getElementById('_pgMd').onclick = () => _baixarPeticaoGerada('md', getTexto(), { ...fallbackModelo, nome: getTitulo() }, processo);
   document.getElementById('_pgTxt').onclick = () => _baixarPeticaoGerada('txt', getTexto(), { ...fallbackModelo, nome: getTitulo() }, processo);
+  document.getElementById('_pgDocx').onclick = async () => {
+    const btn = document.getElementById('_pgDocx');
+    const orig = btn.textContent;
+    btn.disabled = true; btn.textContent = '⏳ gerando…';
+    try {
+      await _baixarPeticaoDocx(getTexto(), { ...fallbackModelo, nome: getTitulo() }, processo);
+    } catch (e) {
+      console.error(e);
+      toast('Falha ao gerar .docx', e?.message || '', 'error');
+    } finally {
+      btn.disabled = false; btn.textContent = orig;
+    }
+  };
   document.getElementById('_pgFechar').onclick = cleanup;
 
   document.getElementById('_pgSalvar').onclick = async () => {
@@ -9569,6 +9587,251 @@ async function _salvarPeticao({ conteudo, titulo, status, modelo, processo, peti
 
   // Refresh do processo se está aberto
   if (state.currentRoute === 'process') renderProcessDetail();
+}
+
+// === Templates seed (Pet.2 — v6.34) ===
+// 5 modelos pré-fabricados pra Eduardo já começar com base. Instalados
+// via botão em /modelos quando a coleção está vazia.
+const PETICAO_TEMPLATES_SEED = [
+  {
+    nome: 'Contestação · base genérica',
+    tipo: 'contestacao',
+    descricao: 'Estrutura básica de contestação cível com qualificação, fatos, direito e pedido.',
+    conteudo:
+`EXCELENTÍSSIMO SENHOR DOUTOR JUIZ DE DIREITO DA {{processo.court}}
+
+Processo nº {{processo.cnj}}
+
+{{cliente.nome}}, {{cliente.tipoPessoa}}, inscrito(a) no CPF/CNPJ sob nº {{cliente.cpfCnpj}}, com endereço em {{cliente.endereco}}, por intermédio de seus advogados que esta subscrevem, vem, respeitosamente, à presença de Vossa Excelência, com fundamento no artigo 335 e seguintes do Código de Processo Civil, apresentar
+
+CONTESTAÇÃO
+
+aos termos da ação proposta por {{processo.parteAdversa}}, pelos motivos de fato e de direito a seguir expostos.
+
+I — DOS FATOS
+
+[Descreva os fatos a partir da perspectiva do contestante.]
+
+II — DO DIREITO
+
+[Argumentação jurídica. Cite dispositivos legais, jurisprudência e doutrina aplicáveis.]
+
+III — DOS PEDIDOS
+
+Diante do exposto, requer-se:
+
+a) Seja a presente contestação recebida e processada nos termos legais;
+b) Sejam julgados improcedentes os pedidos formulados na petição inicial;
+c) Seja a parte autora condenada ao pagamento das custas processuais e honorários advocatícios na forma do artigo 85 do CPC.
+
+Protesta provar o alegado por todos os meios em direito admitidos, especialmente pela produção de prova documental, testemunhal e pericial.
+
+Termos em que pede deferimento.
+
+{{data.cidadeData}}
+
+{{processo.advogadoResponsavel}}
+{{escritorio.oabSocio}}`
+  },
+  {
+    nome: 'Manifestação · simples',
+    tipo: 'manifestacao',
+    descricao: 'Manifestação enxuta para juntada de documento, ciência, ou cumprimento de despacho.',
+    conteudo:
+`EXCELENTÍSSIMO SENHOR DOUTOR JUIZ DE DIREITO DA {{processo.court}}
+
+Processo nº {{processo.cnj}}
+
+{{cliente.nome}}, já qualificado(a) nos autos da ação em epígrafe, por seus advogados, vem respeitosamente à presença de Vossa Excelência
+
+MANIFESTAR-SE
+
+nos termos a seguir:
+
+[Conteúdo da manifestação — ciência, juntada de documento, requerimento, etc.]
+
+Termos em que pede deferimento.
+
+{{data.cidadeData}}
+
+{{processo.advogadoResponsavel}}
+{{escritorio.oabSocio}}`
+  },
+  {
+    nome: 'Apelação · pedido de reforma',
+    tipo: 'apelacao',
+    descricao: 'Recurso de apelação com pedido de provimento e reforma da sentença.',
+    conteudo:
+`EXCELENTÍSSIMO SENHOR DOUTOR JUIZ DE DIREITO DA {{processo.court}}
+
+Processo nº {{processo.cnj}}
+
+{{cliente.nome}}, já qualificado(a) nos autos, por seus advogados, vem, com fundamento nos artigos 1.009 e seguintes do Código de Processo Civil, dentro do prazo legal, interpor
+
+APELAÇÃO
+
+contra a r. sentença de fls. ___, requerendo seja recebida em ambos os efeitos e remetida ao Egrégio Tribunal competente, com as razões em anexo.
+
+Termos em que pede deferimento.
+
+{{data.cidadeData}}
+
+{{processo.advogadoResponsavel}}
+{{escritorio.oabSocio}}
+
+———————————————
+
+RAZÕES DE APELAÇÃO
+
+Apelante: {{cliente.nome}}
+Apelado: {{processo.parteAdversa}}
+Processo nº {{processo.cnj}}
+
+EGRÉGIO TRIBUNAL,
+COLENDA TURMA,
+ÍNCLITOS JULGADORES.
+
+I — BREVE EXPOSIÇÃO DOS FATOS
+
+[Resumo da demanda e da sentença recorrida.]
+
+II — DAS RAZÕES DE REFORMA
+
+[Fundamentos para reforma — error in judicando ou error in procedendo. Cite dispositivos legais e precedentes.]
+
+III — DO PEDIDO
+
+Ante o exposto, requer-se o conhecimento e provimento do presente recurso para o fim de reformar integralmente a r. sentença recorrida, julgando-se improcedentes os pedidos formulados na inicial, com a inversão dos ônus sucumbenciais.
+
+Pede deferimento.
+
+{{data.cidadeData}}
+
+{{processo.advogadoResponsavel}}
+{{escritorio.oabSocio}}`
+  },
+  {
+    nome: 'Embargos à execução fiscal · base',
+    tipo: 'emb_exec_fiscal',
+    descricao: 'Embargos à execução fiscal (Lei 6.830/80, art. 16) — estrutura padrão.',
+    conteudo:
+`EXCELENTÍSSIMO SENHOR DOUTOR JUIZ DE DIREITO DA {{processo.court}}
+
+Processo de Execução Fiscal nº {{processo.cnj}}
+
+{{cliente.nome}}, já qualificado(a) nos autos da execução fiscal em epígrafe, por seus advogados que esta subscrevem, vem, respeitosamente, à presença de Vossa Excelência, com fulcro no artigo 16 da Lei nº 6.830/80, opor
+
+EMBARGOS À EXECUÇÃO FISCAL
+
+contra a Fazenda Pública embargada, pelos fundamentos de fato e de direito a seguir expostos.
+
+I — DA TEMPESTIVIDADE
+
+Os presentes embargos são tempestivos, vez que oferecidos no prazo de 30 (trinta) dias a contar da intimação da penhora/garantia do juízo, conforme determina o art. 16, III, da Lei nº 6.830/80.
+
+II — DOS FATOS
+
+[Histórico do lançamento, da inscrição em dívida ativa e da execução.]
+
+III — DO DIREITO
+
+[Matéria de defesa: nulidade da CDA, prescrição, decadência, ilegitimidade, excesso de execução, etc.]
+
+IV — DOS PEDIDOS
+
+Diante do exposto, requer-se:
+
+a) O recebimento dos presentes embargos com efeito suspensivo (art. 919, §1º, CPC);
+b) A intimação da Fazenda Pública para apresentar impugnação no prazo legal;
+c) Ao final, a procedência dos embargos para o fim de extinguir/reduzir a execução fiscal;
+d) A condenação da embargada nas custas e honorários advocatícios.
+
+Protesta provar o alegado por todos os meios em direito admitidos.
+
+Termos em que pede deferimento.
+
+{{data.cidadeData}}
+
+{{processo.advogadoResponsavel}}
+{{escritorio.oabSocio}}`
+  },
+  {
+    nome: 'Exceção de pré-executividade',
+    tipo: 'epe',
+    descricao: 'EPE para questões de ordem pública (sem necessidade de garantia do juízo).',
+    conteudo:
+`EXCELENTÍSSIMO SENHOR DOUTOR JUIZ DE DIREITO DA {{processo.court}}
+
+Processo nº {{processo.cnj}}
+
+{{cliente.nome}}, já qualificado(a) nos autos da execução em epígrafe, por seus advogados, vem, com fundamento na Súmula nº 393 do STJ e em consonância com a doutrina e jurisprudência dominantes, opor
+
+EXCEÇÃO DE PRÉ-EXECUTIVIDADE
+
+contra {{processo.parteAdversa}}, pelos motivos a seguir expostos.
+
+I — DO CABIMENTO
+
+A presente exceção de pré-executividade tem cabimento em razão de matéria conhecível de ofício pelo juízo, dispensando-se a garantia do juízo, conforme entendimento consolidado pela Súmula 393/STJ:
+
+"A exceção de pré-executividade é admissível na execução fiscal relativamente às matérias conhecíveis de ofício que não demandem dilação probatória."
+
+II — DA MATÉRIA DE ORDEM PÚBLICA ARGUIDA
+
+[Indicar a matéria — prescrição, decadência, ilegitimidade passiva, nulidade do título, pagamento integral, etc.]
+
+III — DO DIREITO
+
+[Argumentação jurídica e prova pré-constituída do alegado.]
+
+IV — DOS PEDIDOS
+
+Diante do exposto, requer-se:
+
+a) O recebimento da presente exceção;
+b) A suspensão dos atos de constrição até apreciação do pedido;
+c) Ao final, o acolhimento da exceção para o fim de extinguir a execução, com a condenação do exequente nos ônus sucumbenciais.
+
+Termos em que pede deferimento.
+
+{{data.cidadeData}}
+
+{{processo.advogadoResponsavel}}
+{{escritorio.oabSocio}}`
+  }
+];
+
+async function instalarTemplatesPadrao() {
+  const ok = await confirmDialog(
+    'Instalar 5 templates padrão?',
+    'Vai cadastrar: Contestação, Manifestação, Apelação, Embargos à execução fiscal e EPE — todos com placeholders prontos. Você pode editar ou remover depois.'
+  );
+  if (!ok) return;
+
+  const me = (window.UC_Auth?.getUser?.() || {}).email || '';
+  const now = Date.now();
+  let cadastrados = 0;
+  for (const seed of PETICAO_TEMPLATES_SEED) {
+    try {
+      await DB.savePeticaoModelo({
+        id: uid(),
+        escritorio_id: 'UC',
+        nome: seed.nome,
+        tipo: seed.tipo,
+        descricao: seed.descricao,
+        conteudo: seed.conteudo,
+        ativo: true,
+        createdAt: now,
+        updatedAt: now,
+        criadoPor: me
+      });
+      cadastrados++;
+    } catch (e) {
+      console.warn('Falha ao instalar template ' + seed.nome + ':', e);
+    }
+  }
+  toast('Templates instalados', cadastrados + ' de ' + PETICAO_TEMPLATES_SEED.length, 'success');
+  if (state.currentRoute === 'modelos') renderModelosPeticao();
 }
 
 // === Aba Petições no processo (Sprint Pet.1) ===
@@ -9711,6 +9974,112 @@ async function removerPeticao(id) {
   await DB.deletePeticao(id);
   toast('Versão removida', '', 'success');
   if (state.currentRoute === 'process') renderProcessDetail();
+}
+
+// === Geração de .docx (Pet.2 — v6.34) ===
+// Lib `docx` carregada sob demanda na primeira chamada (UMD via CDN, ~700KB).
+let _docxLibPromise = null;
+function _carregarDocxLib() {
+  if (window.docx) return Promise.resolve(window.docx);
+  if (_docxLibPromise) return _docxLibPromise;
+  _docxLibPromise = new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = 'https://unpkg.com/docx@8.5.0/build/index.umd.js';
+    s.onload = () => window.docx ? resolve(window.docx) : reject(new Error('docx lib não inicializou'));
+    s.onerror = () => reject(new Error('Falha ao carregar lib docx do CDN'));
+    document.head.appendChild(s);
+  });
+  return _docxLibPromise;
+}
+
+async function _baixarPeticaoDocx(texto, modelo, processo) {
+  const docx = await _carregarDocxLib();
+  const { Document, Paragraph, TextRun, Header, Footer, Packer, AlignmentType, PageNumber } = docx;
+
+  // Quebra em parágrafos por linha em branco. Linhas dentro do mesmo
+  // parágrafo viram quebras de linha simples (não double-paragraph).
+  const blocos = String(texto || '').split(/\n{2,}/).map(b => b.trim()).filter(Boolean);
+
+  const paragrafos = blocos.map(bloco => {
+    // Detecção simples de heading: começa com ## ou linha em CAIXA ALTA curta
+    const isHeading2 = /^##\s+/.test(bloco);
+    const isHeading3 = /^###\s+/.test(bloco);
+    const limpo = bloco.replace(/^#{2,3}\s+/, '');
+    const tudoCaps = limpo.length < 120 && limpo === limpo.toUpperCase() && /[A-ZÀ-Ú]/.test(limpo);
+
+    // Quebras simples viram line breaks dentro do parágrafo
+    const linhas = limpo.split('\n');
+    const runs = [];
+    linhas.forEach((linha, i) => {
+      if (i > 0) runs.push(new TextRun({ break: 1 }));
+      runs.push(new TextRun({
+        text: linha,
+        font: 'EB Garamond',
+        size: isHeading2 || tudoCaps ? 28 : isHeading3 ? 26 : 24,  // half-points (24 = 12pt)
+        bold: isHeading2 || isHeading3 || tudoCaps
+      }));
+    });
+
+    return new Paragraph({
+      children: runs,
+      alignment: (isHeading2 || tudoCaps) ? AlignmentType.CENTER : AlignmentType.JUSTIFIED,
+      spacing: { after: 200, line: 360 },  // line 360 = 1.5 espaçamento
+      indent: (isHeading2 || isHeading3 || tudoCaps) ? undefined : { firstLine: 720 }  // 720 twips = 0.5"
+    });
+  });
+
+  const cabecalho = new Header({
+    children: [new Paragraph({
+      alignment: AlignmentType.CENTER,
+      children: [new TextRun({
+        text: 'URANY DE CASTRO ADVOCACIA · 30 ANOS · OAB/GO 16.539 · OAB/DF 87.243',
+        font: 'EB Garamond', size: 18, color: '8a6f3d'
+      })]
+    })]
+  });
+
+  const rodape = new Footer({
+    children: [new Paragraph({
+      alignment: AlignmentType.CENTER,
+      children: [new TextRun({
+        text: 'Goiânia · Av. Deputado Jamel Cecílio, 2690 · sala 2903 · Jardim Goiás · CEP 74.810-100   |   Anápolis · Rua Conde Afonso Celso, 557 · Centro · CEP 75.025-030',
+        font: 'EB Garamond', size: 16, color: '6b6b68'
+      }), new TextRun({ text: '\n', break: 1 }), new TextRun({
+        children: ['Página ', PageNumber.CURRENT, ' de ', PageNumber.TOTAL_PAGES],
+        font: 'EB Garamond', size: 16, color: '9b9b96'
+      })]
+    })]
+  });
+
+  const doc = new Document({
+    creator: 'UC Jurídico',
+    title: modelo?.nome || 'Petição',
+    description: 'Gerado pelo UC Jurídico em ' + new Date().toLocaleDateString('pt-BR'),
+    styles: {
+      default: {
+        document: { run: { font: 'EB Garamond', size: 24 } }
+      }
+    },
+    sections: [{
+      properties: {
+        page: {
+          margin: { top: 1701, bottom: 1701, left: 1701, right: 1134 }  // ~3cm sup/inf/esq, 2cm dir (padrão jurídico)
+        }
+      },
+      headers: { default: cabecalho },
+      footers: { default: rodape },
+      children: paragrafos.length > 0 ? paragrafos : [
+        new Paragraph({ children: [new TextRun({ text: '(petição vazia)', font: 'EB Garamond', size: 24, italics: true })] })
+      ]
+    }]
+  });
+
+  const blob = await Packer.toBlob(doc);
+  const slug = (modelo?.nome || 'peticao').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  const cnj = processo?.cnj ? '_' + processo.cnj.replace(/[^0-9]/g, '') : '';
+  const fname = `${slug}${cnj}_${new Date().toISOString().slice(0,10)}.docx`;
+  downloadBlob(blob, fname);
+  toast('Word baixado', fname, 'success');
 }
 
 function _baixarPeticaoGerada(formato, texto, modelo, processo) {

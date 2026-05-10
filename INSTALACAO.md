@@ -1,6 +1,6 @@
 # UC Jurídico — Instalação e operação
 
-Versão atual: **v6.33.0**
+Versão atual: **v6.34.0**
 URL pública: https://eduardourany-dot.github.io/uc-juridico/
 Repositório: https://github.com/eduardourany-dot/uc-juridico
 
@@ -269,7 +269,8 @@ Verificar:
 | v6.30.0 | ✅ entregue | Calendário visual mensal — toggle 📋 Lista / 📅 Calendário no header de `/agenda`. Grid 7×N + chips por dia. |
 | v6.31.0 | ✅ entregue | Petições Pet.1 — versionamento + aba "Petições" no processo + editor com "+ Nova versão" / status / arquivar. |
 | v6.32.0 | ✅ entregue | Indicadores por advogado — rota `/equipe` com picker + 8 cards + listas (próximos prazos, vencidos não-cumpridos, próximos compromissos, processos por papel). |
-| **v6.33.0** | ✅ em produção | **Modo escuro completo** — 3 opções (☀ Claro / 🌙 Escuro / 🖥 Auto). Modo Auto segue preferência do SO via `matchMedia('(prefers-color-scheme)')` e reage em tempo real quando você muda nas Configurações do sistema. Toggle rápido no rodapé da sidebar (cicla light → dark → auto) sem precisar ir em Configurações. Correções de inline backgrounds que não respeitavam tema (células do calendário, chips de placeholder em /modelos). |
+| v6.33.0 | ✅ entregue | Modo escuro completo — 3 opções (☀/🌙/🖥 Auto via matchMedia) + toggle rápido na sidebar. |
+| **v6.34.0** | ✅ em produção | **Petições Pet.2 — .docx + templates seed** — exportação Word .docx via lib `docx@8.5.0` lazy-loaded (CDN UMD ~700KB carregado só na 1ª chamada). Formatação automática: Garamond 12pt, justificado, espaçamento 1.5, parágrafos com indent 0.5", margens 3cm/2cm (padrão jurídico), cabeçalho centralizado com nome do escritório + OAB e rodapé com endereços + paginação. Headings (## ###) e linhas em CAIXA ALTA viram títulos centralizados. **5 templates seed instaláveis com 1 clique** em `/modelos` quando vazio: Contestação base · Manifestação simples · Apelação com pedido de reforma · Embargos à execução fiscal (LEF 16) · Exceção de pré-executividade (Súmula 393/STJ) — todos com placeholders prontos. |
 | v6.22+ | planejado | Retomada Financeiro A.4 (Recorrências + Balancete) → A.5 → Agenda unificada |
 | v7.x | planejado | Módulo Petições com Claude API (briefing em [docs/BRIEFING_Peticoes.md](docs/BRIEFING_Peticoes.md)) |
 

@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.33.0 (Modo escuro + auto: toggle na sidebar + segue preferência do SO + correções de backgrounds inline)
-const CACHE_NAME = 'uc-juridico-v6-33-0';
+// Service Worker — UC Jurídico v6.34.0 (Petições Pet.2: export .docx + 5 templates seed instaláveis com 1 clique)
+const CACHE_NAME = 'uc-juridico-v6-34-0';
 const APP_SHELL = [
   './',
   './index.html',
