@@ -404,6 +404,14 @@ const RemoteDB = {
   async savePeticaoModelo(m) { return await upsert_('peticao_modelos', m); },
   async deletePeticaoModelo(id) { return await softDelete_('peticao_modelos', id); },
 
+  // ====== Módulo Petições — Versões (v6.31, Sprint Pet.1) ======
+  async getAllPeticoes() { return await getAll_('peticoes'); },
+  async getPeticoesByProcess(pid) {
+    return (await getAll_('peticoes')).filter(p => p.processoId === pid);
+  },
+  async savePeticao(p) { return await upsert_('peticoes', p); },
+  async deletePeticao(id) { return await softDelete_('peticoes', id); },
+
   // Jurisprudência
   async getJurisprudenceByProcess(pid) {
     return (await getAll_('jurisprudencia')).filter(j => j.processId === pid);

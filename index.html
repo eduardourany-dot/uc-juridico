@@ -281,7 +281,7 @@ body{background:var(--uc-paper);color:var(--uc-graphite);font-size:15px;-webkit-
 
     <div style="margin-top:auto;padding:16px 20px;border-top:1px solid var(--uc-line-soft);font-size:11px;color:var(--uc-warm-gray);text-align:center;">
       <p class="smallcaps font-serif" style="margin:0 0 4px;">Urany de Castro · 30 anos</p>
-      <p style="margin:0;">100% local · v6.30.0</p>
+      <p style="margin:0;">100% local · v6.31.0</p>
     </div>
   </aside>
 
@@ -496,6 +496,12 @@ const DB = {
   async getAllPeticaoModelos() { return []; },
   async savePeticaoModelo(m) { return m; },
   async deletePeticaoModelo(_id) {},
+
+  // ====== Petições / Versões (stub IndexedDB — sobrescrito por UC_RemoteDB no boot) ======
+  async getAllPeticoes() { return []; },
+  async getPeticoesByProcess(_pid) { return []; },
+  async savePeticao(p) { return p; },
+  async deletePeticao(_id) {},
 
   // ====== Módulo Financeiro (stubs IndexedDB — sobrescritos por UC_RemoteDB no boot) ======
   async getAllBancos() { return []; },
@@ -2395,13 +2401,15 @@ async function renderProcessDetail() {
   const honorarios = await DB.getHonorariosByProcess(p.id);
   let compromissos = [];
   try { compromissos = await DB.getCompromissosByProcess(p.id); } catch (e) { console.warn('compromissos não disponíveis', e); }
+  let peticoes = [];
+  try { peticoes = await DB.getPeticoesByProcess(p.id); } catch (e) { console.warn('peticoes não disponíveis', e); }
 
   // Update counts
   p.eventCount = events.length;
   p.noteCount = notes.length;
   await DB.saveProcess(p);
 
-  state._processView = { p, events, deadlines, notes, jurisprudence, honorarios, compromissos, activeTab: state._processView?.activeTab || 'overview' };
+  state._processView = { p, events, deadlines, notes, jurisprudence, honorarios, compromissos, peticoes, activeTab: state._processView?.activeTab || 'overview' };
 
   $('appContent').innerHTML = `
     <div class="page-header">
@@ -2431,6 +2439,7 @@ async function renderProcessDetail() {
       <button class="detail-tab ${state._processView.activeTab === 'notes' ? 'active' : ''}" onclick="setProcessTab('notes')">Notas · ${notes.length}</button>
       <button class="detail-tab ${state._processView.activeTab === 'honorarios' ? 'active' : ''}" onclick="setProcessTab('honorarios')">Honorários · ${honorarios.length}</button>
       <button class="detail-tab ${state._processView.activeTab === 'compromissos' ? 'active' : ''}" onclick="setProcessTab('compromissos')">Compromissos · ${compromissos.length}</button>
+      <button class="detail-tab ${state._processView.activeTab === 'peticoes' ? 'active' : ''}" onclick="setProcessTab('peticoes')">Petições · ${peticoes.length}</button>
       <button class="detail-tab ${state._processView.activeTab === 'analysis' ? 'active' : ''}" onclick="setProcessTab('analysis')">Análise IA</button>
     </div>
 
@@ -2459,6 +2468,7 @@ async function renderProcessTabContent() {
   else if (activeTab === 'notes') c.innerHTML = renderProcessNotes(p, notes);
   else if (activeTab === 'honorarios') c.innerHTML = renderProcessHonorarios(p, honorarios || []);
   else if (activeTab === 'compromissos') c.innerHTML = await renderProcessCompromissos(p, compromissos || []);
+  else if (activeTab === 'peticoes') c.innerHTML = renderProcessPeticoes(p, state._processView.peticoes || []);
   else if (activeTab === 'analysis') c.innerHTML = renderProcessAnalysis(p, events, deadlines, jurisprudence);
 }
 
@@ -9336,45 +9346,337 @@ async function gerarPeticaoFlow() {
   const faltUnicos = [...new Set(faltando)];
 
   state._peticaoGerada = { conteudo: conteudoGerado, modelo, processo: proc, cliente };
-  _abrirModalPeticaoGerada(conteudoGerado, modelo, proc, faltUnicos);
+  _abrirModalPeticaoGerada({
+    conteudo: conteudoGerado, modelo, processo: proc,
+    cliente, faltUnicos, peticaoExistente: null
+  });
 }
 
-function _abrirModalPeticaoGerada(conteudo, modelo, processo, faltUnicos) {
+// Modo unificado: usado tanto pra petição recém-gerada (peticaoExistente=null)
+// quanto pra editor de uma versão existente (peticaoExistente=doc).
+function _abrirModalPeticaoGerada(opts) {
+  const { conteudo, modelo, processo, cliente, faltUnicos = [], peticaoExistente = null } = opts || {};
+  const isExistente = !!peticaoExistente;
+  const titulo = isExistente
+    ? `Petição v${peticaoExistente.numeroVersao || 1} · ${escapeHtml(peticaoExistente.titulo || modelo?.nome || '')}`
+    : `Petição gerada · ${escapeHtml(modelo?.nome || '')}`;
+
   const modal = document.createElement('div');
   modal.className = 'modal-backdrop';
   modal.innerHTML = `
-    <div class="modal scroll-thin" style="max-width: 800px;">
-      <h3 class="modal-title">Petição gerada · ${escapeHtml(modelo.nome)}</h3>
+    <div class="modal scroll-thin" style="max-width: 820px;">
+      <h3 class="modal-title">${titulo}</h3>
       <p class="help-text" style="margin-bottom: 12px;">
         ${faltUnicos.length > 0
           ? `⚠ <strong>${faltUnicos.length} placeholder(s) sem dado</strong>: <code>${faltUnicos.map(escapeHtml).join('</code>, <code>')}</code> — preencha o cadastro do processo/cliente ou edite manualmente abaixo.`
-          : 'Conteúdo pronto · revise antes de protocolar.'}
+          : isExistente
+            ? `Status: <strong>${escapeHtml(peticaoExistente.status || 'rascunho')}</strong> · criado por ${escapeHtml(peticaoExistente.criadoPor || '—')} em ${formatDateTime(peticaoExistente.criadoEm)}`
+            : 'Conteúdo pronto · revise antes de protocolar. Salve como versão pra registrar histórico no processo.'}
       </p>
+      <div style="margin-bottom: 12px; display: flex; gap: 8px; align-items: end; flex-wrap: wrap;">
+        <div style="flex: 1; min-width: 240px;">
+          <label class="label">Título da petição</label>
+          <input type="text" id="_pgTitulo" class="input" value="${escapeHtml(peticaoExistente?.titulo || (modelo?.nome || ''))}" placeholder="Ex: Contestação · cliente XYZ">
+        </div>
+        ${isExistente ? `
+          <div style="min-width: 140px;">
+            <label class="label">Status</label>
+            <select class="select" id="_pgStatus">
+              <option value="rascunho" ${peticaoExistente.status === 'rascunho' ? 'selected' : ''}>Rascunho</option>
+              <option value="final" ${peticaoExistente.status === 'final' ? 'selected' : ''}>Final</option>
+              <option value="arquivada" ${peticaoExistente.status === 'arquivada' ? 'selected' : ''}>Arquivada</option>
+            </select>
+          </div>
+        ` : ''}
+      </div>
       <div style="margin-bottom: 16px;">
-        <label class="label">Texto gerado (editável)</label>
-        <textarea id="_pgConteudo" class="textarea" rows="22" style="font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px;">${escapeHtml(conteudo)}</textarea>
+        <label class="label">Conteúdo (editável)</label>
+        <textarea id="_pgConteudo" class="textarea" rows="20" style="font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px;">${escapeHtml(conteudo)}</textarea>
       </div>
       <div class="flex gap-2 flex-wrap">
-        <button class="btn btn-primary" id="_pgCopiar" style="flex: 1; min-width: 140px;">📋 Copiar texto</button>
-        <button class="btn btn-secondary" id="_pgMd" style="min-width: 120px;">⬇ Baixar .md</button>
-        <button class="btn btn-secondary" id="_pgTxt" style="min-width: 120px;">⬇ Baixar .txt</button>
-        <button class="btn btn-outline" id="_pgFechar" style="min-width: 100px;">Fechar</button>
+        <button class="btn btn-primary" id="_pgSalvar" style="flex: 1; min-width: 160px;">${isExistente ? '💾 Salvar alterações' : '💾 Salvar versão'}</button>
+        ${isExistente ? `<button class="btn btn-secondary" id="_pgNovaVersao" style="min-width: 140px;">+ Nova versão</button>` : ''}
+        <button class="btn btn-secondary" id="_pgCopiar" style="min-width: 130px;">📋 Copiar</button>
+        <button class="btn btn-secondary" id="_pgMd" style="min-width: 110px;">⬇ .md</button>
+        <button class="btn btn-secondary" id="_pgTxt" style="min-width: 110px;">⬇ .txt</button>
+        <button class="btn btn-outline" id="_pgFechar" style="min-width: 90px;">Fechar</button>
       </div>
     </div>
   `;
   $('modalContainer').appendChild(modal);
   const cleanup = () => modal.remove();
   const getTexto = () => document.getElementById('_pgConteudo').value;
+  const getTitulo = () => document.getElementById('_pgTitulo').value;
+  const getStatus = () => document.getElementById('_pgStatus')?.value || 'rascunho';
+
+  const fallbackModelo = modelo || {
+    id: peticaoExistente?.modeloId, nome: peticaoExistente?.modeloNome || 'petição', tipo: peticaoExistente?.tipo || 'outro'
+  };
 
   document.getElementById('_pgCopiar').onclick = () => {
     navigator.clipboard.writeText(getTexto()).then(
-      () => toast('Copiado para área de transferência', modelo.nome, 'success'),
+      () => toast('Copiado para área de transferência', getTitulo(), 'success'),
       () => toast('Falha ao copiar', '', 'error')
     );
   };
-  document.getElementById('_pgMd').onclick = () => _baixarPeticaoGerada('md', getTexto(), modelo, processo);
-  document.getElementById('_pgTxt').onclick = () => _baixarPeticaoGerada('txt', getTexto(), modelo, processo);
+  document.getElementById('_pgMd').onclick = () => _baixarPeticaoGerada('md', getTexto(), { ...fallbackModelo, nome: getTitulo() }, processo);
+  document.getElementById('_pgTxt').onclick = () => _baixarPeticaoGerada('txt', getTexto(), { ...fallbackModelo, nome: getTitulo() }, processo);
   document.getElementById('_pgFechar').onclick = cleanup;
+
+  document.getElementById('_pgSalvar').onclick = async () => {
+    try {
+      await _salvarPeticao({
+        conteudo: getTexto(),
+        titulo: getTitulo(),
+        status: isExistente ? getStatus() : 'rascunho',
+        modelo: fallbackModelo,
+        processo,
+        peticaoExistente
+      });
+      cleanup();
+    } catch (e) {
+      toast('Falha ao salvar', e?.message || '', 'error');
+    }
+  };
+
+  if (isExistente) {
+    document.getElementById('_pgNovaVersao').onclick = async () => {
+      try {
+        await _salvarPeticao({
+          conteudo: getTexto(),
+          titulo: getTitulo(),
+          status: 'rascunho',
+          modelo: fallbackModelo,
+          processo,
+          peticaoExistente,
+          forcarNovaVersao: true
+        });
+        cleanup();
+      } catch (e) {
+        toast('Falha ao criar versão', e?.message || '', 'error');
+      }
+    };
+  }
+}
+
+// Persiste a petição. Se forcarNovaVersao OU se for primeira vez (peticaoExistente
+// null), cria doc novo. Senão atualiza existente.
+async function _salvarPeticao({ conteudo, titulo, status, modelo, processo, peticaoExistente, forcarNovaVersao }) {
+  if (!processo?.id) { toast('Processo inválido', '', 'error'); return; }
+  if (!conteudo?.trim()) { toast('Conteúdo vazio', '', 'error'); return; }
+
+  const me = (window.UC_Auth?.getUser?.() || {}).email || '';
+  const now = Date.now();
+
+  if (forcarNovaVersao && peticaoExistente) {
+    // Cria nova versão derivada
+    const peticoes = await DB.getPeticoesByProcess(processo.id);
+    const linhagemId = peticaoExistente.peticaoOriginalId || peticaoExistente.id;
+    const linhagem = peticoes.filter(p => (p.peticaoOriginalId || p.id) === linhagemId);
+    const proxNumero = Math.max(...linhagem.map(p => p.numeroVersao || 1), 0) + 1;
+    const novo = {
+      id: uid(),
+      escritorio_id: 'UC',
+      processoId: processo.id,
+      modeloId: modelo?.id || null,
+      modeloNome: modelo?.nome || '',
+      tipo: modelo?.tipo || peticaoExistente.tipo || 'outro',
+      titulo: titulo?.trim() || (modelo?.nome || 'Petição'),
+      conteudoMd: conteudo,
+      numeroVersao: proxNumero,
+      peticaoOriginalId: linhagemId,
+      status: 'rascunho',
+      geradoPor: 'manual',
+      briefing: '',
+      contextoSnapshot: null,
+      custoEstimado: 0, tokensInput: 0, tokensOutput: 0,
+      criadoEm: now,
+      criadoPor: me,
+      atualizadoEm: now
+    };
+    await DB.savePeticao(novo);
+    toast('Nova versão criada', 'v' + proxNumero, 'success');
+  } else if (peticaoExistente) {
+    // Atualiza existente
+    const atualizado = {
+      ...peticaoExistente,
+      titulo: titulo?.trim() || peticaoExistente.titulo,
+      conteudoMd: conteudo,
+      status: status || peticaoExistente.status || 'rascunho',
+      atualizadoEm: now
+    };
+    await DB.savePeticao(atualizado);
+    toast('Petição atualizada', '', 'success');
+  } else {
+    // Primeira versão
+    const novo = {
+      id: uid(),
+      escritorio_id: 'UC',
+      processoId: processo.id,
+      modeloId: modelo?.id || null,
+      modeloNome: modelo?.nome || '',
+      tipo: modelo?.tipo || 'outro',
+      titulo: titulo?.trim() || (modelo?.nome || 'Petição'),
+      conteudoMd: conteudo,
+      numeroVersao: 1,
+      peticaoOriginalId: null,
+      status: 'rascunho',
+      geradoPor: 'manual',
+      briefing: '',
+      contextoSnapshot: null,
+      custoEstimado: 0, tokensInput: 0, tokensOutput: 0,
+      criadoEm: now,
+      criadoPor: me,
+      atualizadoEm: now
+    };
+    await DB.savePeticao(novo);
+    toast('Petição salva como rascunho', 'v1', 'success');
+  }
+
+  // Refresh do processo se está aberto
+  if (state.currentRoute === 'process') renderProcessDetail();
+}
+
+// === Aba Petições no processo (Sprint Pet.1) ===
+const PETICAO_STATUS_META = {
+  'rascunho':  { label: 'Rascunho',  badge: 'badge-amber', icon: '📝' },
+  'final':     { label: 'Final',     badge: 'badge-green', icon: '✓' },
+  'arquivada': { label: 'Arquivada', badge: 'badge-gray',  icon: '📦' }
+};
+
+function renderProcessPeticoes(p, peticoes) {
+  if (!peticoes.length) {
+    return `
+      <div class="empty-state">
+        <h3 class="empty-state-title">Nenhuma petição salva</h3>
+        <p class="empty-state-msg">Use o botão <strong>📝 Gerar petição</strong> no header → escolha um modelo → no preview clique em <strong>💾 Salvar versão</strong> pra registrar a petição neste processo.</p>
+        <button class="btn btn-primary" onclick="gerarPeticaoFlow()">📝 Gerar petição</button>
+      </div>
+    `;
+  }
+
+  // Agrupa por linhagem (peticaoOriginalId ou self.id)
+  const linhagens = {};
+  peticoes.forEach(pet => {
+    const lin = pet.peticaoOriginalId || pet.id;
+    if (!linhagens[lin]) linhagens[lin] = [];
+    linhagens[lin].push(pet);
+  });
+  // Ordena versões dentro de cada linhagem
+  Object.values(linhagens).forEach(arr => arr.sort((a, b) => (a.numeroVersao || 1) - (b.numeroVersao || 1)));
+  // Ordena linhagens pela data da última versão (desc)
+  const linOrdenadas = Object.entries(linhagens).sort((a, b) => {
+    const lastA = Math.max(...a[1].map(p => p.atualizadoEm || p.criadoEm || 0));
+    const lastB = Math.max(...b[1].map(p => p.atualizadoEm || p.criadoEm || 0));
+    return lastB - lastA;
+  });
+
+  return `
+    <div class="flex justify-between items-center mb-3">
+      <p class="text-sm" style="color: var(--uc-warm-gray); margin: 0;">${peticoes.length} versão(ões) em ${linOrdenadas.length} linhagem(ns)</p>
+      <button class="btn btn-primary btn-sm" onclick="gerarPeticaoFlow()">📝 Gerar nova petição</button>
+    </div>
+    ${linOrdenadas.map(([linId, versoes]) => {
+      const ultima = versoes[versoes.length - 1];
+      const statusMeta = PETICAO_STATUS_META[ultima.status] || PETICAO_STATUS_META.rascunho;
+      const tipoLabel = (PETICAO_TIPOS.find(t => t.value === ultima.tipo) || {}).label || ultima.tipo;
+      return `
+        <div class="card mb-3">
+          <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; flex-wrap: wrap; margin-bottom: 8px;">
+            <div style="flex: 1; min-width: 0;">
+              <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                <span style="font-size: 14px;">${statusMeta.icon}</span>
+                <strong style="color: var(--uc-black); font-size: 14px;">${escapeHtml(ultima.titulo || 'Petição')}</strong>
+                <span class="badge ${statusMeta.badge}" style="font-size: 9px;">${statusMeta.label}</span>
+                <span class="badge badge-gray" style="font-size: 9px;">${escapeHtml(tipoLabel)}</span>
+                ${versoes.length > 1 ? `<span class="badge badge-gold" style="font-size: 9px;">${versoes.length} versões</span>` : ''}
+              </div>
+              <div style="font-size: 11px; color: var(--uc-warm-gray); margin-top: 4px;">
+                Última: v${ultima.numeroVersao} · ${formatDateTime(ultima.atualizadoEm || ultima.criadoEm)}${ultima.criadoPor ? ' · ' + escapeHtml(ultima.criadoPor) : ''}
+                ${ultima.modeloNome ? ' · modelo: ' + escapeHtml(ultima.modeloNome) : ''}
+              </div>
+            </div>
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 4px;">
+            ${versoes.slice().reverse().map(v => {
+              const sm = PETICAO_STATUS_META[v.status] || PETICAO_STATUS_META.rascunho;
+              const isLast = v.id === ultima.id;
+              return `
+                <div style="display: flex; align-items: center; gap: 8px; padding: 6px 8px; background: ${isLast ? 'var(--uc-cream)' : 'transparent'}; border-radius: 4px; font-size: 12px;">
+                  <span style="font-weight: 600; min-width: 32px;">v${v.numeroVersao || 1}</span>
+                  <span class="badge ${sm.badge}" style="font-size: 9px;">${sm.label}</span>
+                  <span style="color: var(--uc-warm-gray); flex: 1;">${formatDateTime(v.atualizadoEm || v.criadoEm)}</span>
+                  <button class="btn btn-ghost btn-sm" onclick="abrirEditorPeticao('${v.id}')" title="Abrir versão" style="padding: 2px 8px;">👁</button>
+                  ${isLast && v.status !== 'arquivada' ? `<button class="btn btn-ghost btn-sm" onclick="arquivarPeticao('${v.id}')" title="Arquivar" style="padding: 2px 6px;">📦</button>` : ''}
+                  <button class="btn btn-ghost btn-sm" onclick="removerPeticao('${v.id}')" title="Remover" style="padding: 2px 6px;">🗑</button>
+                </div>
+              `;
+            }).join('')}
+          </div>
+        </div>
+      `;
+    }).join('')}
+  `;
+}
+
+async function abrirEditorPeticao(id) {
+  const todas = await DB.getAllPeticoes();
+  const pet = todas.find(x => x.id === id);
+  if (!pet) { toast('Petição não encontrada', '', 'error'); return; }
+
+  // Carrega processo
+  const processo = await DB.getProcess(pet.processoId);
+  if (!processo) { toast('Processo da petição não encontrado', '', 'error'); return; }
+
+  // Carrega cliente se houver
+  let cliente = null;
+  if (processo.clienteId) {
+    try {
+      const clientes = await DB.getAllClientes();
+      cliente = clientes.find(c => c.id === processo.clienteId) || null;
+    } catch (_) {}
+  }
+
+  // Tenta resolver o modelo (pode ter sido removido)
+  let modelo = null;
+  if (pet.modeloId) {
+    try {
+      const modelos = await DB.getAllPeticaoModelos();
+      modelo = modelos.find(m => m.id === pet.modeloId) || null;
+    } catch (_) {}
+  }
+  if (!modelo) {
+    modelo = { id: pet.modeloId, nome: pet.modeloNome || 'petição', tipo: pet.tipo || 'outro' };
+  }
+
+  state._peticaoGerada = { conteudo: pet.conteudoMd, modelo, processo, cliente };
+  _abrirModalPeticaoGerada({
+    conteudo: pet.conteudoMd,
+    modelo,
+    processo,
+    cliente,
+    faltUnicos: [],
+    peticaoExistente: pet
+  });
+}
+
+async function arquivarPeticao(id) {
+  const todas = await DB.getAllPeticoes();
+  const pet = todas.find(x => x.id === id);
+  if (!pet) return;
+  pet.status = 'arquivada';
+  pet.atualizadoEm = Date.now();
+  await DB.savePeticao(pet);
+  toast('Petição arquivada', '', 'success');
+  if (state.currentRoute === 'process') renderProcessDetail();
+}
+
+async function removerPeticao(id) {
+  const ok = await confirmDialog('Remover esta versão?', 'A versão será apagada permanentemente. Outras versões da mesma linhagem permanecem.', true);
+  if (!ok) return;
+  await DB.deletePeticao(id);
+  toast('Versão removida', '', 'success');
+  if (state.currentRoute === 'process') renderProcessDetail();
 }
 
 function _baixarPeticaoGerada(formato, texto, modelo, processo) {
@@ -12549,6 +12851,31 @@ async function bootApp() {
     return r;
   };
 
+  // ====== Cache Petições (v6.31 — Sprint Pet.1) ======
+  const _remoteGetAllPeticoes = DB.getAllPeticoes.bind(DB);
+  const _remoteSavePeticao = DB.savePeticao.bind(DB);
+  const _remoteDeletePeticao = DB.deletePeticao.bind(DB);
+  let _petCache = null, _petCacheAt = 0;
+  DB.getAllPeticoes = async () => {
+    if (_petCache && (Date.now() - _petCacheAt < CACHE_MS)) return _petCache;
+    _petCache = await _remoteGetAllPeticoes();
+    _petCacheAt = Date.now();
+    return _petCache;
+  };
+  DB.getPeticoesByProcess = async (pid) => {
+    return (await DB.getAllPeticoes()).filter(p => p.processoId === pid);
+  };
+  DB.savePeticao = async (p) => {
+    const r = await _remoteSavePeticao(p);
+    _petCache = null; _petCacheAt = 0;
+    return r;
+  };
+  DB.deletePeticao = async (id) => {
+    const r = await _remoteDeletePeticao(id);
+    _petCache = null; _petCacheAt = 0;
+    return r;
+  };
+
   // ====== Cache Financeiro (v6.16+) ======
   const _finCaches = {
     bancos: { data: null, at: 0 },
@@ -12615,6 +12942,7 @@ async function bootApp() {
     _comCache = null; _comCacheAt = 0;
     _agCache = null; _agCacheAt = 0;
     _modCache = null; _modCacheAt = 0;
+    _petCache = null; _petCacheAt = 0;
     _settingsCache.clear();
     _settingsCacheAt.clear();
     Object.keys(_finCaches).forEach(k => _finCacheBust(k));

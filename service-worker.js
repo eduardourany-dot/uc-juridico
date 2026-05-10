@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.30.0 (Calendário visual mensal na agenda: toggle Lista/Calendário + grid 7×N com chips por dia)
-const CACHE_NAME = 'uc-juridico-v6-30-0';
+// Service Worker — UC Jurídico v6.31.0 (Petições Pet.1: versionamento + aba no processo + editor com nova versão / arquivar)
+const CACHE_NAME = 'uc-juridico-v6-31-0';
 const APP_SHELL = [
   './',
   './index.html',
