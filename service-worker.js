@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.37.0 (Notificações in-app: sino flutuante com timeline + persistência local de lidas)
-const CACHE_NAME = 'uc-juridico-v6-37-0';
+// Service Worker — UC Jurídico v6.38.0 (Equipe Comparativo: tabela ranqueando advogados com sort + barras + drill-down)
+const CACHE_NAME = 'uc-juridico-v6-38-0';
 const APP_SHELL = [
   './',
   './index.html',

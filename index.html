@@ -313,7 +313,7 @@ body{background:var(--uc-paper);color:var(--uc-graphite);font-size:15px;-webkit-
         <span id="themeQuickToggleLabel">☀ Claro</span>
       </button>
       <p class="smallcaps font-serif" style="margin:0 0 4px;">Urany de Castro · 30 anos</p>
-      <p style="margin:0;">100% local · v6.37.0</p>
+      <p style="margin:0;">100% local · v6.38.0</p>
     </div>
   </aside>
 
@@ -10513,18 +10513,25 @@ function _baixarPeticaoGerada(formato, texto, modelo, processo) {
 // vencidos não-cumpridos, próximos compromissos, processos por papel).
 
 async function renderEquipe() {
-  // Estado: advogado selecionado + mês de referência
+  // Estado: modo + advogado selecionado + mês de referência
   if (!state._equipeRef) {
     const me = (window.UC_Auth?.getUser?.() || {}).email || '';
     const meuNome = defaultAdvogado(me);
     const hoje = new Date();
     state._equipeRef = {
+      modo: 'individual',  // individual | comparativo
+      sortCol: 'cargaAtual',
+      sortDir: 'desc',
       advogado: meuNome || ADVOGADOS[0] || '',
       ano: hoje.getFullYear(),
       mes: hoje.getMonth()
     };
   }
   const { advogado, ano, mes } = state._equipeRef;
+  const modo = state._equipeRef.modo || 'individual';
+  if (modo === 'comparativo') {
+    return await _renderEquipeComparativo(ano, mes);
+  }
   const range = _mesRange(ano, mes);
   const rangePrev = _mesRange(mes === 0 ? ano - 1 : ano, mes === 0 ? 11 : mes - 1);
 
@@ -10624,6 +10631,10 @@ async function renderEquipe() {
         <p class="page-subtitle">Indicadores individuais · ${escapeHtml(advogado)}${ehMesAtual ? ' <span class="badge badge-gold" style="font-size:9px;">EM CURSO</span>' : ''}</p>
       </div>
       <div class="flex gap-2 items-center flex-wrap">
+        <div style="display: inline-flex; border: 1px solid var(--uc-line); border-radius: 6px; overflow: hidden;">
+          <button class="btn btn-primary btn-sm" style="border-radius: 0; min-width: 80px;" onclick="_setEquipeModo('individual')">👤 Individual</button>
+          <button class="btn btn-ghost btn-sm" style="border-radius: 0; min-width: 100px;" onclick="_setEquipeModo('comparativo')">📊 Comparativo</button>
+        </div>
         <select class="select" style="min-width: 200px;" onchange="_setEquipeAdvogado(this.value)">
           ${ADVOGADOS.map(n => `<option value="${escapeHtml(n)}" ${n === advogado ? 'selected' : ''}>${escapeHtml(n)}</option>`).join('')}
         </select>
@@ -10781,6 +10792,253 @@ async function renderEquipe() {
       Snapshot gerado em ${formatDateTime(Date.now())}
     </p>
   `;
+}
+
+// ====================================================================
+// === Equipe — Modo Comparativo (v6.38) =============================
+// ====================================================================
+// Tabela com uma linha por advogado, ordenável, semáforos visuais
+// nos campos críticos, click navega pro individual daquele advogado.
+
+async function _renderEquipeComparativo(ano, mes) {
+  const range = _mesRange(ano, mes);
+  const today = new Date(); today.setHours(0,0,0,0);
+
+  const [processos, prazos, compromissos, comunicacoes] = await Promise.all([
+    DB.getAllProcesses(),
+    DB.getAllDeadlines(),
+    DB.getAllCompromissos ? DB.getAllCompromissos().catch(() => []) : Promise.resolve([]),
+    DB.getAllComunicacoes ? DB.getAllComunicacoes().catch(() => []) : Promise.resolve([])
+  ]);
+
+  // Computa stats por advogado
+  const stats = ADVOGADOS.map(advogado => {
+    const procsTitular = processos.filter(p => p.advogadoResponsavel === advogado);
+    const procsSuplente = processos.filter(p => p.advogadoSuplente === advogado);
+
+    const ativosSnapshot = prazos.filter(d => {
+      if (!prazoEstaAtivo(d)) return false;
+      const proc = processos.find(p => p.id === d.processId);
+      return proc?.advogadoResponsavel === advogado;
+    });
+    const vencidos = ativosSnapshot.filter(d => new Date(d.deadlineDate) < today).length;
+
+    const cumpridos = prazos.filter(d => {
+      if (d.status !== 'cumprido') return false;
+      if (!_isDateInRange(d.cumprimento?.dataCumprimento, range)) return false;
+      const proc = processos.find(p => p.id === d.processId);
+      return proc?.advogadoResponsavel === advogado;
+    }).length;
+
+    const perdidos = prazos.filter(d => {
+      if (d.status !== 'perdido') return false;
+      if (!_isDateInRange(d.deadlineDate, range)) return false;
+      const proc = processos.find(p => p.id === d.processId);
+      return proc?.advogadoResponsavel === advogado;
+    }).length;
+
+    const compsDoMes = compromissos.filter(c => {
+      if (!_isDateInRange(c.dataHoraInicio, range)) return false;
+      return c.responsavel === advogado || (c.participantes || []).includes(advogado);
+    });
+    const compsRealizados = compsDoMes.filter(c => c.status === 'realizado').length;
+
+    const comsDoMes = comunicacoes.filter(c => {
+      if (!_isInRange(c.data || c.createdAt, range)) return false;
+      return c.atendidoPor === advogado || c.criadoPor === advogado;
+    }).length;
+
+    const resolvedosNoMes = cumpridos + perdidos;
+    const taxaCumprimento = resolvedosNoMes > 0 ? (cumpridos / resolvedosNoMes) * 100 : null;
+
+    return {
+      advogado,
+      procsTitular: procsTitular.length,
+      procsAtivosTitular: procsTitular.filter(p => p.status !== 'archived').length,
+      procsSuplente: procsSuplente.length,
+      cargaAtual: ativosSnapshot.length,
+      vencidos,
+      cumpridos,
+      perdidos,
+      compsDoMes: compsDoMes.length,
+      compsRealizados,
+      comsDoMes,
+      taxaCumprimento
+    };
+  });
+
+  // Sort
+  const sortCol = state._equipeRef.sortCol || 'cargaAtual';
+  const sortDir = state._equipeRef.sortDir || 'desc';
+  stats.sort((a, b) => {
+    const va = a[sortCol] ?? -Infinity;
+    const vb = b[sortCol] ?? -Infinity;
+    return sortDir === 'asc' ? va - vb : vb - va;
+  });
+
+  // Máximos pra escala das barras
+  const maxCarga = Math.max(...stats.map(s => s.cargaAtual), 1);
+  const maxCumpridos = Math.max(...stats.map(s => s.cumpridos), 1);
+  const maxComps = Math.max(...stats.map(s => s.compsDoMes), 1);
+
+  // Totais consolidados (footer)
+  const totais = stats.reduce((acc, s) => ({
+    cargaAtual: acc.cargaAtual + s.cargaAtual,
+    vencidos: acc.vencidos + s.vencidos,
+    cumpridos: acc.cumpridos + s.cumpridos,
+    perdidos: acc.perdidos + s.perdidos,
+    compsDoMes: acc.compsDoMes + s.compsDoMes,
+    comsDoMes: acc.comsDoMes + s.comsDoMes,
+    procsAtivosTitular: acc.procsAtivosTitular + s.procsAtivosTitular
+  }), { cargaAtual: 0, vencidos: 0, cumpridos: 0, perdidos: 0, compsDoMes: 0, comsDoMes: 0, procsAtivosTitular: 0 });
+
+  const ehMesAtual = ano === new Date().getFullYear() && mes === new Date().getMonth();
+
+  const headerCell = (key, label, tooltip) => {
+    const isActive = sortCol === key;
+    const arrow = isActive ? (sortDir === 'desc' ? ' ↓' : ' ↑') : '';
+    return `<th onclick="_sortEquipeCol('${key}')" title="${tooltip}" style="cursor: pointer; padding: 8px 6px; color: var(--uc-warm-gray); font-weight: 500; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; text-align: right; user-select: none; ${isActive ? 'color: var(--uc-gold);' : ''}">${label}${arrow}</th>`;
+  };
+
+  $('appContent').innerHTML = `
+    <div class="page-header">
+      <div>
+        <h1 class="page-title"><span class="smallcaps-prefix">Equipe</span></h1>
+        <p class="page-subtitle">Comparativo · ${_mesLabel(ano, mes)}${ehMesAtual ? ' <span class="badge badge-gold" style="font-size:9px;">EM CURSO</span>' : ''} · ${ADVOGADOS.length} advogados</p>
+      </div>
+      <div class="flex gap-2 items-center flex-wrap">
+        <div style="display: inline-flex; border: 1px solid var(--uc-line); border-radius: 6px; overflow: hidden;">
+          <button class="btn btn-ghost btn-sm" style="border-radius: 0; min-width: 80px;" onclick="_setEquipeModo('individual')">👤 Individual</button>
+          <button class="btn btn-primary btn-sm" style="border-radius: 0; min-width: 100px;" onclick="_setEquipeModo('comparativo')">📊 Comparativo</button>
+        </div>
+        <button class="btn btn-ghost btn-sm" onclick="_navegarMesEquipe(-1)" title="Mês anterior">‹</button>
+        <input type="month" class="input" style="max-width: 150px;" value="${ano}-${String(mes+1).padStart(2,'0')}" onchange="_setMesEquipe(this.value)">
+        <button class="btn btn-ghost btn-sm" onclick="_navegarMesEquipe(1)" title="Próximo mês">›</button>
+      </div>
+    </div>
+
+    <!-- Stats consolidados do escritório -->
+    <div class="grid gap-3 mb-4" style="grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));">
+      <div class="stat-card">
+        <div class="stat-label">Carga total</div>
+        <div class="stat-value">${totais.cargaAtual}</div>
+        <div class="stat-meta">prazos ativos</div>
+      </div>
+      <div class="stat-card" style="${totais.vencidos > 0 ? 'background: var(--uc-red-soft); border-color: var(--uc-red);' : ''}">
+        <div class="stat-label">Vencidos</div>
+        <div class="stat-value" style="${totais.vencidos > 0 ? 'color: var(--uc-red);' : ''}">${totais.vencidos}</div>
+        <div class="stat-meta">no escritório</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Cumpridos no mês</div>
+        <div class="stat-value" style="color: var(--uc-green);">${totais.cumpridos}</div>
+        <div class="stat-meta">${totais.perdidos > 0 ? '<span style="color: var(--uc-red);">' + totais.perdidos + ' perdidos</span>' : 'sem perdas'}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Compromissos</div>
+        <div class="stat-value">${totais.compsDoMes}</div>
+        <div class="stat-meta">no mês</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Processos ativos</div>
+        <div class="stat-value">${totais.procsAtivosTitular}</div>
+        <div class="stat-meta">como titular</div>
+      </div>
+    </div>
+
+    <!-- Tabela comparativa -->
+    <div class="card" style="padding: 0; overflow-x: auto;">
+      <table style="width: 100%; border-collapse: collapse; font-size: 13px; min-width: 760px;">
+        <thead>
+          <tr style="border-bottom: 1px solid var(--uc-line); text-align: left;">
+            <th onclick="_sortEquipeCol('advogado')" style="cursor: pointer; padding: 10px 12px; color: var(--uc-warm-gray); font-weight: 500; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; user-select: none; ${sortCol === 'advogado' ? 'color: var(--uc-gold);' : ''}">Advogado${sortCol === 'advogado' ? (sortDir === 'desc' ? ' ↓' : ' ↑') : ''}</th>
+            ${headerCell('cargaAtual', 'Carga', 'Prazos ativos atualmente (sou titular)')}
+            ${headerCell('vencidos', 'Venc.', 'Prazos vencidos não-cumpridos')}
+            ${headerCell('cumpridos', 'Cumprid.', 'Prazos cumpridos no mês')}
+            ${headerCell('perdidos', 'Perd.', 'Prazos perdidos no mês')}
+            ${headerCell('taxaCumprimento', 'Taxa', 'Taxa cumprimento: cumpridos / (cumpridos + perdidos)')}
+            ${headerCell('compsDoMes', 'Comprom.', 'Compromissos no mês (responsável ou participante)')}
+            ${headerCell('comsDoMes', 'Comun.', 'Comunicações registradas no mês')}
+            ${headerCell('procsAtivosTitular', 'Procs.', 'Processos ativos como titular')}
+          </tr>
+        </thead>
+        <tbody>
+          ${stats.map(s => {
+            const cargaPct = (s.cargaAtual / maxCarga) * 100;
+            const cumpridosPct = (s.cumpridos / maxCumpridos) * 100;
+            const compsPct = (s.compsDoMes / maxComps) * 100;
+            const cargaCor = s.cargaAtual >= 15 ? 'var(--uc-red)' : s.cargaAtual >= 8 ? 'var(--uc-amber)' : 'var(--uc-graphite)';
+            const taxaCor = s.taxaCumprimento === null ? 'var(--uc-warm-gray)'
+                          : s.taxaCumprimento >= 90 ? 'var(--uc-green)'
+                          : s.taxaCumprimento >= 75 ? 'var(--uc-amber)'
+                          : 'var(--uc-red)';
+            return `
+              <tr style="border-bottom: 1px solid var(--uc-line-soft); cursor: pointer; transition: background 0.1s;" onclick="_drillEquipe('${escapeHtml(s.advogado)}')" onmouseover="this.style.background='var(--uc-cream)'" onmouseout="this.style.background=''">
+                <td style="padding: 10px 12px;">
+                  <strong style="color: var(--uc-black);">${escapeHtml(s.advogado.split(' ')[0])} ${escapeHtml(s.advogado.split(' ').slice(-1)[0])}</strong>
+                </td>
+                <td style="padding: 10px 6px; text-align: right;">
+                  <div style="display: inline-flex; align-items: center; gap: 6px; justify-content: flex-end;">
+                    <span style="color: ${cargaCor}; font-weight: 600;">${s.cargaAtual}</span>
+                    <div style="width: 40px; height: 4px; background: var(--uc-cream); border-radius: 2px; overflow: hidden;">
+                      <div style="height: 100%; background: ${cargaCor}; width: ${cargaPct}%;"></div>
+                    </div>
+                  </div>
+                </td>
+                <td style="padding: 10px 6px; text-align: right; color: ${s.vencidos > 0 ? 'var(--uc-red)' : 'var(--uc-graphite)'}; font-weight: ${s.vencidos > 0 ? '600' : '400'};">${s.vencidos}</td>
+                <td style="padding: 10px 6px; text-align: right;">
+                  <div style="display: inline-flex; align-items: center; gap: 6px; justify-content: flex-end;">
+                    <span style="color: var(--uc-green); font-weight: 600;">${s.cumpridos}</span>
+                    <div style="width: 32px; height: 3px; background: var(--uc-cream); border-radius: 2px; overflow: hidden;">
+                      <div style="height: 100%; background: var(--uc-green); width: ${cumpridosPct}%;"></div>
+                    </div>
+                  </div>
+                </td>
+                <td style="padding: 10px 6px; text-align: right; color: ${s.perdidos > 0 ? 'var(--uc-red)' : 'var(--uc-warm-gray)'};">${s.perdidos}</td>
+                <td style="padding: 10px 6px; text-align: right; color: ${taxaCor}; font-weight: 600;">${s.taxaCumprimento === null ? '—' : s.taxaCumprimento.toFixed(0) + '%'}</td>
+                <td style="padding: 10px 6px; text-align: right;">
+                  <div style="display: inline-flex; align-items: center; gap: 6px; justify-content: flex-end;">
+                    <span>${s.compsDoMes}</span>
+                    <div style="width: 28px; height: 3px; background: var(--uc-cream); border-radius: 2px; overflow: hidden;">
+                      <div style="height: 100%; background: var(--uc-gold); width: ${compsPct}%;"></div>
+                    </div>
+                  </div>
+                </td>
+                <td style="padding: 10px 6px; text-align: right;">${s.comsDoMes}</td>
+                <td style="padding: 10px 12px; text-align: right;">${s.procsAtivosTitular}</td>
+              </tr>
+            `;
+          }).join('')}
+        </tbody>
+      </table>
+    </div>
+
+    <p class="help-text" style="text-align: center; margin-top: 16px;">
+      Clique numa linha pra abrir o detalhamento individual do advogado · clique nos cabeçalhos pra ordenar
+    </p>
+  `;
+}
+
+function _setEquipeModo(modo) {
+  state._equipeRef = state._equipeRef || {};
+  state._equipeRef.modo = modo;
+  renderEquipe();
+}
+function _sortEquipeCol(col) {
+  state._equipeRef = state._equipeRef || {};
+  if (state._equipeRef.sortCol === col) {
+    state._equipeRef.sortDir = state._equipeRef.sortDir === 'desc' ? 'asc' : 'desc';
+  } else {
+    state._equipeRef.sortCol = col;
+    state._equipeRef.sortDir = col === 'advogado' ? 'asc' : 'desc';
+  }
+  renderEquipe();
+}
+function _drillEquipe(nome) {
+  state._equipeRef = state._equipeRef || {};
+  state._equipeRef.advogado = nome;
+  state._equipeRef.modo = 'individual';
+  renderEquipe();
 }
 
 function _setEquipeAdvogado(nome) {

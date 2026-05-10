@@ -1,6 +1,6 @@
 # UC Jurídico — Instalação e operação
 
-Versão atual: **v6.37.0**
+Versão atual: **v6.38.0**
 URL pública: https://eduardourany-dot.github.io/uc-juridico/
 Repositório: https://github.com/eduardourany-dot/uc-juridico
 
@@ -334,7 +334,8 @@ Verificar:
 | v6.34.0 | ✅ entregue | Petições Pet.2 — export .docx (Garamond + cabeçalho/rodapé) + 5 templates seed instaláveis com 1 clique. |
 | v6.35.0 | ✅ entregue | Petições Pet.3 — proxy Apps Script → Claude API + botão "🤖 Gerar com IA" no processo + audit log de tokens/custo. |
 | v6.36.0 | ✅ entregue | Dashboard "Minhas tarefas hoje" — card personalizado no topo do `/` com prazos urgentes, compromissos, follow-ups e parcelas do advogado logado. |
-| **v6.37.0** | ✅ em produção | **Notificações in-app — sino flutuante** — botão 🔔 fixo no canto superior direito (no mobile vai pro canto inferior, acima da bottom nav) com badge vermelho do número de não-lidas. Click abre painel com timeline agregada: prazos T-7/T-3/T-2/T-1/T-0/T+1 (titular), compromissos T-1/T-0 (responsável OU participante), follow-ups vencidos, parcelas vencendo. Item lido fica desbotado, não-lido com fundo dourado. Click em item navega pro contexto e marca como lida. Botão "✓ Marcar todas como lidas". Refresh automático a cada 5min. Persistência local no `localStorage` (device-specific). |
+| v6.37.0 | ✅ entregue | Notificações in-app — sino flutuante com timeline agregada + persistência local de lidas + refresh 5min. |
+| **v6.38.0** | ✅ em produção | **Equipe Comparativo** — `/equipe` ganha toggle 👤 Individual / 📊 Comparativo. Modo comparativo mostra tabela com 1 linha por advogado e 9 colunas (carga, vencidos, cumpridos, perdidos, taxa de cumprimento, compromissos, comunicações, processos como titular). Cada coluna ordenável por clique no cabeçalho. Barras inline mostram escala relativa de carga/cumpridos/compromissos. Semáforos: carga ≥15 vermelho · ≥8 âmbar; taxa ≥90% verde · ≥75% âmbar · <75% vermelho. Cards consolidados do escritório no topo (carga total, vencidos, cumpridos vs perdidos, compromissos, processos ativos). Click na linha leva pro drill-down individual. |
 | v6.22+ | planejado | Retomada Financeiro A.4 (Recorrências + Balancete) → A.5 → Agenda unificada |
 | v7.x | planejado | Módulo Petições com Claude API (briefing em [docs/BRIEFING_Peticoes.md](docs/BRIEFING_Peticoes.md)) |
 
