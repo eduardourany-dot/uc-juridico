@@ -1,6 +1,6 @@
 # UC Jurídico — Instalação e operação
 
-Versão atual: **v6.14.2**
+Versão atual: **v6.15.0**
 URL pública: https://eduardourany-dot.github.io/uc-juridico/
 Repositório: https://github.com/eduardourany-dot/uc-juridico
 
@@ -37,6 +37,7 @@ Plataforma interna de gestão jurídica do escritório **Urany de Castro Advocac
 | Push notifications | Firebase Cloud Messaging (FCM) |
 | Backend (PDFs) | Google Apps Script (Drive API) + Sheets como fallback histórico |
 | Backend (cron lembretes) | Apps Script com trigger time-driven 30min, FCM HTTP v1 + JWT manual |
+| Email (lembretes críticos) | Gmail Workspace via `MailApp.sendEmail` (Apps Script) — 2K/dia |
 | OCR | Tesseract.js |
 | PDF | pdf.js + pdf-lib |
 | Estilo | Tailwind CSS (CDN) + EB Garamond + Inter |
@@ -198,16 +199,17 @@ Verificar:
 |---|---|---|
 | v6.7–v6.10 | ✅ entregue | Módulo Prazos: state machine completo + cumprimento explícito + auto-perdido + UI de Equipe |
 | v6.11–v6.13 | ✅ entregue | Lembretes via Web Notifications in-app (B.1) |
-| v6.14 | ✅ em produção | FCM real (B.2) — push 24/7 com app fechado + cache em memória |
-| **v6.15** | **próxima** | Módulo Financeiro: receitas, despesas, bancos, cartões, parcelamento de honorários, balancete |
-| v6.16+ | planejado | CRM de clientes (Cliente vira entidade), agenda unificada, tarefas/projetos, formulário de atendimento |
+| v6.14 | ✅ entregue | FCM real (B.2) — push 24/7 com app fechado + cache em memória |
+| v6.15 | ✅ em produção | Sprint 3 C — email Gmail Workspace nos marcos críticos (T-1/T-0/T+1) |
+| **v6.16** | **próxima** | Módulo Financeiro: receitas, despesas, bancos, cartões, parcelamento de honorários, balancete |
+| v6.17+ | planejado | CRM de clientes (Cliente vira entidade), agenda unificada, tarefas/projetos, formulário de atendimento |
 | v7.x | futuro | Módulo Petições com integração Claude API |
 
 Pendências menores:
 - Reescrita do `INSTALACAO.md` (este documento — feita em v6.14.2)
 - Corpus de validação do parser (50 publicações com gabarito) — coleta incremental
 - Tier 3 LLM no parser (após corpus mostrar acerto baixo) — não bloqueia
-- Sprint 3 C: Email via SES (canal redundante) — adiado, push cobre 95%+
+- Migração futura para AWS SES (se precisar enviar pra clientes externos com volume alto): trocar 1 chamada em `enviarEmail()` no `Lembretes.gs`
 
 ---
 

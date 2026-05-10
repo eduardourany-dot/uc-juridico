@@ -305,6 +305,134 @@ function enviarFcmPush(token, title, body, data) {
 }
 
 // =====================================================================
+// Email — Sprint 3 Fase C (canal redundante via Gmail Workspace)
+// =====================================================================
+// Usa MailApp.sendEmail (Apps Script built-in) — sai como a conta logada
+// (eduardourany@uranydecastro.com.br Workspace), 2000 emails/dia.
+// DKIM/SPF/DMARC já configurados pelo Google Workspace pra uranydecastro.adv.br.
+//
+// Para migrar pra AWS SES no futuro: trocar a chamada em enviarEmail() por
+// enviarEmailSES() (criar essa função com UrlFetchApp.fetch). Nada mais muda
+// no resto do código.
+
+// Marcos em que email é enviado (push é enviado em TODOS os marcos sempre).
+// Email é redundância pros marcos críticos onde o push pode ser perdido.
+const EMAIL_MARCOS = ['T-1', 'T-0', 'T+1'];
+
+/**
+ * Abstração de provider. Hoje: Gmail (MailApp). Amanhã: SES, se precisar.
+ * Retorna { ok, error? }.
+ */
+function enviarEmail(destinatario, assunto, corpoHtml) {
+  return enviarEmailGmail(destinatario, assunto, corpoHtml);
+  // Pra migrar pra SES quando precisar:
+  // return enviarEmailSES(destinatario, assunto, corpoHtml);
+}
+
+function enviarEmailGmail(destinatario, assunto, corpoHtml) {
+  try {
+    MailApp.sendEmail({
+      to: destinatario,
+      subject: assunto,
+      htmlBody: corpoHtml,
+      name: 'UC Jurídico — Prazos',
+      replyTo: 'eduardourany@uranydecastro.com.br',
+      noReply: false
+    });
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+}
+
+/**
+ * Monta { assunto, html } pro email de lembrete. HTML inline-styled
+ * (clientes de email não respeitam CSS externo).
+ */
+function _montarEmailLembrete(marco, prazo, processo) {
+  const labels = {
+    'T-7': 'Prazo em até 7 dias',
+    'T-3': 'Prazo em 3 dias',
+    'T-2': 'Prazo em 2 dias',
+    'T-1': '🚨 PRAZO AMANHÃ',
+    'T-0': '🚨🚨 PRAZO HOJE',
+    'T+1': '✗ PRAZO VENCIDO ONTEM'
+  };
+  const cores = {
+    'T-7': '#4a7c4a', 'T-3': '#b87f1c', 'T-2': '#b87f1c',
+    'T-1': '#a8472d', 'T-0': '#a8472d', 'T+1': '#a8472d'
+  };
+  const dl = (typeof prazo.deadlineDate === 'string')
+    ? prazo.deadlineDate.slice(0,10)
+    : new Date(prazo.deadlineDate).toISOString().slice(0,10);
+  const url = 'https://eduardourany-dot.github.io/uc-juridico/#process/' + processo._docId;
+
+  const titulo = labels[marco] || marco;
+  const cor = cores[marco] || '#6b6b68';
+  const assunto = '[' + titulo.replace(/[🚨✗]/g, '').trim() + '] ' + (prazo.description || prazo.type || 'Prazo');
+
+  const html = `
+    <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 0 auto; background: #fafaf7; padding: 24px; border-radius: 8px; border: 1px solid #e8e3d4;">
+      <div style="border-left: 4px solid ${cor}; padding-left: 16px; margin-bottom: 20px;">
+        <h1 style="margin: 0 0 6px; font-size: 22px; color: ${cor}; font-weight: 600;">${_escapeEmail(titulo)}</h1>
+        <p style="margin: 0; color: #1f1f1f; font-size: 15px; font-weight: 500;">${_escapeEmail(prazo.description || prazo.type || 'Prazo')}</p>
+      </div>
+
+      <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px; font-size: 14px;">
+        <tr><td style="padding: 6px 0; color: #6b6b68; width: 130px;">Vencimento:</td><td style="padding: 6px 0; font-weight: 600; color: #1f1f1f;">${_escapeEmail(dl)}</td></tr>
+        ${processo.client ? `<tr><td style="padding: 6px 0; color: #6b6b68;">Cliente:</td><td style="padding: 6px 0;">${_escapeEmail(processo.client)}</td></tr>` : ''}
+        ${(processo.cnj || processo.name) ? `<tr><td style="padding: 6px 0; color: #6b6b68;">Processo:</td><td style="padding: 6px 0;">${_escapeEmail(processo.cnj || processo.name)}</td></tr>` : ''}
+        ${prazo.tribunal && prazo.tribunal !== 'NACIONAL' ? `<tr><td style="padding: 6px 0; color: #6b6b68;">Tribunal:</td><td style="padding: 6px 0;">${_escapeEmail(prazo.tribunal)}</td></tr>` : ''}
+        ${prazo.daysAllowed ? `<tr><td style="padding: 6px 0; color: #6b6b68;">Prazo:</td><td style="padding: 6px 0;">${prazo.daysAllowed} dias ${prazo.unidade === 'CORRIDOS' ? 'corridos' : 'úteis'}${prazo.emDobro ? ' (em dobro)' : ''}</td></tr>` : ''}
+        ${prazo.diarioCalculo ? `<tr><td style="padding: 6px 0; color: #6b6b68; vertical-align: top;">Cálculo:</td><td style="padding: 6px 0; color: #6b6b68; font-size: 12px;">${_escapeEmail(prazo.diarioCalculo)}</td></tr>` : ''}
+      </table>
+
+      <a href="${url}" style="display: inline-block; background: #8a6f3d; color: white; padding: 12px 24px; text-decoration: none; border-radius: 4px; font-weight: 600; font-size: 14px;">Abrir prazo no UC Jurídico →</a>
+
+      <p style="color: #6b6b68; font-size: 12px; margin-top: 28px; padding-top: 16px; border-top: 1px solid #e8e3d4;">
+        Você está recebendo este email porque é destinatário deste prazo no UC Jurídico (titular, suplente ou sócio padrão).
+        Para parar de receber sobre este prazo, marque-o como cumprido no app com o número de protocolo.
+      </p>
+
+      <p style="color: #9b9b96; font-size: 11px; margin-top: 12px; text-align: center;">
+        UC Jurídico · Urany de Castro Advocacia · 30 anos
+      </p>
+    </div>
+  `;
+
+  return { assunto, html };
+}
+
+function _escapeEmail(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+/**
+ * Teste manual — envia email de exemplo. Cole o destinatário na constante.
+ */
+function _testarEmailEnvio() {
+  const destinatario = 'eduardourany@uranydecastro.com.br';
+  const prazoFake = {
+    description: '[TESTE] Contestação · Vara cível',
+    deadlineDate: new Date(Date.now() + 24*3600*1000).toISOString(),
+    daysAllowed: 15, unidade: 'UTEIS', emDobro: false, tribunal: 'TJGO',
+    diarioCalculo: 'Publicado 09/05/2026 (sex). Marco inicial 12/05/2026 (seg). Prazo: 15 dias úteis. Data fatal: 02/06/2026.'
+  };
+  const procFake = {
+    client: 'Cliente Teste',
+    cnj: '0000000-00.0000.0.00.0000',
+    name: 'Processo Teste',
+    _docId: 'teste123'
+  };
+  const conteudo = _montarEmailLembrete('T-1', prazoFake, procFake);
+  Logger.log('Assunto: ' + conteudo.assunto);
+  Logger.log('Enviando para: ' + destinatario);
+  const r = enviarEmail(destinatario, conteudo.assunto, conteudo.html);
+  Logger.log(JSON.stringify(r));
+}
+
+// =====================================================================
 // Cron — varre prazos e envia lembretes
 // =====================================================================
 
@@ -414,43 +542,69 @@ function cron_lembretesDePrazo() {
     for (const nome of destinatariosNomes) {
       const email = NOME_EMAIL_MAP[nome];
       if (!email) continue;
-      if (notificado[marco][email]) continue;  // anti-spam
+      if (notificado[marco][email]) continue;  // anti-spam (por marco/email)
 
+      let pushOk = false, emailOk = false;
       const tokenInfo = fcmTokens[email];
-      if (!tokenInfo || !tokenInfo.token) continue;
+      const enviarEmailNesteMarco = EMAIL_MARCOS.indexOf(marco) >= 0;
 
-      const title = MARCO_LABELS[marco] || ('Prazo ' + marco);
-      const body = (d.description || d.type || 'Prazo') + ' · vence ' +
-        (typeof d.deadlineDate === 'string' ? d.deadlineDate.slice(0,10) : new Date(d.deadlineDate).toISOString().slice(0,10));
-      const url = 'https://eduardourany-dot.github.io/uc-juridico/#process/' + proc._docId;
-      const requireInteraction = ['T-1','T-0','T+1'].indexOf(marco) >= 0 ? 'true' : 'false';
-
-      processados++;
-      try {
-        const r = enviarFcmPush(tokenInfo.token, title, body, {
-          tag: 'prazo-' + d._docId + '-' + marco,
-          url: url,
-          requireInteraction: requireInteraction,
-          processId: proc._docId,
-          prazoId: d._docId,
-          marco: marco
-        });
-        if (r.ok) {
-          enviados++;
-          notificado[marco][email] = Date.now();
-          alterado = true;
-        } else {
-          erros++;
-          Logger.log('FCM falha pra ' + email + ' marco ' + marco + ': ' + r.code + ' ' + r.response);
-          // Token inválido → remove pra próxima rodada e re-registro do client
-          if (r.code === 404 || (r.code === 400 && /UNREGISTERED|INVALID_ARGUMENT|registration/i.test(r.response))) {
-            delete fcmTokens[email];
-            tokensRemovidos = true;
+      // ---------- Canal 1: Push FCM (todos os marcos, se tem token) ----------
+      if (tokenInfo && tokenInfo.token) {
+        processados++;
+        try {
+          const title = MARCO_LABELS[marco] || ('Prazo ' + marco);
+          const body = (d.description || d.type || 'Prazo') + ' · vence ' +
+            (typeof d.deadlineDate === 'string' ? d.deadlineDate.slice(0,10) : new Date(d.deadlineDate).toISOString().slice(0,10));
+          const url = 'https://eduardourany-dot.github.io/uc-juridico/#process/' + proc._docId;
+          const requireInteraction = ['T-1','T-0','T+1'].indexOf(marco) >= 0 ? 'true' : 'false';
+          const r = enviarFcmPush(tokenInfo.token, title, body, {
+            tag: 'prazo-' + d._docId + '-' + marco,
+            url: url,
+            requireInteraction: requireInteraction,
+            processId: proc._docId,
+            prazoId: d._docId,
+            marco: marco
+          });
+          if (r.ok) {
+            pushOk = true;
+          } else {
+            erros++;
+            Logger.log('FCM falha pra ' + email + ' marco ' + marco + ': ' + r.code + ' ' + r.response);
+            if (r.code === 404 || (r.code === 400 && /UNREGISTERED|INVALID_ARGUMENT|registration/i.test(r.response))) {
+              delete fcmTokens[email];
+              tokensRemovidos = true;
+            }
           }
+        } catch (e) {
+          erros++;
+          Logger.log('FCM exceção para ' + email + ' marco ' + marco + ': ' + e.message);
         }
-      } catch (e) {
-        erros++;
-        Logger.log('FCM exceção para ' + email + ' marco ' + marco + ': ' + e.message);
+      }
+
+      // ---------- Canal 2: Email Gmail ----------
+      // Envia email se: marco crítico (T-1/T-0/T+1) OU push falhou/sem token (fallback).
+      const precisaEmail = enviarEmailNesteMarco || (!pushOk && !tokenInfo);
+      if (precisaEmail) {
+        try {
+          const conteudo = _montarEmailLembrete(marco, d, proc);
+          const r = enviarEmail(email, conteudo.assunto, conteudo.html);
+          if (r.ok) {
+            emailOk = true;
+          } else {
+            erros++;
+            Logger.log('Email falha pra ' + email + ' marco ' + marco + ': ' + r.error);
+          }
+        } catch (e) {
+          erros++;
+          Logger.log('Email exceção para ' + email + ' marco ' + marco + ': ' + e.message);
+        }
+      }
+
+      // Anti-spam: marca notificado se ALGUM canal funcionou
+      if (pushOk || emailOk) {
+        notificado[marco][email] = { at: Date.now(), push: pushOk, email: emailOk };
+        alterado = true;
+        enviados++;
       }
     }
 
@@ -569,6 +723,7 @@ function _previewLembretesDePrazo() {
   Logger.log('Janela: ' + janelaInicio.slice(0,10) + ' a ' + janelaFim.slice(0,10) + ' · ' + prazos.length + ' prazos · ' + processIdsUnicos.length + ' processos');
 
   const linhas = [];
+  let totalPush = 0, totalEmail = 0;
   for (const d of prazos) {
     const marco = _marcoDoPrazo(d, todayMs);
     if (!marco) continue;
@@ -580,19 +735,24 @@ function _previewLembretesDePrazo() {
     const destEmails = destinatariosNomes.map(n => NOME_EMAIL_MAP[n]).filter(Boolean);
     const notificado = d.notificado || {};
     const pendentes = destEmails.filter(e => !(notificado[marco] && notificado[marco][e]));
-    const semToken = pendentes.filter(e => !(fcmTokens[e] && fcmTokens[e].token));
-    const enviarParaEmails = pendentes.filter(e => fcmTokens[e] && fcmTokens[e].token);
     if (pendentes.length === 0) continue;
+
+    const enviarEmailNesteMarco = EMAIL_MARCOS.indexOf(marco) >= 0;
+    const enviarPush = pendentes.filter(e => fcmTokens[e] && fcmTokens[e].token);
+    const enviarEmail = pendentes.filter(e => enviarEmailNesteMarco || !(fcmTokens[e] && fcmTokens[e].token));
+
+    totalPush += enviarPush.length;
+    totalEmail += enviarEmail.length;
+
     linhas.push({
       desc: (d.description || d.type || '').slice(0, 50),
       marco: marco,
       processo: (proc.name || '').slice(0, 40),
-      destinatarios: destEmails.join(', '),
-      enviar_para: enviarParaEmails.join(', ') || '—',
-      sem_token: semToken.join(', ') || '—'
+      push: enviarPush.join(', ') || '—',
+      email: enviarEmail.join(', ') || '—'
     });
   }
   Logger.log('Preview (sem enviar):');
   Logger.log(JSON.stringify(linhas, null, 2));
-  Logger.log('Total que seria enviado: ' + linhas.reduce((s, l) => s + (l.enviar_para === '—' ? 0 : l.enviar_para.split(', ').length), 0));
+  Logger.log('Total push: ' + totalPush + ' · Total email: ' + totalEmail);
 }

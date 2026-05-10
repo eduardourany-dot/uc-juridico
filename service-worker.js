@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.14.2 (Saneamento: dead libs removidas + INSTALACAO reescrito)
-const CACHE_NAME = 'uc-juridico-v6-14-2';
+// Service Worker — UC Jurídico v6.15.0 (Sprint 3 C: email Gmail Workspace nos marcos críticos)
+const CACHE_NAME = 'uc-juridico-v6-15-0';
 const APP_SHELL = [
   './',
   './index.html',
