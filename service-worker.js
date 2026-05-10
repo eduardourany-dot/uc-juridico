@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.23.0 (Sprint Cli.4: Comunicações com cliente + follow-ups)
-const CACHE_NAME = 'uc-juridico-v6-23-0';
+// Service Worker — UC Jurídico v6.23.1 (hotfix: dashboard cliente resiliente quando rules de comunicações não deployadas)
+const CACHE_NAME = 'uc-juridico-v6-23-1';
 const APP_SHELL = [
   './',
   './index.html',
