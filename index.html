@@ -288,7 +288,7 @@ body{background:var(--uc-paper);color:var(--uc-graphite);font-size:15px;-webkit-
         <span id="themeQuickToggleLabel">☀ Claro</span>
       </button>
       <p class="smallcaps font-serif" style="margin:0 0 4px;">Urany de Castro · 30 anos</p>
-      <p style="margin:0;">100% local · v6.35.0</p>
+      <p style="margin:0;">100% local · v6.36.0</p>
     </div>
   </aside>
 
@@ -863,6 +863,10 @@ async function renderDashboard() {
   const deadlines = await DB.getAllDeadlines();
   let compromissosAll = [];
   try { compromissosAll = await DB.getAllCompromissos(); } catch (e) { console.warn('compromissos não disponíveis no dashboard', e); }
+  let comunicacoesAll = [];
+  try { comunicacoesAll = DB.getAllComunicacoes ? await DB.getAllComunicacoes() : []; } catch (e) { /* ok */ }
+  let honorariosAll = [];
+  try { honorariosAll = await DB.getAllHonorarios(); } catch (e) { /* ok */ }
   const activeDeadlines = deadlines.filter(d => prazoEstaAtivo(d));
   const today = new Date(); today.setHours(0,0,0,0);
   const urgentDeadlines = activeDeadlines.filter(d => {
@@ -889,6 +893,70 @@ async function renderDashboard() {
   const daysSinceBackup = lastBackup ? Math.floor((Date.now() - lastBackup) / 86400000) : 999;
   const showBackupReminder = state.settings.backupReminder && processes.length > 0 && daysSinceBackup >= 7;
 
+  // ====== "Minhas tarefas hoje" — personalizado pelo advogado logado (v6.36) ======
+  const me = (window.UC_Auth?.getUser?.() || {}).email || '';
+  const meuNome = defaultAdvogado(me) || '';
+  const hojeISO = today.toISOString().slice(0, 10);
+  const amanha = new Date(today.getTime() + 86400000);
+  const amanhaMs = amanha.getTime();
+  const procsById = {}; processes.forEach(p => procsById[p.id] = p);
+
+  // Filtro: prazo onde sou titular (advogadoResponsavel do processo)
+  const meusPrazosAtivos = activeDeadlines.filter(d => {
+    const proc = procsById[d.processId];
+    return proc?.advogadoResponsavel === meuNome;
+  });
+
+  const prazosVencidos = meusPrazosAtivos.filter(d => new Date(d.deadlineDate) < today);
+  const prazosHoje = meusPrazosAtivos.filter(d => {
+    const dl = new Date(d.deadlineDate); dl.setHours(0,0,0,0);
+    return dl.getTime() === today.getTime();
+  });
+  const prazosAmanha = meusPrazosAtivos.filter(d => {
+    const dl = new Date(d.deadlineDate); dl.setHours(0,0,0,0);
+    return dl.getTime() === amanhaMs;
+  });
+
+  // Compromissos: sou responsável ou estou em participantes
+  const compsHoje = (compromissosAll || []).filter(c => {
+    if (c.status === 'cancelado' || c.status === 'realizado') return false;
+    if (!c.dataHoraInicio) return false;
+    if (c.responsavel !== meuNome && !(c.participantes || []).includes(meuNome)) return false;
+    return c.dataHoraInicio.slice(0, 10) === hojeISO;
+  }).sort((a, b) => (a.dataHoraInicio || '').localeCompare(b.dataHoraInicio || ''));
+  const compsAmanha = (compromissosAll || []).filter(c => {
+    if (c.status === 'cancelado' || c.status === 'realizado') return false;
+    if (!c.dataHoraInicio) return false;
+    if (c.responsavel !== meuNome && !(c.participantes || []).includes(meuNome)) return false;
+    return c.dataHoraInicio.slice(0, 10) === amanha.toISOString().slice(0, 10);
+  }).sort((a, b) => (a.dataHoraInicio || '').localeCompare(b.dataHoraInicio || ''));
+
+  // Follow-ups vencidos: próxima ação não-feita com data ≤ hoje (qualquer advogado pode ver)
+  const followUpsVencidos = (comunicacoesAll || []).filter(c =>
+    c.proximaAcao && !c.proximaAcaoFeita && c.proximaAcaoData && c.proximaAcaoData <= hojeISO
+  ).sort((a, b) => (a.proximaAcaoData || '').localeCompare(b.proximaAcaoData || ''));
+
+  // Parcelas de honorário vencendo nos próximos 3 dias (que coordeno = processo onde sou titular)
+  const parcelasProximas = [];
+  (honorariosAll || []).forEach(h => {
+    (h.parcelas || []).forEach(p => {
+      if (p.status === 'pago') return;
+      if (!p.vencimento) return;
+      const venc = new Date(p.vencimento + 'T12:00:00');
+      const days = Math.ceil((venc - today) / 86400000);
+      if (days < -7 || days > 3) return;  // janela: vencidos até 7d ou próximos 3d
+      // Filtra: alguma dos processos cobertos é meu (titular)?
+      const procsCob = (h.processosCobertos || []).concat(h.processoId ? [h.processoId] : []);
+      const ehMeu = procsCob.some(pid => procsById[pid]?.advogadoResponsavel === meuNome);
+      if (!ehMeu) return;
+      parcelasProximas.push({ honorario: h, parcela: p, days });
+    });
+  });
+  parcelasProximas.sort((a, b) => a.days - b.days);
+
+  const totalTarefas = prazosVencidos.length + prazosHoje.length + prazosAmanha.length
+    + compsHoje.length + compsAmanha.length + followUpsVencidos.length + parcelasProximas.length;
+
   $('appContent').innerHTML = `
     <div class="page-header">
       <div>
@@ -910,6 +978,145 @@ async function renderDashboard() {
           <p style="font-size: 12px; margin: 2px 0 0; color: var(--uc-graphite);">Faz ${daysSinceBackup === 999 ? 'muito tempo' : daysSinceBackup + ' dias'} desde o último backup. Os dados estão apenas neste dispositivo.</p>
         </div>
         <button class="btn btn-secondary btn-sm" onclick="exportBackup()">Fazer backup</button>
+      </div>
+    ` : ''}
+
+    ${meuNome ? `
+      <div class="card mb-6" style="border-left: 3px solid ${prazosVencidos.length > 0 || compsHoje.length > 0 ? 'var(--uc-red)' : 'var(--uc-gold)'};">
+        <div class="flex justify-between items-center mb-3" style="flex-wrap: wrap; gap: 8px;">
+          <h2 class="font-serif text-lg font-semibold smallcaps" style="color: var(--uc-black); margin: 0;">
+            ✓ Minhas tarefas · ${escapeHtml(meuNome.split(' ')[0])}
+            ${totalTarefas > 0 ? `<span class="badge badge-red" style="font-size:10px; margin-left:8px;">${totalTarefas}</span>` : ''}
+          </h2>
+          <a class="text-sm" style="color: var(--uc-gold); cursor: pointer;" onclick="navigate('equipe')">Ver indicadores completos →</a>
+        </div>
+
+        ${totalTarefas === 0 ? `
+          <div style="padding: 20px; text-align: center;">
+            <p style="font-size: 32px; margin: 0 0 8px;">✓</p>
+            <p style="font-weight: 600; color: var(--uc-green); margin: 0 0 4px;">Tudo em dia!</p>
+            <p class="help-text" style="margin: 0;">Sem prazos urgentes, compromissos ou follow-ups pendentes pra você hoje.</p>
+          </div>
+        ` : `
+          <div class="grid gap-3" style="grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));">
+
+            ${prazosVencidos.length > 0 ? `
+              <div style="background: var(--uc-red-soft); border-radius: 6px; padding: 10px;">
+                <p class="text-xs smallcaps" style="color: var(--uc-red); font-weight: 600; margin: 0 0 6px;">⚠ Prazos vencidos · ${prazosVencidos.length}</p>
+                ${prazosVencidos.slice(0, 5).map(d => {
+                  const proc = procsById[d.processId];
+                  const dl = new Date(d.deadlineDate); dl.setHours(0,0,0,0);
+                  const dias = Math.abs(Math.ceil((dl - today) / 86400000));
+                  return `
+                    <div style="padding: 6px 0; border-bottom: 1px solid rgba(168, 71, 45, 0.2); font-size: 12px;">
+                      <div style="display: flex; justify-content: space-between; gap: 6px;">
+                        <span style="color: var(--uc-red); font-weight: 500; flex: 1; min-width: 0;">${escapeHtml((d.description || d.type || 'Prazo').slice(0, 40))}</span>
+                        <span class="badge badge-red" style="font-size: 9px;">há ${dias}d</span>
+                      </div>
+                      <div style="font-size: 11px; color: var(--uc-warm-gray); margin-top: 2px;">
+                        ${escapeHtml((proc?.name || '—').slice(0, 28))}
+                        <button class="btn btn-ghost btn-sm" onclick="abrirModalCumprimento('${d.id}')" title="Cumprir" style="padding: 0 6px; font-size: 11px; margin-left: 6px;">✓</button>
+                      </div>
+                    </div>
+                  `;
+                }).join('')}
+                ${prazosVencidos.length > 5 ? `<p style="font-size: 11px; color: var(--uc-warm-gray); margin: 6px 0 0;">+${prazosVencidos.length - 5} mais — ver em <a onclick="navigate('equipe')" style="color: var(--uc-gold); cursor: pointer;">/equipe</a></p>` : ''}
+              </div>
+            ` : ''}
+
+            ${prazosHoje.length > 0 ? `
+              <div style="background: var(--uc-red-soft); border-radius: 6px; padding: 10px;">
+                <p class="text-xs smallcaps" style="color: var(--uc-red); font-weight: 600; margin: 0 0 6px;">🚨 Prazos HOJE · ${prazosHoje.length}</p>
+                ${prazosHoje.map(d => {
+                  const proc = procsById[d.processId];
+                  return `
+                    <div style="padding: 6px 0; border-bottom: 1px solid rgba(168, 71, 45, 0.2); font-size: 12px; cursor: pointer;" onclick="${proc ? `navigate('process', { currentProcessId: '${proc.id}' })` : ''}">
+                      <strong style="color: var(--uc-red);">${escapeHtml((d.description || d.type || 'Prazo').slice(0, 42))}</strong>
+                      <div style="font-size: 11px; color: var(--uc-warm-gray); margin-top: 2px;">${escapeHtml((proc?.name || '—').slice(0, 32))}${proc?.cnj ? ' · ' + escapeHtml(proc.cnj.slice(0, 25)) : ''}</div>
+                    </div>
+                  `;
+                }).join('')}
+              </div>
+            ` : ''}
+
+            ${prazosAmanha.length > 0 ? `
+              <div style="background: var(--uc-amber-soft); border-radius: 6px; padding: 10px;">
+                <p class="text-xs smallcaps" style="color: var(--uc-amber); font-weight: 600; margin: 0 0 6px;">⏰ Prazos amanhã · ${prazosAmanha.length}</p>
+                ${prazosAmanha.map(d => {
+                  const proc = procsById[d.processId];
+                  return `
+                    <div style="padding: 6px 0; border-bottom: 1px solid rgba(184, 127, 28, 0.2); font-size: 12px; cursor: pointer;" onclick="${proc ? `navigate('process', { currentProcessId: '${proc.id}' })` : ''}">
+                      <strong>${escapeHtml((d.description || d.type || 'Prazo').slice(0, 42))}</strong>
+                      <div style="font-size: 11px; color: var(--uc-warm-gray); margin-top: 2px;">${escapeHtml((proc?.name || '—').slice(0, 32))}</div>
+                    </div>
+                  `;
+                }).join('')}
+              </div>
+            ` : ''}
+
+            ${compsHoje.length > 0 ? `
+              <div style="background: var(--uc-cream); border-left: 3px solid var(--uc-gold); border-radius: 6px; padding: 10px;">
+                <p class="text-xs smallcaps" style="color: var(--uc-gold); font-weight: 600; margin: 0 0 6px;">📅 Compromissos HOJE · ${compsHoje.length}</p>
+                ${compsHoje.map(c => {
+                  const meta = _agTipoMeta(c.tipo);
+                  const hora = c.dataHoraInicio ? new Date(c.dataHoraInicio).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '';
+                  return `
+                    <div style="padding: 6px 0; border-bottom: 1px solid var(--uc-line-soft); font-size: 12px; cursor: pointer;" onclick="navigate('agenda')">
+                      <span style="color: ${meta.cor};">${meta.icon}</span>
+                      <strong>${escapeHtml((c.titulo || meta.label).slice(0, 38))}</strong>
+                      <div style="font-size: 11px; color: var(--uc-warm-gray); margin-top: 2px;">${hora}${c.local ? ' · ' + escapeHtml(c.local.slice(0, 30)) : ''}</div>
+                    </div>
+                  `;
+                }).join('')}
+              </div>
+            ` : ''}
+
+            ${compsAmanha.length > 0 ? `
+              <div style="background: var(--uc-cream); border-radius: 6px; padding: 10px;">
+                <p class="text-xs smallcaps" style="color: var(--uc-warm-gray); font-weight: 600; margin: 0 0 6px;">📅 Compromissos amanhã · ${compsAmanha.length}</p>
+                ${compsAmanha.map(c => {
+                  const meta = _agTipoMeta(c.tipo);
+                  const hora = c.dataHoraInicio ? new Date(c.dataHoraInicio).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '';
+                  return `
+                    <div style="padding: 4px 0; font-size: 12px; cursor: pointer;" onclick="navigate('agenda')">
+                      <span style="color: ${meta.cor};">${meta.icon}</span>
+                      <strong>${escapeHtml((c.titulo || meta.label).slice(0, 38))}</strong>
+                      <span style="color: var(--uc-warm-gray); margin-left: 6px; font-size: 11px;">${hora}</span>
+                    </div>
+                  `;
+                }).join('')}
+              </div>
+            ` : ''}
+
+            ${followUpsVencidos.length > 0 ? `
+              <div style="background: var(--uc-amber-soft); border-radius: 6px; padding: 10px;">
+                <p class="text-xs smallcaps" style="color: var(--uc-amber); font-weight: 600; margin: 0 0 6px;">🔔 Follow-ups pendentes · ${followUpsVencidos.length}</p>
+                ${followUpsVencidos.slice(0, 5).map(c => `
+                  <div style="padding: 4px 0; font-size: 12px; cursor: pointer;" onclick="navigate('clienteDetalhe', { currentClienteId: '${c.clienteId}' })">
+                    <strong>${escapeHtml((c.proximaAcao || '').slice(0, 50))}</strong>
+                    <div style="font-size: 11px; color: var(--uc-warm-gray); margin-top: 2px;">desde ${escapeHtml((c.proximaAcaoData || '').slice(0, 10))}</div>
+                  </div>
+                `).join('')}
+                ${followUpsVencidos.length > 5 ? `<p style="font-size: 11px; color: var(--uc-warm-gray); margin: 6px 0 0;">+${followUpsVencidos.length - 5} mais</p>` : ''}
+              </div>
+            ` : ''}
+
+            ${parcelasProximas.length > 0 ? `
+              <div style="background: var(--uc-cream); border-radius: 6px; padding: 10px;">
+                <p class="text-xs smallcaps" style="color: var(--uc-warm-gray); font-weight: 600; margin: 0 0 6px;">💰 Parcelas vencendo · ${parcelasProximas.length}</p>
+                ${parcelasProximas.slice(0, 5).map(({ honorario, parcela, days }) => `
+                  <div style="padding: 4px 0; font-size: 12px; cursor: pointer;" onclick="navigate('clienteDetalhe', { currentClienteId: '${honorario.clienteId}' })">
+                    <strong>${escapeHtml((honorario.clienteNome || '—').slice(0, 32))}</strong> · parc ${parcela.numero}
+                    <div style="font-size: 11px; color: var(--uc-warm-gray); margin-top: 2px;">
+                      ${brl(parcela.valor)} · ${days < 0 ? 'vencida há ' + Math.abs(days) + 'd' : days === 0 ? 'HOJE' : 'em ' + days + 'd'}
+                    </div>
+                  </div>
+                `).join('')}
+              </div>
+            ` : ''}
+
+          </div>
+        `}
       </div>
     ` : ''}
 

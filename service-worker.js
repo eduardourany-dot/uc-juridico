@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.35.0 (Petições Pet.3: proxy Apps Script → Claude API + botão "Gerar com IA" no processo)
-const CACHE_NAME = 'uc-juridico-v6-35-0';
+// Service Worker — UC Jurídico v6.36.0 (Dashboard "Minhas tarefas hoje": prazos vencidos/hoje/amanhã + compromissos + follow-ups + parcelas)
+const CACHE_NAME = 'uc-juridico-v6-36-0';
 const APP_SHELL = [
   './',
   './index.html',
