@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.25.0 (Sprint Agenda: compromissos com push/email T-1 e T-0 via cron Apps Script)
-const CACHE_NAME = 'uc-juridico-v6-25-0';
+// Service Worker — UC Jurídico v6.25.1 (Agenda consolidada: prazos ativos aparecem como overlay read-only na rota /agenda)
+const CACHE_NAME = 'uc-juridico-v6-25-1';
 const APP_SHELL = [
   './',
   './index.html',

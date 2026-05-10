@@ -273,7 +273,7 @@ body{background:var(--uc-paper);color:var(--uc-graphite);font-size:15px;-webkit-
 
     <div style="margin-top:auto;padding:16px 20px;border-top:1px solid var(--uc-line-soft);font-size:11px;color:var(--uc-warm-gray);text-align:center;">
       <p class="smallcaps font-serif" style="margin:0 0 4px;">Urany de Castro · 30 anos</p>
-      <p style="margin:0;">100% local · v6.25.0</p>
+      <p style="margin:0;">100% local · v6.25.1</p>
     </div>
   </aside>
 
@@ -7926,8 +7926,8 @@ function _marcoDoCompromisso(c, hoje) {
 }
 
 async function renderAgenda() {
-  const [compromissos, processos, clientes] = await Promise.all([
-    DB.getAllCompromissos(), DB.getAllProcesses(), DB.getAllClientes()
+  const [compromissos, processos, clientes, deadlines] = await Promise.all([
+    DB.getAllCompromissos(), DB.getAllProcesses(), DB.getAllClientes(), DB.getAllDeadlines()
   ]);
   const procById = {}; processos.forEach(p => procById[p.id] = p);
   const cliById = {}; clientes.forEach(c => cliById[c.id] = c);
@@ -7952,9 +7952,11 @@ async function renderAgenda() {
     tipo: 'todos',
     status: 'ativos',  // ativos = exclui cancelado+realizado
     responsavel: '',
-    busca: ''
+    busca: '',
+    incluirPrazos: true   // overlay de prazos ativos (read-only)
   };
   const f = state._agFiltro;
+  if (f.incluirPrazos === undefined) f.incluirPrazos = true;
 
   // Resolve range de datas
   let dataInicioISO = '', dataFimISO = '';
@@ -7990,26 +7992,55 @@ async function renderAgenda() {
   }
   filtrados.sort((a, b) => (a.dataHoraInicio || '').localeCompare(b.dataHoraInicio || ''));
 
+  // ===== Overlay de prazos ativos =====
+  // Read-only: mostra prazo no dia da deadlineDate. Editar/cumprir continua
+  // em /prazos. O filtro "Tipo" só esconde quando o usuário escolhe um
+  // tipo específico de compromisso (não 'todos').
+  let prazosOverlay = [];
+  if (f.incluirPrazos && f.tipo === 'todos') {
+    prazosOverlay = (deadlines || []).filter(d => prazoEstaAtivo(d));
+    if (f.responsavel) prazosOverlay = prazosOverlay.filter(d => d.advogadoResponsavel === f.responsavel);
+    if (dataInicioISO) prazosOverlay = prazosOverlay.filter(d => (d.deadlineDate || '').slice(0, 10) >= dataInicioISO);
+    if (dataFimISO) prazosOverlay = prazosOverlay.filter(d => (d.deadlineDate || '').slice(0, 10) <= dataFimISO);
+    if (f.busca && f.busca.trim()) {
+      const q = f.busca.trim().toLowerCase();
+      prazosOverlay = prazosOverlay.filter(d =>
+        (d.description || '').toLowerCase().includes(q) ||
+        (d.type || '').toLowerCase().includes(q) ||
+        (procById[d.processId]?.name || '').toLowerCase().includes(q) ||
+        (procById[d.processId]?.cnj || '').toLowerCase().includes(q)
+      );
+    }
+  }
+
   // Stats
   const venceram = compromissos.filter(c => {
     if (c.status === 'cancelado' || c.status === 'realizado') return false;
     return new Date(c.dataHoraInicio || 0) < new Date();
   }).length;
 
-  // Agrupa por dia (ISO YYYY-MM-DD)
+  // Agrupa por dia (ISO YYYY-MM-DD) — compromissos + prazos misturados
   const porDia = {};
   for (const c of filtrados) {
     const dia = (c.dataHoraInicio || '').slice(0, 10);
     if (!porDia[dia]) porDia[dia] = [];
-    porDia[dia].push(c);
+    porDia[dia].push({ kind: 'compromisso', item: c, ts: c.dataHoraInicio || '' });
   }
+  for (const d of prazosOverlay) {
+    const dia = (d.deadlineDate || '').slice(0, 10);
+    if (!porDia[dia]) porDia[dia] = [];
+    // Sort key: prazo aparece no fim do dia (sem hora específica)
+    porDia[dia].push({ kind: 'prazo', item: d, ts: dia + 'T23:59:00' });
+  }
+  // Ordenar dentro de cada dia
+  Object.values(porDia).forEach(arr => arr.sort((a, b) => (a.ts || '').localeCompare(b.ts || '')));
   const diasOrdenados = Object.keys(porDia).sort();
 
   $('appContent').innerHTML = `
     <div class="page-header">
       <div>
         <h1 class="page-title"><span class="smallcaps-prefix">Agenda</span></h1>
-        <p class="page-subtitle">${compromissos.length} compromisso(s) · ${proximos7.length} nos próximos 7 dias${venceram > 0 ? ' · <span style="color: var(--uc-red);">⚠ ' + venceram + ' venceu(ram) sem marcação</span>' : ''}</p>
+        <p class="page-subtitle">${compromissos.length} compromisso(s) · ${proximos7.length} nos próximos 7 dias${prazosOverlay.length ? ' · ⏰ ' + prazosOverlay.length + ' prazo(s) na visão' : ''}${venceram > 0 ? ' · <span style="color: var(--uc-red);">⚠ ' + venceram + ' compromisso(s) venceu(ram) sem marcação</span>' : ''}</p>
       </div>
       <button class="btn btn-primary" onclick="novoCompromissoFlow()">+ Novo compromisso</button>
     </div>
@@ -8052,16 +8083,22 @@ async function renderAgenda() {
             ${ADVOGADOS.map(n => `<option value="${escapeHtml(n)}" ${f.responsavel === n ? 'selected' : ''}>${escapeHtml(n.split(' ')[0])} ${escapeHtml(n.split(' ').slice(-1)[0])}</option>`).join('')}
           </select>
         </div>
-        <div style="grid-column: 1 / -1;">
-          <label class="label" style="font-size: 11px; margin-bottom: 4px;">Buscar</label>
-          <input type="text" class="input" value="${escapeHtml(f.busca || '')}" placeholder="Título, local, observações" oninput="_setAgFiltroDebounced('busca', this.value)">
+        <div style="grid-column: 1 / -1; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+          <div style="flex: 1; min-width: 200px;">
+            <label class="label" style="font-size: 11px; margin-bottom: 4px;">Buscar</label>
+            <input type="text" class="input" value="${escapeHtml(f.busca || '')}" placeholder="Título, local, observações" oninput="_setAgFiltroDebounced('busca', this.value)">
+          </div>
+          <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 12px; color: var(--uc-graphite); padding-bottom: 6px; user-select: none;">
+            <input type="checkbox" ${f.incluirPrazos ? 'checked' : ''} onchange="_setAgFiltro('incluirPrazos', this.checked)" style="cursor: pointer;">
+            <span>⏰ Incluir prazos do processo${f.tipo !== 'todos' ? ' <em style="color: var(--uc-warm-gray);">(oculto: filtro de tipo)</em>' : ''}</span>
+          </label>
         </div>
       </div>
     </div>
 
-    ${filtrados.length === 0 ? `
+    ${(filtrados.length === 0 && prazosOverlay.length === 0) ? `
       <div class="empty-state">
-        <p class="empty-state-msg">${compromissos.length === 0 ? 'Nenhum compromisso cadastrado. Use o botão "+ Novo compromisso" para começar.' : 'Nenhum compromisso com esses filtros.'}</p>
+        <p class="empty-state-msg">${compromissos.length === 0 ? 'Nenhum compromisso cadastrado. Use o botão "+ Novo compromisso" para começar.' : 'Nenhum compromisso ou prazo com esses filtros.'}</p>
       </div>
     ` : diasOrdenados.map(dia => {
       const dt = new Date(dia + 'T12:00:00');
@@ -8073,10 +8110,51 @@ async function renderAgenda() {
           <h3 style="font-size: 13px; font-weight: 600; color: ${isHoje ? 'var(--uc-red)' : isPassado ? 'var(--uc-warm-gray)' : 'var(--uc-black)'}; margin: 0 0 8px; text-transform: capitalize;">
             ${isHoje ? '📍 ' : ''}${labelDia}${isHoje ? ' (hoje)' : ''}
           </h3>
-          ${porDia[dia].map(c => _renderCompromissoCard(c, procById, cliById)).join('')}
+          ${porDia[dia].map(entry => entry.kind === 'compromisso'
+            ? _renderCompromissoCard(entry.item, procById, cliById)
+            : _renderPrazoNaAgenda(entry.item, procById, today)
+          ).join('')}
         </div>
       `;
     }).join('')}
+  `;
+}
+
+// Card read-only de prazo dentro da agenda. Editar/cumprir continua em /prazos.
+function _renderPrazoNaAgenda(d, procById, today) {
+  const proc = (d.processId && procById && typeof procById === 'object') ? procById[d.processId] : null;
+  const visual = recomputarStatusVisual(d, today);
+  const dl = new Date(d.deadlineDate);
+  dl.setHours(0,0,0,0);
+  const days = Math.ceil((dl - today) / 86400000);
+  let cor = '#4a7c4a', badgeClass = 'badge-green', label = days + 'd';
+  if (visual === 'expirado') { cor = '#a8472d'; badgeClass = 'badge-red'; label = 'vencido há ' + Math.abs(days) + 'd'; }
+  else if (visual === 'iminente') { cor = '#a8472d'; badgeClass = 'badge-red'; label = days === 0 ? 'HOJE' : 'AMANHÃ'; }
+  else if (visual === 'vincendo') { cor = '#b87f1c'; badgeClass = 'badge-amber'; label = days + 'd'; }
+  else if (visual === 'suspenso') { cor = '#6b6b68'; badgeClass = 'badge-gray'; label = 'suspenso'; }
+  const procLabel = proc ? (proc.cnj || proc.name || 'processo') : '(processo removido)';
+
+  return `
+    <div class="card" style="margin-bottom: 8px; padding: 12px; border-left: 4px solid ${cor}; background: var(--uc-cream);">
+      <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;">
+        <div style="flex: 1; min-width: 0;">
+          <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px; flex-wrap: wrap;">
+            <span style="font-size: 14px;">⏰</span>
+            <span class="badge badge-gray" style="font-size: 9px; background: var(--uc-graphite); color: var(--uc-cream);">PRAZO</span>
+            <strong style="color: var(--uc-black); font-size: 14px;">${escapeHtml(d.description || d.type || 'Prazo')}</strong>
+            <span class="badge ${badgeClass}" style="font-size: 9px;">${label}</span>
+          </div>
+          <div style="font-size: 12px; color: var(--uc-warm-gray);">
+            ${d.advogadoResponsavel ? '👤 ' + escapeHtml(d.advogadoResponsavel.split(' ')[0]) : ''}
+            ${proc ? ` · <a onclick="navigate('process', { currentProcessId: '${proc.id}' })" style="cursor:pointer; color:var(--uc-gold);">${escapeHtml(procLabel)}</a>` : ` · <span style="color: var(--uc-warm-gray);">${escapeHtml(procLabel)}</span>`}
+            · vence ${escapeHtml((d.deadlineDate || '').slice(0, 10))}
+          </div>
+        </div>
+        <div style="display: flex; gap: 2px; flex-shrink: 0;">
+          <button class="btn btn-ghost btn-sm" onclick="navigate('deadlines')" title="Ir para Prazos pra cumprir/editar" style="padding: 2px 6px;">→</button>
+        </div>
+      </div>
+    </div>
   `;
 }
 

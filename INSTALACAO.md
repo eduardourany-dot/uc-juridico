@@ -1,6 +1,6 @@
 # UC Jurídico — Instalação e operação
 
-Versão atual: **v6.25.0**
+Versão atual: **v6.25.1**
 URL pública: https://eduardourany-dot.github.io/uc-juridico/
 Repositório: https://github.com/eduardourany-dot/uc-juridico
 
@@ -210,7 +210,8 @@ Verificar:
 | v6.22 | ✅ entregue | Financeiro A.4 — Recorrências mensais + Balancete por mês/ano + exportações CSV |
 | v6.23 | ✅ entregue | Sprint Cli.4 — Comunicações com cliente + follow-ups |
 | v6.24 | ✅ entregue | Financeiro A.5 — push/email de parcela vencendo via cron Apps Script (reusa Sprint 3) |
-| **v6.25** | ✅ em produção | **Sprint Agenda Unificada** — compromissos (audiência/reunião/diligência/prazo admin) com push+email T-1/T-0, aba no processo, seção no cliente, bloco no dashboard inicial |
+| v6.25.0 | ✅ entregue | Sprint Agenda Unificada — compromissos (audiência/reunião/diligência/prazo admin) com push+email T-1/T-0, aba no processo, seção no cliente, bloco no dashboard inicial |
+| **v6.25.1** | ✅ em produção | **Agenda consolidada** — prazos processuais ativos aparecem como cards read-only na rota `/agenda` (toggle "Incluir prazos do processo"). Cumprimento/edição segue em /prazos. |
 | v6.22+ | planejado | Retomada Financeiro A.4 (Recorrências + Balancete) → A.5 → Agenda unificada |
 | v7.x | planejado | Módulo Petições com Claude API (briefing em [docs/BRIEFING_Peticoes.md](docs/BRIEFING_Peticoes.md)) |
 
