@@ -209,6 +209,45 @@ function _firestoreGet(path) {
 }
 
 /**
+ * Roda uma query estruturada (Firestore :runQuery). Mais eficiente que list
+ * quando só precisamos de docs filtrados por campo (cobra só os retornados).
+ * filters = [{ field, op, value }, ...] — op: GREATER_THAN_OR_EQUAL, etc.
+ * deadlineDate é ISO string — comparação lexicográfica = ordem cronológica.
+ */
+function _firestoreQuery(collectionId, filters, limit) {
+  const accessToken = _getGoogleAccessToken();
+  const filterObjs = filters.map(f => ({
+    fieldFilter: {
+      field: { fieldPath: f.field },
+      op: f.op,
+      value: _firestoreEncode(f.value)
+    }
+  }));
+  const where = filterObjs.length === 1 ? filterObjs[0]
+    : { compositeFilter: { op: 'AND', filters: filterObjs } };
+  const query = {
+    structuredQuery: {
+      from: [{ collectionId: collectionId }],
+      where: where,
+      limit: limit || 1000
+    }
+  };
+  const url = FIRESTORE_BASE + ':runQuery';
+  const resp = UrlFetchApp.fetch(url, {
+    method: 'post',
+    contentType: 'application/json',
+    headers: { Authorization: 'Bearer ' + accessToken },
+    payload: JSON.stringify(query),
+    muteHttpExceptions: true
+  });
+  if (resp.getResponseCode() !== 200) {
+    throw new Error('Firestore runQuery ' + collectionId + ' falhou (' + resp.getResponseCode() + '): ' + resp.getContentText());
+  }
+  const arr = JSON.parse(resp.getContentText());
+  return arr.filter(r => r.document).map(r => _firestoreDecodeDoc(r.document));
+}
+
+/**
  * Atualiza campos específicos de um doc. fieldsObj é objeto JS plano.
  * Usa updateMask pra patch parcial — não toca campos não listados.
  */
@@ -307,29 +346,44 @@ function _rotearDestinatarios(titular, suplente, socio, marco, titularAusente) {
 
 /**
  * Trigger time-driven principal. Idempotente (anti-spam por marco/email).
- * Roda ~30 min — envia, atualiza notificado no Firestore, limpa tokens
- * inválidos.
+ *
+ * Otimizado v6.14.1: usa runQuery filtrando deadlineDate em janela
+ * [hoje-2, hoje+8] dias. Reduz de ~2342 reads/exec (list completo)
+ * pra ~85 reads/exec. A janela cobre todos os marcos T-7..T+1 com folga.
  */
 function cron_lembretesDePrazo() {
   const startTime = Date.now();
   const today = new Date(); today.setHours(0,0,0,0);
   const todayMs = today.getTime();
 
-  // Carrega tudo
-  const prazos = _firestoreList('prazos');
-  const processosArr = _firestoreList('processos');
+  // Janela: 2 dias atrás (cobre T+1) até 8 dias à frente (cobre T-7).
+  // deadlineDate é ISO string — comparação lexicográfica = ordem cronológica.
+  const janelaInicio = new Date(todayMs - 2 * 86400000).toISOString();
+  const janelaFim = new Date(todayMs + 8 * 86400000).toISOString();
+
+  const prazos = _firestoreQuery('prazos', [
+    { field: 'deadlineDate', op: 'GREATER_THAN_OR_EQUAL', value: janelaInicio },
+    { field: 'deadlineDate', op: 'LESS_THAN_OR_EQUAL', value: janelaFim }
+  ], 500);
+
+  // Buscar processos só dos prazos retornados (1 fetch por id único)
+  const processIdsUnicos = [];
+  const seenPid = {};
+  prazos.forEach(d => { if (d.processId && !seenPid[d.processId]) { seenPid[d.processId] = true; processIdsUnicos.push(d.processId); } });
   const processos = {};
-  processosArr.forEach(p => { processos[p._docId] = p; });
+  for (const pid of processIdsUnicos) {
+    try {
+      const proc = _firestoreGet('processos/' + pid);
+      if (proc) processos[pid] = proc;
+    } catch (e) {
+      Logger.log('Falha ao buscar processo ' + pid + ': ' + e.message);
+    }
+  }
 
   const fcmTokensDoc = _firestoreGet('settings/fcmTokens') || {};
-  // Estrutura no Firestore: settings/fcmTokens.value = { 'email@x': { token, ua, lastSeen } }
-  // ou diretamente os emails como keys do doc — depende de como o client salva.
-  // Hoje DB.setSetting salva como { value, updatedAt, updatedBy } no api.js linha 423.
   const fcmTokens = (fcmTokensDoc && fcmTokensDoc.value) || {};
-
   const ausenciasDoc = _firestoreGet('settings/advogadosAusencias') || {};
   const ausencias = (ausenciasDoc && ausenciasDoc.value) || {};
-
   const socioDoc = _firestoreGet('settings/socioPadraoNome') || {};
   const socio = (socioDoc && socioDoc.value) || null;
 
@@ -419,14 +473,15 @@ function cron_lembretesDePrazo() {
   }
 
   const elapsed = Date.now() - startTime;
-  const summary = 'cron_lembretesDePrazo: prazos=' + prazos.length +
+  const summary = 'cron_lembretesDePrazo: prazos_query=' + prazos.length +
+    ' processos_fetch=' + processIdsUnicos.length +
     ' processados=' + processados +
     ' enviados=' + enviados +
     ' erros=' + erros +
     ' ignorados=' + ignorados +
     ' elapsed=' + elapsed + 'ms';
   Logger.log(summary);
-  return { prazos: prazos.length, processados, enviados, erros, ignorados, elapsed };
+  return { prazos: prazos.length, processos_fetch: processIdsUnicos.length, processados, enviados, erros, ignorados, elapsed };
 }
 
 // =====================================================================
@@ -487,10 +542,22 @@ function _previewLembretesDePrazo() {
   // Igual cron mas SEM enviar — útil pra ver o que seria disparado
   const today = new Date(); today.setHours(0,0,0,0);
   const todayMs = today.getTime();
-  const prazos = _firestoreList('prazos');
-  const processosArr = _firestoreList('processos');
+
+  const janelaInicio = new Date(todayMs - 2 * 86400000).toISOString();
+  const janelaFim = new Date(todayMs + 8 * 86400000).toISOString();
+
+  const prazos = _firestoreQuery('prazos', [
+    { field: 'deadlineDate', op: 'GREATER_THAN_OR_EQUAL', value: janelaInicio },
+    { field: 'deadlineDate', op: 'LESS_THAN_OR_EQUAL', value: janelaFim }
+  ], 500);
+
+  const processIdsUnicos = [];
+  const seenPid = {};
+  prazos.forEach(d => { if (d.processId && !seenPid[d.processId]) { seenPid[d.processId] = true; processIdsUnicos.push(d.processId); } });
   const processos = {};
-  processosArr.forEach(p => { processos[p._docId] = p; });
+  for (const pid of processIdsUnicos) {
+    try { const proc = _firestoreGet('processos/' + pid); if (proc) processos[pid] = proc; } catch(_) {}
+  }
 
   const ausenciasDoc = _firestoreGet('settings/advogadosAusencias') || {};
   const ausencias = (ausenciasDoc && ausenciasDoc.value) || {};
@@ -498,6 +565,8 @@ function _previewLembretesDePrazo() {
   const socio = (socioDoc && socioDoc.value) || null;
   const tokensDoc = _firestoreGet('settings/fcmTokens') || {};
   const fcmTokens = (tokensDoc && tokensDoc.value) || {};
+
+  Logger.log('Janela: ' + janelaInicio.slice(0,10) + ' a ' + janelaFim.slice(0,10) + ' · ' + prazos.length + ' prazos · ' + processIdsUnicos.length + ' processos');
 
   const linhas = [];
   for (const d of prazos) {
