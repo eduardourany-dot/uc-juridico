@@ -263,7 +263,7 @@ body{background:var(--uc-paper);color:var(--uc-graphite);font-size:15px;-webkit-
 
     <div style="margin-top:auto;padding:16px 20px;border-top:1px solid var(--uc-line-soft);font-size:11px;color:var(--uc-warm-gray);text-align:center;">
       <p class="smallcaps font-serif" style="margin:0 0 4px;">Urany de Castro · 30 anos</p>
-      <p style="margin:0;">100% local · v6.17.0</p>
+      <p style="margin:0;">100% local · v6.17.1</p>
     </div>
   </aside>
 
@@ -4237,15 +4237,18 @@ async function renderFinanceiro() {
 }
 
 // Calcula valor da fatura aberta de um cartão.
-// Janela do ciclo: do dia de corte (mês passado) até dia de corte (deste mês).
-// MVP: pega transações realizadas no mês corrente. Refinar quando precisar.
+// Em cartão de crédito, toda compra (previsto OU realizado) já ocupou o limite
+// no momento do lançamento — então a fatura inclui ambos os status.
+// Status 'previsto' em cartão = "está na fatura em aberto, ainda não foi paga".
+// Status 'realizado' em cartão = "fatura paga / quitada".
+// Janela do ciclo: do dia 1 do mês ref até último dia (MVP simplificado, sem
+// lógica de corte/vencimento — refinar quando ciclo de fatura for implementado).
 function _calcularFaturaCartao(cartao, transacoes, ref) {
   const refDate = ref || new Date();
-  // Janela: do dia 1 do mês ref até hoje (mais simples, evita lógica de corte)
   const inicioMes = new Date(refDate.getFullYear(), refDate.getMonth(), 1).toISOString().slice(0,10);
   const fimMes = new Date(refDate.getFullYear(), refDate.getMonth()+1, 0).toISOString().slice(0,10);
   return transacoes
-    .filter(t => t.tipoConta === 'cartao' && t.contaId === cartao.id && t.status === 'realizado')
+    .filter(t => t.tipoConta === 'cartao' && t.contaId === cartao.id)
     .filter(t => t.data >= inicioMes && t.data <= fimMes)
     .reduce((s, t) => s + (t.tipo === 'despesa' ? Number(t.valor) : -Number(t.valor)), 0);
 }
@@ -4617,7 +4620,9 @@ async function renderFinCartoes() {
           const limite = Number(c.limite) || 0;
           const pctUso = limite > 0 ? Math.min(100, (fatura / limite * 100)) : 0;
           const corBarra = pctUso >= 80 ? 'var(--uc-red)' : pctUso >= 50 ? 'var(--uc-amber)' : 'var(--uc-green)';
-          const movs = transacoes.filter(t => t.contaId === c.id && t.tipoConta === 'cartao' && t.status === 'realizado').length;
+          const movsCartao = transacoes.filter(t => t.contaId === c.id && t.tipoConta === 'cartao');
+          const movsAbertas = movsCartao.filter(t => t.status === 'previsto').length;
+          const movsPagas = movsCartao.filter(t => t.status === 'realizado').length;
           return `
             <div class="card">
               <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px;">
@@ -4646,7 +4651,9 @@ async function renderFinCartoes() {
                   <span>limite ${brl(limite)}</span>
                 </div>
               </div>
-              <p class="text-xs" style="color: var(--uc-warm-gray); margin: 0;">${movs} despesa(s) no ciclo</p>
+              <p class="text-xs" style="color: var(--uc-warm-gray); margin: 0;">
+                ${movsAbertas + movsPagas} lançamento(s) no ciclo${movsAbertas > 0 ? ` · <span style="color:var(--uc-amber);">${movsAbertas} em aberto</span>` : ''}${movsPagas > 0 ? ` · <span style="color:var(--uc-green);">${movsPagas} pagos</span>` : ''}
+              </p>
             </div>
           `;
         }).join('')}

@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.17.0 (Módulo Financeiro Sprint A.2: cartões + categorias com orçamento + filtros avançados)
-const CACHE_NAME = 'uc-juridico-v6-17-0';
+// Service Worker — UC Jurídico v6.17.1 (fix: fatura do cartão inclui previstas — limite ocupa no lançamento)
+const CACHE_NAME = 'uc-juridico-v6-17-1';
 const APP_SHELL = [
   './',
   './index.html',
