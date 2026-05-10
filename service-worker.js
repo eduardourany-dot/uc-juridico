@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.21.0 (Sprint Cli.3: aba Cliente no processo + dashboard /clientes/{id} + dropdown nos forms)
-const CACHE_NAME = 'uc-juridico-v6-21-0';
+// Service Worker — UC Jurídico v6.22.0 (Sprint Financeiro A.4: Recorrências + Balancete + exportações CSV)
+const CACHE_NAME = 'uc-juridico-v6-22-0';
 const APP_SHELL = [
   './',
   './index.html',

@@ -268,7 +268,7 @@ body{background:var(--uc-paper);color:var(--uc-graphite);font-size:15px;-webkit-
 
     <div style="margin-top:auto;padding:16px 20px;border-top:1px solid var(--uc-line-soft);font-size:11px;color:var(--uc-warm-gray);text-align:center;">
       <p class="smallcaps font-serif" style="margin:0 0 4px;">Urany de Castro · 30 anos</p>
-      <p style="margin:0;">100% local · v6.21.0</p>
+      <p style="margin:0;">100% local · v6.22.0</p>
     </div>
   </aside>
 
@@ -5116,22 +5116,104 @@ async function renderFinanceiro() {
         <p class="page-subtitle">Controle de caixa, bancos e honorários</p>
       </div>
     </div>
-    <div class="tabs">
+    <div class="tabs scroll-thin" style="overflow-x: auto;">
       <button class="tab ${tab === 'visao' ? 'active' : ''}" onclick="setFinTab('visao')">Visão geral</button>
       <button class="tab ${tab === 'transacoes' ? 'active' : ''}" onclick="setFinTab('transacoes')">Transações</button>
       <button class="tab ${tab === 'bancos' ? 'active' : ''}" onclick="setFinTab('bancos')">Bancos</button>
       <button class="tab ${tab === 'cartoes' ? 'active' : ''}" onclick="setFinTab('cartoes')">Cartões</button>
       <button class="tab ${tab === 'honorarios' ? 'active' : ''}" onclick="setFinTab('honorarios')">Honorários</button>
+      <button class="tab ${tab === 'recorrencias' ? 'active' : ''}" onclick="setFinTab('recorrencias')">Recorrências</button>
+      <button class="tab ${tab === 'balancete' ? 'active' : ''}" onclick="setFinTab('balancete')">Balancete</button>
       <button class="tab ${tab === 'categorias' ? 'active' : ''}" onclick="setFinTab('categorias')">Categorias</button>
     </div>
     <div id="finContent"><p style="color: var(--uc-warm-gray);">Carregando…</p></div>
   `;
+  // Geração automática de transações recorrentes (uma vez por sessão na primeira visita ao Financeiro)
+  if (!state._recorrenciasJaGeradas) {
+    state._recorrenciasJaGeradas = true;
+    _gerarTransacoesRecorrentes().catch(e => console.warn('gerar recorrências falhou', e));
+  }
   if (tab === 'visao') return renderFinVisaoGeral();
   if (tab === 'transacoes') return renderFinTransacoes();
   if (tab === 'bancos') return renderFinBancos();
   if (tab === 'cartoes') return renderFinCartoes();
   if (tab === 'honorarios') return renderFinHonorarios();
+  if (tab === 'recorrencias') return renderFinRecorrencias();
+  if (tab === 'balancete') return renderFinBalancete();
   if (tab === 'categorias') return renderFinCategorias();
+}
+
+// === Helpers de recorrências (Sprint A.4) ===
+
+function _ultimoDiaDoMes(year, month) {
+  return new Date(year, month + 1, 0).getDate();
+}
+
+// Calcula próxima data ISO (YYYY-MM-DD) de uma recorrência baseada na
+// última geração e dia do mês configurado. Se dia não existe no mês
+// (ex: 30 em fevereiro), clamp ao último dia do mês.
+function _proximaDataRecorrencia(ultimaGeracao, diaDoMes) {
+  let nextYear, nextMonth;
+  if (!ultimaGeracao) {
+    const hoje = new Date();
+    nextYear = hoje.getFullYear();
+    nextMonth = hoje.getMonth();
+  } else {
+    const ult = new Date(ultimaGeracao + 'T12:00:00');
+    nextYear = ult.getFullYear();
+    nextMonth = ult.getMonth() + 1;
+    if (nextMonth > 11) { nextYear++; nextMonth = 0; }
+  }
+  const ultimoDia = _ultimoDiaDoMes(nextYear, nextMonth);
+  const dia = Math.min(diaDoMes || 1, ultimoDia);
+  const mes = String(nextMonth + 1).padStart(2, '0');
+  const d = String(dia).padStart(2, '0');
+  return `${nextYear}-${mes}-${d}`;
+}
+
+// Gera transações pendentes pra todas as recorrências ativas até hoje.
+// Idempotente: usa rec.ultimaGeracao pra não duplicar.
+// Lançamentos são criados com status 'previsto' — usuário confirma um a um
+// (ou em lote no futuro) na sub-aba Transações.
+async function _gerarTransacoesRecorrentes() {
+  const recs = (await DB.getAllRecorrencias()).filter(r => r.ativo !== false);
+  if (recs.length === 0) return 0;
+  const hojeISO = new Date().toISOString().slice(0, 10);
+  let geradas = 0;
+  for (const rec of recs) {
+    let proxima = _proximaDataRecorrencia(rec.ultimaGeracao, rec.diaDoMes);
+    while (proxima <= hojeISO) {
+      try {
+        await DB.saveTransacao({
+          id: uid(),
+          tipo: rec.tipo || 'despesa',
+          valor: Number(rec.valor) || 0,
+          data: proxima,
+          categoriaId: rec.categoriaId || null,
+          contaId: rec.contaId || null,
+          tipoConta: rec.tipoConta || 'banco',
+          descricao: rec.descricao || '(recorrência sem descrição)',
+          recorrenteId: rec.id,
+          status: 'previsto',
+          createdAt: Date.now()
+        });
+        rec.ultimaGeracao = proxima;
+        geradas++;
+      } catch (e) {
+        console.warn('falha ao gerar transação recorrente', rec.id, proxima, e);
+        break;
+      }
+      proxima = _proximaDataRecorrencia(proxima, rec.diaDoMes);
+    }
+    if (rec.ultimaGeracao) {
+      try { await DB.saveRecorrencia(rec); } catch (e) {}
+    }
+  }
+  if (geradas > 0 && typeof toast === 'function') {
+    toast(`${geradas} transação(ões) recorrente(s) gerada(s)`,
+      'previstas — confirme em Transações conforme caírem', 'info');
+  }
+  return geradas;
 }
 
 // Lê processos cobertos por um honorário, com compat para schema legado
@@ -5475,7 +5557,10 @@ async function renderFinTransacoes() {
         <span style="color: var(--uc-red);">−${brl(somaDespesa)}</span> ·
         saldo do filtro <strong style="color: ${somaReceita - somaDespesa >= 0 ? 'var(--uc-green)' : 'var(--uc-red)'};">${brl(somaReceita - somaDespesa)}</strong>
       </div>
-      <button class="btn btn-primary btn-sm" onclick="novaTransacaoFlow()" ${bancos.length === 0 && cartoes.length === 0 ? 'disabled title="Cadastre um banco primeiro"' : ''}>+ Nova transação</button>
+      <div class="flex gap-2">
+        <button class="btn btn-outline btn-sm" onclick="exportarTransacoesCSV()" ${filtradas.length === 0 ? 'disabled' : ''}>📥 Exportar CSV</button>
+        <button class="btn btn-primary btn-sm" onclick="novaTransacaoFlow()" ${bancos.length === 0 && cartoes.length === 0 ? 'disabled title="Cadastre um banco primeiro"' : ''}>+ Nova transação</button>
+      </div>
     </div>
 
     ${filtradas.length === 0 ? `
@@ -5657,6 +5742,266 @@ async function renderFinCartoes() {
   `;
 }
 
+async function renderFinRecorrencias() {
+  const [recs, categorias, bancos, cartoes, transacoes] = await Promise.all([
+    DB.getAllRecorrencias(), DB.getAllCategoriasFin(),
+    DB.getAllBancos(), DB.getAllCartoes(), DB.getAllTransacoes()
+  ]);
+  const catById = {}; categorias.forEach(c => catById[c.id] = c);
+  const bancoById = {}; bancos.forEach(b => bancoById[b.id] = b);
+  const cartaoById = {}; cartoes.forEach(c => cartaoById[c.id] = c);
+
+  const ativas = recs.filter(r => r.ativo !== false);
+  const inativas = recs.filter(r => r.ativo === false);
+
+  function renderRow(r) {
+    const conta = r.tipoConta === 'cartao' ? cartaoById[r.contaId] : bancoById[r.contaId];
+    const cat = catById[r.categoriaId];
+    const proxima = _proximaDataRecorrencia(r.ultimaGeracao, r.diaDoMes);
+    const transGeradas = transacoes.filter(t => t.recorrenteId === r.id).length;
+    return `
+      <tr style="border-bottom: 1px solid var(--uc-line-soft); ${r.ativo === false ? 'opacity: 0.5;' : ''}">
+        <td style="padding: 8px 6px;"><strong>${escapeHtml(r.descricao || '—')}</strong></td>
+        <td style="padding: 8px 6px;"><span class="badge ${r.tipo === 'receita' ? 'badge-green' : 'badge-red'}" style="font-size: 9px;">${r.tipo}</span></td>
+        <td style="padding: 8px 6px; text-align: right; font-weight: 600;">${brl(r.valor)}</td>
+        <td style="padding: 8px 6px;">${escapeHtml(cat?.nome || '—')}</td>
+        <td style="padding: 8px 6px;">${escapeHtml(conta?.nome || '—')} ${r.tipoConta === 'cartao' ? '<span class="badge badge-gray" style="font-size: 9px;">cartão</span>' : ''}</td>
+        <td style="padding: 8px 6px; text-align: center;">dia ${r.diaDoMes || '—'}</td>
+        <td style="padding: 8px 6px;">${r.ativo === false ? '—' : formatDate(proxima)}</td>
+        <td style="padding: 8px 6px; text-align: center;">${transGeradas}</td>
+        <td style="padding: 8px 6px; text-align: right; white-space: nowrap;">
+          <button class="btn btn-ghost btn-sm" onclick="editarRecorrencia('${r.id}')" title="Editar">✎</button>
+          <button class="btn btn-ghost btn-sm" onclick="alternarRecorrenciaAtiva('${r.id}')" title="${r.ativo === false ? 'Reativar' : 'Pausar'}">${r.ativo === false ? '▶' : '⏸'}</button>
+          <button class="btn btn-ghost btn-sm" onclick="removerRecorrencia('${r.id}')" title="Remover">🗑</button>
+        </td>
+      </tr>
+    `;
+  }
+
+  $('finContent').innerHTML = `
+    <div class="flex justify-between items-center mb-3">
+      <p class="text-sm" style="color: var(--uc-warm-gray);">${ativas.length} ativa(s) · ${inativas.length} pausada(s)</p>
+      <button class="btn btn-primary btn-sm" onclick="novaRecorrenciaFlow()" ${bancos.length === 0 && cartoes.length === 0 ? 'disabled title="Cadastre um banco primeiro"' : ''}>+ Nova recorrência</button>
+    </div>
+
+    ${recs.length === 0 ? `
+      <div class="empty-state">
+        <p class="empty-state-msg">Nenhuma recorrência cadastrada. Use isso pra despesas/receitas fixas mensais (aluguel, energia, contabilidade, pró-labore, etc.) — cada vez que abrir o Financeiro, transações pendentes são geradas automaticamente.</p>
+      </div>
+    ` : `
+      <div style="overflow-x: auto;">
+        <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
+          <thead>
+            <tr style="border-bottom: 1px solid var(--uc-line); text-align: left;">
+              <th style="padding: 8px 6px; color: var(--uc-warm-gray); font-weight: 500;">Descrição</th>
+              <th style="padding: 8px 6px; color: var(--uc-warm-gray); font-weight: 500;">Tipo</th>
+              <th style="padding: 8px 6px; color: var(--uc-warm-gray); font-weight: 500; text-align: right;">Valor</th>
+              <th style="padding: 8px 6px; color: var(--uc-warm-gray); font-weight: 500;">Categoria</th>
+              <th style="padding: 8px 6px; color: var(--uc-warm-gray); font-weight: 500;">Conta</th>
+              <th style="padding: 8px 6px; color: var(--uc-warm-gray); font-weight: 500; text-align: center;">Dia</th>
+              <th style="padding: 8px 6px; color: var(--uc-warm-gray); font-weight: 500;">Próxima</th>
+              <th style="padding: 8px 6px; color: var(--uc-warm-gray); font-weight: 500; text-align: center;">Geradas</th>
+              <th style="padding: 8px 6px;"></th>
+            </tr>
+          </thead>
+          <tbody>
+            ${[...ativas, ...inativas].map(renderRow).join('')}
+          </tbody>
+        </table>
+      </div>
+    `}
+  `;
+}
+
+// === Sub-aba Balancete ===
+
+async function renderFinBalancete() {
+  const [transacoes, categorias, bancos, cartoes] = await Promise.all([
+    DB.getAllTransacoes(), DB.getAllCategoriasFin(),
+    DB.getAllBancos(), DB.getAllCartoes()
+  ]);
+  const catById = {}; categorias.forEach(c => catById[c.id] = c);
+  const bancoById = {}; bancos.forEach(b => bancoById[b.id] = b);
+  const cartaoById = {}; cartoes.forEach(c => cartaoById[c.id] = c);
+
+  const hoje = new Date();
+  state._balanceteFiltro = state._balanceteFiltro || {
+    ano: hoje.getFullYear(),
+    mes: hoje.getMonth() + 1     // 1-12, ou 0 = ano todo
+  };
+  const f = state._balanceteFiltro;
+
+  // Range do filtro
+  let inicio, fim, labelPeriodo;
+  if (f.mes === 0) {
+    inicio = `${f.ano}-01-01`;
+    fim = `${f.ano}-12-31`;
+    labelPeriodo = `Ano ${f.ano}`;
+  } else {
+    const mm = String(f.mes).padStart(2, '0');
+    const ultimoDia = String(_ultimoDiaDoMes(f.ano, f.mes - 1)).padStart(2, '0');
+    inicio = `${f.ano}-${mm}-01`;
+    fim = `${f.ano}-${mm}-${ultimoDia}`;
+    const meses = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
+    labelPeriodo = `${meses[f.mes - 1]}/${f.ano}`;
+  }
+
+  const noPeriodo = transacoes.filter(t => (t.data || '') >= inicio && (t.data || '') <= fim);
+
+  // Totais
+  const recPrev = noPeriodo.filter(t => t.tipo === 'receita' && t.status === 'previsto').reduce((s,t) => s + Number(t.valor), 0);
+  const recReal = noPeriodo.filter(t => t.tipo === 'receita' && t.status === 'realizado').reduce((s,t) => s + Number(t.valor), 0);
+  const despPrev = noPeriodo.filter(t => t.tipo === 'despesa' && t.status === 'previsto').reduce((s,t) => s + Number(t.valor), 0);
+  const despReal = noPeriodo.filter(t => t.tipo === 'despesa' && t.status === 'realizado').reduce((s,t) => s + Number(t.valor), 0);
+
+  // Por categoria
+  const porCat = {};
+  noPeriodo.forEach(t => {
+    const k = t.categoriaId || '_';
+    if (!porCat[k]) porCat[k] = { previsto: 0, realizado: 0, tipo: t.tipo };
+    porCat[k][t.status === 'realizado' ? 'realizado' : 'previsto'] += Number(t.valor);
+  });
+  const linhasCat = Object.entries(porCat).map(([k, v]) => ({
+    nome: catById[k]?.nome || '— sem categoria —',
+    cor: catById[k]?.cor || '#6b6b68',
+    tipo: v.tipo,
+    previsto: v.previsto,
+    realizado: v.realizado,
+    total: v.previsto + v.realizado
+  })).sort((a, b) => b.total - a.total);
+
+  // Por conta (apenas bancos — cartões não fecham saldo)
+  const porBanco = {};
+  noPeriodo.forEach(t => {
+    if (t.tipoConta !== 'banco' || !t.contaId) return;
+    const k = t.contaId;
+    if (!porBanco[k]) porBanco[k] = { receitas: 0, despesas: 0 };
+    if (t.status === 'realizado') {
+      porBanco[k][t.tipo === 'receita' ? 'receitas' : 'despesas'] += Number(t.valor);
+    }
+  });
+  const linhasBanco = Object.entries(porBanco).map(([k, v]) => ({
+    nome: bancoById[k]?.nome || '— banco removido —',
+    receitas: v.receitas,
+    despesas: v.despesas,
+    saldo: v.receitas - v.despesas
+  })).sort((a, b) => b.saldo - a.saldo);
+
+  const meses = ['(Ano todo)', 'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
+  const anos = [];
+  const anoAtual = hoje.getFullYear();
+  for (let y = anoAtual + 1; y >= anoAtual - 5; y--) anos.push(y);
+
+  $('finContent').innerHTML = `
+    <div class="card mb-3" style="padding: 10px;">
+      <div style="display: flex; gap: 8px; align-items: end; flex-wrap: wrap;">
+        <div>
+          <label class="label" style="font-size: 11px; margin-bottom: 4px;">Mês</label>
+          <select class="select" onchange="_setBalanceteFiltro('mes', parseInt(this.value))">
+            ${meses.map((nome, i) => `<option value="${i}" ${f.mes === i ? 'selected' : ''}>${nome}</option>`).join('')}
+          </select>
+        </div>
+        <div>
+          <label class="label" style="font-size: 11px; margin-bottom: 4px;">Ano</label>
+          <select class="select" onchange="_setBalanceteFiltro('ano', parseInt(this.value))">
+            ${anos.map(y => `<option value="${y}" ${f.ano === y ? 'selected' : ''}>${y}</option>`).join('')}
+          </select>
+        </div>
+        <div style="margin-left: auto;">
+          <button class="btn btn-outline btn-sm" onclick="exportarBalanceteCSV()">📥 Exportar CSV</button>
+        </div>
+      </div>
+    </div>
+
+    <h3 class="font-serif text-lg font-semibold smallcaps mb-3" style="color: var(--uc-black);">Balancete · ${labelPeriodo}</h3>
+
+    <div class="grid gap-3" style="grid-template-columns: 1fr 1fr; margin-bottom: 16px;">
+      <div class="card">
+        <h4 class="font-serif font-semibold smallcaps mb-3" style="color: var(--uc-green);">Receitas</h4>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 13px;">
+          <div><p class="text-xs smallcaps" style="color: var(--uc-warm-gray); margin: 0 0 2px;">Recebidas</p><p style="font-size: 18px; font-weight: 600; color: var(--uc-green); margin: 0;">${brl(recReal)}</p></div>
+          <div><p class="text-xs smallcaps" style="color: var(--uc-warm-gray); margin: 0 0 2px;">Previstas</p><p style="font-size: 18px; font-weight: 600; color: var(--uc-amber); margin: 0;">${brl(recPrev)}</p></div>
+        </div>
+      </div>
+      <div class="card">
+        <h4 class="font-serif font-semibold smallcaps mb-3" style="color: var(--uc-red);">Despesas</h4>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 13px;">
+          <div><p class="text-xs smallcaps" style="color: var(--uc-warm-gray); margin: 0 0 2px;">Pagas</p><p style="font-size: 18px; font-weight: 600; color: var(--uc-red); margin: 0;">${brl(despReal)}</p></div>
+          <div><p class="text-xs smallcaps" style="color: var(--uc-warm-gray); margin: 0 0 2px;">Em aberto</p><p style="font-size: 18px; font-weight: 600; color: var(--uc-amber); margin: 0;">${brl(despPrev)}</p></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card mb-3">
+      <h4 class="font-serif text-lg font-semibold smallcaps mb-3" style="color: var(--uc-black);">Resultado do período</h4>
+      <p style="font-size: 28px; font-weight: 700; color: ${recReal - despReal >= 0 ? 'var(--uc-green)' : 'var(--uc-red)'}; margin: 0;">
+        ${brl(recReal - despReal)}
+      </p>
+      <p class="text-xs" style="color: var(--uc-warm-gray); margin: 4px 0 0;">recebido ${brl(recReal)} − pagas ${brl(despReal)} (somente realizados)</p>
+    </div>
+
+    <div class="card mb-3">
+      <h4 class="font-serif text-lg font-semibold smallcaps mb-3" style="color: var(--uc-black);">Por categoria</h4>
+      ${linhasCat.length === 0 ? '<p class="help-text">Sem transações no período.</p>' : `
+        <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
+          <thead>
+            <tr style="border-bottom: 1px solid var(--uc-line); text-align: left;">
+              <th style="padding: 6px 4px; color: var(--uc-warm-gray); font-weight: 500;">Categoria</th>
+              <th style="padding: 6px 4px; color: var(--uc-warm-gray); font-weight: 500;">Tipo</th>
+              <th style="padding: 6px 4px; color: var(--uc-warm-gray); font-weight: 500; text-align: right;">Realizado</th>
+              <th style="padding: 6px 4px; color: var(--uc-warm-gray); font-weight: 500; text-align: right;">Previsto</th>
+              <th style="padding: 6px 4px; color: var(--uc-warm-gray); font-weight: 500; text-align: right;">Total</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${linhasCat.map(l => `
+              <tr style="border-bottom: 1px solid var(--uc-line-soft);">
+                <td style="padding: 6px 4px;"><span style="color: ${l.cor};">${escapeHtml(l.nome)}</span></td>
+                <td style="padding: 6px 4px;"><span class="badge ${l.tipo === 'receita' ? 'badge-green' : 'badge-red'}" style="font-size: 9px;">${l.tipo}</span></td>
+                <td style="padding: 6px 4px; text-align: right; font-weight: 600;">${brl(l.realizado)}</td>
+                <td style="padding: 6px 4px; text-align: right; color: var(--uc-warm-gray);">${brl(l.previsto)}</td>
+                <td style="padding: 6px 4px; text-align: right; font-weight: 600;">${brl(l.total)}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      `}
+    </div>
+
+    ${linhasBanco.length > 0 ? `
+      <div class="card mb-3">
+        <h4 class="font-serif text-lg font-semibold smallcaps mb-3" style="color: var(--uc-black);">Por banco (apenas realizadas)</h4>
+        <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
+          <thead>
+            <tr style="border-bottom: 1px solid var(--uc-line); text-align: left;">
+              <th style="padding: 6px 4px; color: var(--uc-warm-gray); font-weight: 500;">Banco</th>
+              <th style="padding: 6px 4px; color: var(--uc-warm-gray); font-weight: 500; text-align: right;">Receitas</th>
+              <th style="padding: 6px 4px; color: var(--uc-warm-gray); font-weight: 500; text-align: right;">Despesas</th>
+              <th style="padding: 6px 4px; color: var(--uc-warm-gray); font-weight: 500; text-align: right;">Saldo</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${linhasBanco.map(l => `
+              <tr style="border-bottom: 1px solid var(--uc-line-soft);">
+                <td style="padding: 6px 4px;">${escapeHtml(l.nome)}</td>
+                <td style="padding: 6px 4px; text-align: right; color: var(--uc-green); font-weight: 600;">${brl(l.receitas)}</td>
+                <td style="padding: 6px 4px; text-align: right; color: var(--uc-red); font-weight: 600;">${brl(l.despesas)}</td>
+                <td style="padding: 6px 4px; text-align: right; font-weight: 700; color: ${l.saldo >= 0 ? 'var(--uc-green)' : 'var(--uc-red)'};">${brl(l.saldo)}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+    ` : ''}
+  `;
+}
+
+function _setBalanceteFiltro(campo, valor) {
+  state._balanceteFiltro = state._balanceteFiltro || {};
+  state._balanceteFiltro[campo] = valor;
+  renderFinBalancete();
+}
+
 async function renderFinCategorias() {
   const [categorias, transacoes] = await Promise.all([
     DB.getAllCategoriasFin(), DB.getAllTransacoes()
@@ -5812,7 +6157,10 @@ async function renderFinHonorarios() {
 
     <div class="flex justify-between items-center mb-3">
       <p class="text-sm" style="color: var(--uc-warm-gray);">${filtrados.length} honorário(s) em ${idsOrdenados.length} cliente(s) ${f.clienteId || f.status !== 'todos' ? '(filtrado)' : ''}</p>
-      <button class="btn btn-primary btn-sm" onclick="novoHonorarioFlow()" ${clientes.length === 0 ? 'disabled title="Cadastre um cliente primeiro"' : ''}>+ Novo honorário</button>
+      <div class="flex gap-2">
+        <button class="btn btn-outline btn-sm" onclick="exportarHonorariosCSV()" ${honorarios.length === 0 ? 'disabled' : ''}>📥 Exportar CSV</button>
+        <button class="btn btn-primary btn-sm" onclick="novoHonorarioFlow()" ${clientes.length === 0 ? 'disabled title="Cadastre um cliente primeiro"' : ''}>+ Novo honorário</button>
+      </div>
     </div>
 
     ${filtrados.length === 0 ? `
@@ -6243,6 +6591,329 @@ async function removerCategoria(id) {
   if (!ok) return;
   await DB.deleteCategoriaFin(id);
   renderFinanceiro();
+}
+
+// ===== Recorrências (Sprint A.4) =====
+
+async function novaRecorrenciaFlow() {
+  const [bancos, cartoes, categorias] = await Promise.all([
+    DB.getAllBancos(), DB.getAllCartoes(), DB.getAllCategoriasFin()
+  ]);
+  const contasOpts = [
+    ...bancos.map(b => ({ value: 'banco:' + b.id, label: '🏦 ' + b.nome })),
+    ...cartoes.map(c => ({ value: 'cartao:' + c.id, label: '💳 ' + c.nome }))
+  ];
+  if (contasOpts.length === 0) {
+    toast('Cadastre um banco primeiro', '', 'error');
+    setFinTab('bancos');
+    return;
+  }
+  const catOpts = [
+    { value: '', label: '— sem categoria —' },
+    ...categorias.map(c => ({ value: c.id, label: c.nome + ' (' + c.tipo + ')' }))
+  ];
+
+  const r = await showModal('Nova recorrência', [
+    { label: 'Descrição', placeholder: 'Ex: Aluguel da sala · Internet · Pró-labore Eduardo' },
+    { label: 'Tipo', type: 'select', default: 'despesa', options: [
+      { value: 'despesa', label: 'Despesa (saída)' },
+      { value: 'receita', label: 'Receita (entrada)' }
+    ]},
+    { label: 'Valor (R$)', type: 'number', default: '', placeholder: '0,00' },
+    { label: 'Categoria', type: 'select', default: '', options: catOpts },
+    { label: 'Conta', type: 'select', default: contasOpts[0].value, options: contasOpts },
+    { label: 'Dia do mês (1-31)', type: 'number', default: '5', min: '1', max: '31' }
+  ], { confirmLabel: 'Cadastrar', intro: 'Recorrências geram transações <strong>previstas</strong> automaticamente todo mês ao abrir o módulo Financeiro. Confirme cada uma como realizada quando o pagamento cair.' });
+  if (!r) return;
+  const [descricao, tipo, valor, categoriaId, contaCombo, diaDoMes] = r;
+  if (!descricao?.trim()) { toast('Descrição obrigatória', '', 'error'); return; }
+  if (!valor || parseFloat(valor) <= 0) { toast('Valor inválido', '', 'error'); return; }
+  const dia = parseInt(diaDoMes) || 1;
+  if (dia < 1 || dia > 31) { toast('Dia do mês inválido', '', 'error'); return; }
+  const [tipoConta, contaId] = (contaCombo || '').split(':');
+
+  await DB.saveRecorrencia({
+    id: uid(),
+    descricao: descricao.trim(),
+    tipo,
+    valor: parseFloat(valor),
+    categoriaId: categoriaId || null,
+    contaId: contaId || null,
+    tipoConta: tipoConta || 'banco',
+    diaDoMes: dia,
+    ativo: true,
+    ultimaGeracao: null,
+    createdAt: Date.now()
+  });
+  toast('Recorrência cadastrada', descricao.trim(), 'success');
+  // Gera imediatamente as transações pendentes (do mês atual em diante)
+  await _gerarTransacoesRecorrentes();
+  renderFinanceiro();
+}
+
+async function editarRecorrencia(id) {
+  const [recs, bancos, cartoes, categorias] = await Promise.all([
+    DB.getAllRecorrencias(), DB.getAllBancos(), DB.getAllCartoes(), DB.getAllCategoriasFin()
+  ]);
+  const r = recs.find(x => x.id === id);
+  if (!r) return;
+  const contasOpts = [
+    ...bancos.map(b => ({ value: 'banco:' + b.id, label: '🏦 ' + b.nome })),
+    ...cartoes.map(c => ({ value: 'cartao:' + c.id, label: '💳 ' + c.nome }))
+  ];
+  const catOpts = [
+    { value: '', label: '— sem categoria —' },
+    ...categorias.map(c => ({ value: c.id, label: c.nome + ' (' + c.tipo + ')' }))
+  ];
+  const result = await showModal('Editar recorrência', [
+    { label: 'Descrição', default: r.descricao || '' },
+    { label: 'Tipo', type: 'select', default: r.tipo || 'despesa', options: [
+      { value: 'despesa', label: 'Despesa' }, { value: 'receita', label: 'Receita' }
+    ]},
+    { label: 'Valor (R$)', type: 'number', default: String(r.valor) },
+    { label: 'Categoria', type: 'select', default: r.categoriaId || '', options: catOpts },
+    { label: 'Conta', type: 'select', default: (r.tipoConta || 'banco') + ':' + (r.contaId || ''), options: contasOpts },
+    { label: 'Dia do mês (1-31)', type: 'number', default: String(r.diaDoMes || 1), min: '1', max: '31' }
+  ], { confirmLabel: 'Salvar' });
+  if (!result) return;
+  const [descricao, tipo, valor, categoriaId, contaCombo, diaDoMes] = result;
+  const [tipoConta, contaId] = (contaCombo || '').split(':');
+  Object.assign(r, {
+    descricao: descricao.trim(),
+    tipo,
+    valor: parseFloat(valor),
+    categoriaId: categoriaId || null,
+    contaId: contaId || null,
+    tipoConta: tipoConta || 'banco',
+    diaDoMes: parseInt(diaDoMes) || 1
+  });
+  await DB.saveRecorrencia(r);
+  toast('Recorrência atualizada', '', 'success');
+  renderFinanceiro();
+}
+
+async function alternarRecorrenciaAtiva(id) {
+  const recs = await DB.getAllRecorrencias();
+  const r = recs.find(x => x.id === id);
+  if (!r) return;
+  r.ativo = r.ativo === false;
+  await DB.saveRecorrencia(r);
+  toast(r.ativo ? 'Recorrência reativada' : 'Recorrência pausada', '', 'success');
+  renderFinanceiro();
+}
+
+async function removerRecorrencia(id) {
+  const transacoes = await DB.getAllTransacoes();
+  const geradas = transacoes.filter(t => t.recorrenteId === id).length;
+  const msg = geradas > 0
+    ? `Esta recorrência já gerou ${geradas} transação(ões). Elas continuarão no extrato — só a regra de geração será apagada. Continuar?`
+    : 'A recorrência será removida. Ação irreversível.';
+  const ok = await confirmDialog('Remover recorrência?', msg, true);
+  if (!ok) return;
+  await DB.deleteRecorrencia(id);
+  renderFinanceiro();
+}
+
+// ===== Exportações CSV (Sprint A.4) =====
+
+// Escapa um valor pra CSV: envolve em aspas se contém ; , " ou quebra de linha;
+// duplica aspas internas; aceita null/undefined → ''.
+function _csvEscape(v) {
+  if (v == null) return '';
+  let s = String(v);
+  if (/[",;\r\n]/.test(s)) {
+    s = '"' + s.replace(/"/g, '""') + '"';
+  }
+  return s;
+}
+
+// rows: array de array (a primeira é cabeçalho).
+// Usa ; como separador (compatível com Excel BR) + BOM UTF-8 pra acentos.
+function _baixarCSV(filename, rows) {
+  const csv = '﻿' + rows.map(row => row.map(_csvEscape).join(';')).join('\r\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+  if (typeof downloadBlob === 'function') {
+    downloadBlob(blob, filename);
+  } else {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+}
+
+async function exportarTransacoesCSV() {
+  const f = state._finTransacoesFiltro || {};
+  const [transacoes, bancos, cartoes, categorias, processos, clientes] = await Promise.all([
+    DB.getAllTransacoes(), DB.getAllBancos(), DB.getAllCartoes(),
+    DB.getAllCategoriasFin(), DB.getAllProcesses(), DB.getAllClientes()
+  ]);
+  const catById = {}; categorias.forEach(c => catById[c.id] = c);
+  const bancoById = {}; bancos.forEach(b => bancoById[b.id] = b);
+  const cartaoById = {}; cartoes.forEach(c => cartaoById[c.id] = c);
+  const procById = {}; processos.forEach(p => procById[p.id] = p);
+  const cliById = {}; clientes.forEach(c => cliById[c.id] = c);
+
+  // Aplica os mesmos filtros da tela
+  const hoje = new Date();
+  let dataInicio = '', dataFim = '';
+  if (f.periodo === 'esteMes') {
+    dataInicio = new Date(hoje.getFullYear(), hoje.getMonth(), 1).toISOString().slice(0,10);
+    dataFim    = new Date(hoje.getFullYear(), hoje.getMonth()+1, 0).toISOString().slice(0,10);
+  } else if (f.periodo === 'mesPassado') {
+    dataInicio = new Date(hoje.getFullYear(), hoje.getMonth()-1, 1).toISOString().slice(0,10);
+    dataFim    = new Date(hoje.getFullYear(), hoje.getMonth(), 0).toISOString().slice(0,10);
+  } else if (f.periodo === 'ano') {
+    dataInicio = new Date(hoje.getFullYear(), 0, 1).toISOString().slice(0,10);
+    dataFim    = new Date(hoje.getFullYear(), 11, 31).toISOString().slice(0,10);
+  } else if (f.periodo === 'custom') {
+    dataInicio = f.dataInicio || ''; dataFim = f.dataFim || '';
+  }
+  let lista = transacoes.slice();
+  if (f.tipo && f.tipo !== 'todos') lista = lista.filter(t => t.tipo === f.tipo);
+  if (f.status && f.status !== 'todos') lista = lista.filter(t => t.status === f.status);
+  if (dataInicio) lista = lista.filter(t => (t.data || '') >= dataInicio);
+  if (dataFim)    lista = lista.filter(t => (t.data || '') <= dataFim);
+  if (f.categoriaId) lista = lista.filter(t => t.categoriaId === f.categoriaId);
+  if (f.contaId)     lista = lista.filter(t => t.contaId === f.contaId);
+  if (f.busca && f.busca.trim()) {
+    const q = f.busca.trim().toLowerCase();
+    lista = lista.filter(t => (t.descricao || '').toLowerCase().includes(q));
+  }
+  lista.sort((a,b) => (a.data || '').localeCompare(b.data || ''));
+
+  const rows = [['Data','Tipo','Descrição','Valor','Status','Categoria','Conta','Tipo Conta','Cliente','Processo','Honorário ID','Parcela']];
+  for (const t of lista) {
+    const conta = t.tipoConta === 'cartao' ? cartaoById[t.contaId] : bancoById[t.contaId];
+    rows.push([
+      t.data || '',
+      t.tipo === 'receita' ? 'Receita' : 'Despesa',
+      t.descricao || '',
+      Number(t.valor || 0).toFixed(2).replace('.', ','),
+      t.status || '',
+      catById[t.categoriaId]?.nome || '',
+      conta?.nome || '',
+      t.tipoConta || '',
+      cliById[t.clienteId]?.nome || t.clienteNome || '',
+      procById[t.processoId]?.cnj || procById[t.processoId]?.name || '',
+      t.honorarioId || '',
+      t.parcelaNumero || ''
+    ]);
+  }
+  const stamp = new Date().toISOString().slice(0,10);
+  _baixarCSV(`transacoes_${stamp}.csv`, rows);
+  toast('Exportado', `${lista.length} transação(ões)`, 'success');
+}
+
+async function exportarHonorariosCSV() {
+  const [honorarios, clientes, processos] = await Promise.all([
+    DB.getAllHonorarios(), DB.getAllClientes(), DB.getAllProcesses()
+  ]);
+  const cliById = {}; clientes.forEach(c => cliById[c.id] = c);
+  const procById = {}; processos.forEach(p => procById[p.id] = p);
+  const hoje = new Date().toISOString().slice(0, 10);
+
+  // Linha por parcela (mais útil pra contabilidade que linha por honorário)
+  const rows = [['Cliente','Tipo','Total','Processos cobertos','Parcela','Vencimento','Valor','Status','Pago em','Valor recebido','Observações']];
+  for (const h of honorarios) {
+    const cli = cliById[h.clienteId];
+    const procsCobertos = _processosDoHonorario(h)
+      .map(pid => procById[pid])
+      .filter(Boolean)
+      .map(p => p.cnj || p.name || '—').join(' | ');
+    for (const p of (h.parcelas || [])) {
+      const venceu = (p.vencimento || '') < hoje && p.status !== 'pago';
+      rows.push([
+        cli?.nome || h.clienteNome || '',
+        TIPO_HONORARIO_LABEL[h.tipoHonorario] || h.tipoHonorario || '',
+        Number(h.valorTotal || 0).toFixed(2).replace('.', ','),
+        procsCobertos,
+        p.numero,
+        p.vencimento || '',
+        Number(p.valor || 0).toFixed(2).replace('.', ','),
+        p.status === 'pago' ? 'pago' : (venceu ? 'vencido' : 'previsto'),
+        p.dataRecebimento || '',
+        p.valorRecebido != null ? Number(p.valorRecebido).toFixed(2).replace('.', ',') : '',
+        h.observacoes || ''
+      ]);
+    }
+  }
+  const stamp = new Date().toISOString().slice(0,10);
+  _baixarCSV(`honorarios_${stamp}.csv`, rows);
+  toast('Exportado', `${honorarios.length} honorário(s)`, 'success');
+}
+
+async function exportarBalanceteCSV() {
+  const f = state._balanceteFiltro || {};
+  const [transacoes, categorias, bancos] = await Promise.all([
+    DB.getAllTransacoes(), DB.getAllCategoriasFin(), DB.getAllBancos()
+  ]);
+  const catById = {}; categorias.forEach(c => catById[c.id] = c);
+  const bancoById = {}; bancos.forEach(b => bancoById[b.id] = b);
+
+  let inicio, fim, labelPeriodo;
+  if (f.mes === 0) {
+    inicio = `${f.ano}-01-01`; fim = `${f.ano}-12-31`;
+    labelPeriodo = `Ano ${f.ano}`;
+  } else {
+    const mm = String(f.mes).padStart(2, '0');
+    const ultimoDia = String(_ultimoDiaDoMes(f.ano, f.mes - 1)).padStart(2, '0');
+    inicio = `${f.ano}-${mm}-01`; fim = `${f.ano}-${mm}-${ultimoDia}`;
+    labelPeriodo = `${f.ano}-${mm}`;
+  }
+  const noPeriodo = transacoes.filter(t => (t.data || '') >= inicio && (t.data || '') <= fim);
+
+  const rows = [['Período', labelPeriodo]];
+  rows.push([]);
+  rows.push(['Resumo']);
+  const recReal = noPeriodo.filter(t => t.tipo === 'receita' && t.status === 'realizado').reduce((s,t) => s + Number(t.valor), 0);
+  const recPrev = noPeriodo.filter(t => t.tipo === 'receita' && t.status === 'previsto').reduce((s,t) => s + Number(t.valor), 0);
+  const despReal = noPeriodo.filter(t => t.tipo === 'despesa' && t.status === 'realizado').reduce((s,t) => s + Number(t.valor), 0);
+  const despPrev = noPeriodo.filter(t => t.tipo === 'despesa' && t.status === 'previsto').reduce((s,t) => s + Number(t.valor), 0);
+  rows.push(['Receitas recebidas', recReal.toFixed(2).replace('.', ',')]);
+  rows.push(['Receitas previstas', recPrev.toFixed(2).replace('.', ',')]);
+  rows.push(['Despesas pagas', despReal.toFixed(2).replace('.', ',')]);
+  rows.push(['Despesas em aberto', despPrev.toFixed(2).replace('.', ',')]);
+  rows.push(['Resultado (recebido − pagas)', (recReal - despReal).toFixed(2).replace('.', ',')]);
+  rows.push([]);
+  rows.push(['Por categoria']);
+  rows.push(['Categoria','Tipo','Realizado','Previsto','Total']);
+  const porCat = {};
+  noPeriodo.forEach(t => {
+    const k = t.categoriaId || '_';
+    if (!porCat[k]) porCat[k] = { previsto: 0, realizado: 0, tipo: t.tipo };
+    porCat[k][t.status === 'realizado' ? 'realizado' : 'previsto'] += Number(t.valor);
+  });
+  Object.entries(porCat)
+    .map(([k, v]) => [catById[k]?.nome || '— sem categoria —', v.tipo,
+      v.realizado.toFixed(2).replace('.', ','),
+      v.previsto.toFixed(2).replace('.', ','),
+      (v.previsto + v.realizado).toFixed(2).replace('.', ',')])
+    .sort((a, b) => parseFloat(b[4].replace(',', '.')) - parseFloat(a[4].replace(',', '.')))
+    .forEach(r => rows.push(r));
+
+  rows.push([]);
+  rows.push(['Por banco (apenas realizados)']);
+  rows.push(['Banco','Receitas','Despesas','Saldo']);
+  const porBanco = {};
+  noPeriodo.forEach(t => {
+    if (t.tipoConta !== 'banco' || !t.contaId || t.status !== 'realizado') return;
+    const k = t.contaId;
+    if (!porBanco[k]) porBanco[k] = { receitas: 0, despesas: 0 };
+    porBanco[k][t.tipo === 'receita' ? 'receitas' : 'despesas'] += Number(t.valor);
+  });
+  Object.entries(porBanco).forEach(([k, v]) => {
+    rows.push([
+      bancoById[k]?.nome || '— removido —',
+      v.receitas.toFixed(2).replace('.', ','),
+      v.despesas.toFixed(2).replace('.', ','),
+      (v.receitas - v.despesas).toFixed(2).replace('.', ',')
+    ]);
+  });
+
+  _baixarCSV(`balancete_${labelPeriodo}.csv`, rows);
+  toast('Balancete exportado', labelPeriodo, 'success');
 }
 
 // ===== Honorários =====
