@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.28.0 (Backup automático Drive: cron semanal Apps Script + card de status em Configurações)
-const CACHE_NAME = 'uc-juridico-v6-28-0';
+// Service Worker — UC Jurídico v6.29.0 (Ações inline de prazo na agenda: cumprir/suspender/cancelar/reabrir direto no card)
+const CACHE_NAME = 'uc-juridico-v6-29-0';
 const APP_SHELL = [
   './',
   './index.html',

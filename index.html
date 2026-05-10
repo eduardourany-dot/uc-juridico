@@ -281,7 +281,7 @@ body{background:var(--uc-paper);color:var(--uc-graphite);font-size:15px;-webkit-
 
     <div style="margin-top:auto;padding:16px 20px;border-top:1px solid var(--uc-line-soft);font-size:11px;color:var(--uc-warm-gray);text-align:center;">
       <p class="smallcaps font-serif" style="margin:0 0 4px;">Urany de Castro · 30 anos</p>
-      <p style="margin:0;">100% local · v6.28.0</p>
+      <p style="margin:0;">100% local · v6.29.0</p>
     </div>
   </aside>
 
@@ -3639,11 +3639,29 @@ async function markDeadlineDone(id) {
   return abrirModalCumprimento(id);
 }
 
+// Helpers v6.29 — ações de prazo agnósticas ao contexto (process detail,
+// agenda overlay, /deadlines lista global). Antes só funcionavam quando
+// state._processView estava montado.
+async function _findPrazoForAction(id) {
+  const fromView = state._processView?.deadlines?.find(x => x.id === id);
+  if (fromView) return fromView;
+  try {
+    const all = await DB.getAllDeadlines();
+    return all.find(x => x.id === id) || null;
+  } catch (_) { return null; }
+}
+function _refreshAfterPrazoAction() {
+  if (state.currentRoute === 'process') renderProcessDetail();
+  else if (state.currentRoute === 'agenda') renderAgenda();
+  else if (state.currentRoute === 'deadlines') renderDeadlines();
+  else if (state.currentRoute === 'dashboard') renderDashboard();
+}
+
 // Marcar como cumprido — exige data + número de protocolo (princípio reitor:
 // nenhum prazo é considerado cumprido até confirmação explícita).
 async function abrirModalCumprimento(id) {
-  const d = state._processView?.deadlines?.find(x => x.id === id);
-  if (!d) return;
+  const d = await _findPrazoForAction(id);
+  if (!d) { toast('Prazo não encontrado', '', 'error'); return; }
   if (prazoEstaResolvido(d)) { toast('Prazo já está resolvido', '', 'info'); return; }
   const hojeISO = new Date().toISOString().slice(0,10);
   const r = await showModal('Marcar como cumprido', [
@@ -3672,13 +3690,13 @@ async function abrirModalCumprimento(id) {
   });
   await DB.saveDeadline(d);
   toast('Prazo cumprido', `Protocolo ${d.cumprimento.numeroProtocolo}`, 'success');
-  renderProcessDetail();
+  _refreshAfterPrazoAction();
 }
 
 // Suspender — pausa lembretes. Reabre via reabrirPrazo() ou (futuro) pela suspensoAte.
 async function abrirModalSuspender(id) {
-  const d = state._processView?.deadlines?.find(x => x.id === id);
-  if (!d) return;
+  const d = await _findPrazoForAction(id);
+  if (!d) { toast('Prazo não encontrado', '', 'error'); return; }
   if (d.status === STATUS_PRAZO.SUSPENSO) { toast('Já está suspenso', '', 'info'); return; }
   if (prazoEstaResolvido(d)) { toast('Prazo já resolvido', '', 'error'); return; }
   const r = await showModal('Suspender prazo', [
@@ -3699,12 +3717,12 @@ async function abrirModalSuspender(id) {
   appendLogPrazo(d, 'suspenso', { motivo: d.suspensao.motivo, ate: d.suspensao.suspensoAte });
   await DB.saveDeadline(d);
   toast('Prazo suspenso', '', 'success');
-  renderProcessDetail();
+  _refreshAfterPrazoAction();
 }
 
 async function reabrirPrazo(id) {
-  const d = state._processView?.deadlines?.find(x => x.id === id);
-  if (!d) return;
+  const d = await _findPrazoForAction(id);
+  if (!d) { toast('Prazo não encontrado', '', 'error'); return; }
   if (d.status !== STATUS_PRAZO.SUSPENSO) { toast('Só prazos suspensos podem ser reabertos', '', 'info'); return; }
   const anterior = d.suspensao?.statusAnterior || STATUS_PRAZO.PENDENTE;
   d.status = STATUS_TERMINAIS.has(anterior) ? STATUS_PRAZO.PENDENTE : anterior;
@@ -3713,13 +3731,13 @@ async function reabrirPrazo(id) {
   d.updatedAt = Date.now();
   await DB.saveDeadline(d);
   toast('Prazo reaberto', '', 'success');
-  renderProcessDetail();
+  _refreshAfterPrazoAction();
 }
 
 // Cancelar — anula com motivo. Diferente de Remover: prazo cancelado fica no histórico.
 async function abrirModalCancelar(id) {
-  const d = state._processView?.deadlines?.find(x => x.id === id);
-  if (!d) return;
+  const d = await _findPrazoForAction(id);
+  if (!d) { toast('Prazo não encontrado', '', 'error'); return; }
   if (prazoEstaResolvido(d)) { toast('Prazo já resolvido', '', 'error'); return; }
   const r = await showModal('Cancelar prazo', [
     { label: 'Motivo do cancelamento (obrigatório)' }
@@ -3736,14 +3754,14 @@ async function abrirModalCancelar(id) {
   appendLogPrazo(d, 'cancelado', { motivo: d.cancelamento.motivo });
   await DB.saveDeadline(d);
   toast('Prazo cancelado', '', 'success');
-  renderProcessDetail();
+  _refreshAfterPrazoAction();
 }
 
 async function deleteDeadline(id) {
   const ok = await confirmDialog('Remover prazo?', 'O prazo será apagado do registro. Para apenas anular mantendo histórico, use Cancelar.', true);
   if (!ok) return;
   await DB.deleteDeadline(id);
-  renderProcessDetail();
+  _refreshAfterPrazoAction();
 }
 
 async function openEventDetail(eventId) {
@@ -8137,7 +8155,9 @@ async function renderAgenda() {
   `;
 }
 
-// Card read-only de prazo dentro da agenda. Editar/cumprir continua em /prazos.
+// Card de prazo dentro da agenda — v6.29: botões inline pra cumprir/suspender/cancelar
+// sem precisar navegar pra /prazos. Mantém o → como atalho pra ver o histórico
+// completo do prazo no contexto do processo.
 function _renderPrazoNaAgenda(d, procById, today) {
   const proc = (d.processId && procById && typeof procById === 'object') ? procById[d.processId] : null;
   const visual = recomputarStatusVisual(d, today);
@@ -8151,6 +8171,21 @@ function _renderPrazoNaAgenda(d, procById, today) {
   else if (visual === 'suspenso') { cor = '#6b6b68'; badgeClass = 'badge-gray'; label = 'suspenso'; }
   const procLabel = proc ? (proc.cnj || proc.name || 'processo') : '(processo removido)';
 
+  // Ações contextuais idênticas ao card no /prazos. Suspenso → reabrir/cancelar.
+  // Pendente/visual ativo → cumprir/suspender/cancelar.
+  let acoes = '';
+  if (visual === 'suspenso') {
+    acoes += `<button class="btn btn-ghost btn-sm" onclick="event.stopPropagation(); reabrirPrazo('${d.id}')" title="Reabrir prazo" style="padding: 2px 6px;">▶</button>`;
+    acoes += `<button class="btn btn-ghost btn-sm" onclick="event.stopPropagation(); abrirModalCancelar('${d.id}')" title="Cancelar com motivo" style="padding: 2px 6px;">⊘</button>`;
+  } else if (prazoEstaAtivo(d)) {
+    acoes += `<button class="btn btn-ghost btn-sm" onclick="event.stopPropagation(); abrirModalCumprimento('${d.id}')" title="Marcar como cumprido (data + protocolo)" style="padding: 2px 6px;">✓</button>`;
+    acoes += `<button class="btn btn-ghost btn-sm" onclick="event.stopPropagation(); abrirModalSuspender('${d.id}')" title="Suspender (pausa lembretes)" style="padding: 2px 6px;">⏸</button>`;
+    acoes += `<button class="btn btn-ghost btn-sm" onclick="event.stopPropagation(); abrirModalCancelar('${d.id}')" title="Cancelar com motivo" style="padding: 2px 6px;">⊘</button>`;
+  }
+  if (proc) {
+    acoes += `<button class="btn btn-ghost btn-sm" onclick="event.stopPropagation(); navigate('process', { currentProcessId: '${proc.id}' })" title="Abrir processo" style="padding: 2px 6px;">↗</button>`;
+  }
+
   return `
     <div class="card" style="margin-bottom: 8px; padding: 12px; border-left: 4px solid ${cor}; background: var(--uc-cream);">
       <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;">
@@ -8160,15 +8195,17 @@ function _renderPrazoNaAgenda(d, procById, today) {
             <span class="badge badge-gray" style="font-size: 9px; background: var(--uc-graphite); color: var(--uc-cream);">PRAZO</span>
             <strong style="color: var(--uc-black); font-size: 14px;">${escapeHtml(d.description || d.type || 'Prazo')}</strong>
             <span class="badge ${badgeClass}" style="font-size: 9px;">${label}</span>
+            ${d.emDobro ? '<span class="badge badge-amber" style="font-size: 9px;">DOBRO</span>' : ''}
           </div>
           <div style="font-size: 12px; color: var(--uc-warm-gray);">
             ${d.advogadoResponsavel ? '👤 ' + escapeHtml(d.advogadoResponsavel.split(' ')[0]) : ''}
-            ${proc ? ` · <a onclick="navigate('process', { currentProcessId: '${proc.id}' })" style="cursor:pointer; color:var(--uc-gold);">${escapeHtml(procLabel)}</a>` : ` · <span style="color: var(--uc-warm-gray);">${escapeHtml(procLabel)}</span>`}
+            ${proc ? ` · <a onclick="event.stopPropagation(); navigate('process', { currentProcessId: '${proc.id}' })" style="cursor:pointer; color:var(--uc-gold);">${escapeHtml(procLabel)}</a>` : ` · <span style="color: var(--uc-warm-gray);">${escapeHtml(procLabel)}</span>`}
             · vence ${escapeHtml((d.deadlineDate || '').slice(0, 10))}
           </div>
+          ${visual === 'suspenso' && d.suspensao ? `<div style="font-size: 11px; color: var(--uc-warm-gray); margin-top: 4px;">⏸ ${escapeHtml(d.suspensao.motivo || '')}${d.suspensao.suspensoAte ? ' · até ' + escapeHtml(d.suspensao.suspensoAte) : ''}</div>` : ''}
         </div>
         <div style="display: flex; gap: 2px; flex-shrink: 0;">
-          <button class="btn btn-ghost btn-sm" onclick="navigate('deadlines')" title="Ir para Prazos pra cumprir/editar" style="padding: 2px 6px;">→</button>
+          ${acoes}
         </div>
       </div>
     </div>

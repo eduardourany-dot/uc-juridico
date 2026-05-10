@@ -1,6 +1,6 @@
 # UC Jurídico — Instalação e operação
 
-Versão atual: **v6.28.0**
+Versão atual: **v6.29.0**
 URL pública: https://eduardourany-dot.github.io/uc-juridico/
 Repositório: https://github.com/eduardourany-dot/uc-juridico
 
@@ -264,7 +264,8 @@ Verificar:
 | v6.25.1 | ✅ entregue | Agenda consolidada — prazos processuais ativos aparecem como cards read-only na rota `/agenda` (toggle "Incluir prazos do processo"). Cumprimento/edição segue em /prazos. |
 | v6.26.0 | ✅ entregue | Relatório executivo mensal — rota `/relatorio` consolida pulso financeiro, processual, clientes e compromissos. Seletor de mês + export CSV. |
 | v6.27.0 | ✅ entregue | Modelos de petição (Pet.0) — rota `/modelos` com CRUD de templates Markdown + placeholders. Botão "📝 Gerar petição" no header do processo. Substituição literal (sem Claude API ainda). |
-| **v6.28.0** | ✅ em produção | **Backup automático Drive** — cron semanal Apps Script (`backend/Backup.gs`) faz dump JSON de todas as 19 coleções Firestore para pasta privada Drive do escritório. Rotação automática (mantém 12 mais recentes). Card "Último backup automático" em `Configurações → Backup` mostra timestamp/tamanho/link Drive. Setup descrito acima. |
+| v6.28.0 | ✅ entregue | Backup automático Drive — cron semanal Apps Script faz dump JSON de todas as 19 coleções para pasta privada do Drive. Rotação automática (12 mais recentes). |
+| **v6.29.0** | ✅ em produção | **Ações inline de prazo na agenda** — botões ✓ cumprir · ⏸ suspender · ⊘ cancelar · ▶ reabrir direto no card de prazo dentro de `/agenda`, sem precisar navegar para `/prazos`. Funções `abrirModalCumprimento` / `abrirModalSuspender` / `abrirModalCancelar` / `reabrirPrazo` / `deleteDeadline` agora são agnósticas ao contexto (helpers `_findPrazoForAction` + `_refreshAfterPrazoAction`). |
 | v6.22+ | planejado | Retomada Financeiro A.4 (Recorrências + Balancete) → A.5 → Agenda unificada |
 | v7.x | planejado | Módulo Petições com Claude API (briefing em [docs/BRIEFING_Peticoes.md](docs/BRIEFING_Peticoes.md)) |
 
