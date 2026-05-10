@@ -268,7 +268,7 @@ body{background:var(--uc-paper);color:var(--uc-graphite);font-size:15px;-webkit-
 
     <div style="margin-top:auto;padding:16px 20px;border-top:1px solid var(--uc-line-soft);font-size:11px;color:var(--uc-warm-gray);text-align:center;">
       <p class="smallcaps font-serif" style="margin:0 0 4px;">Urany de Castro · 30 anos</p>
-      <p style="margin:0;">100% local · v6.19.1</p>
+      <p style="margin:0;">100% local · v6.19.2</p>
     </div>
   </aside>
 
@@ -652,12 +652,49 @@ function showModal(title, fields, options = {}) {
       </div>`;
     $('modalContainer').appendChild(modal);
     const cleanup = () => modal.remove();
+
+    // Helpers de acesso pra callbacks dinâmicos (onChange).
+    const getField = idx => document.getElementById('_mf_' + idx);
+    const getValue = idx => {
+      const el = getField(idx);
+      if (!el) return null;
+      return el.type === 'checkbox' ? el.checked : el.value;
+    };
+    const setValue = (idx, val) => {
+      const el = getField(idx);
+      if (!el) return;
+      if (el.type === 'checkbox') el.checked = !!val;
+      else el.value = val == null ? '' : val;
+    };
+    const findByName = name => fields.findIndex(f => f.name === name);
+    const getByName = name => {
+      const idx = findByName(name);
+      return idx >= 0 ? getValue(idx) : null;
+    };
+    const setByName = (name, val) => {
+      const idx = findByName(name);
+      if (idx >= 0) setValue(idx, val);
+    };
+
+    // Liga onChange por campo (suporta callback async). Reagentes:
+    //   - select/checkbox: evento 'change'
+    //   - text/number/etc: evento 'change' (dispara quando blur com valor diferente)
+    fields.forEach((f, i) => {
+      if (typeof f.onChange !== 'function') return;
+      const el = getField(i);
+      if (!el) return;
+      el.addEventListener('change', async () => {
+        try {
+          await f.onChange(getValue(i), { getValue, setValue, getByName, setByName });
+        } catch (e) {
+          console.warn('Modal onChange error', e);
+        }
+      });
+    });
+
     $('_modalCancel').onclick = () => { cleanup(); resolve(null); };
     $('_modalConfirm').onclick = () => {
-      const values = fields.map((f, i) => {
-        const el = document.getElementById('_mf_' + i);
-        return f.type === 'checkbox' ? el.checked : el.value;
-      });
+      const values = fields.map((f, i) => getValue(i));
       cleanup(); resolve(values);
     };
     document.getElementById('_mf_0')?.focus();
@@ -1092,6 +1129,41 @@ function _validarEmail(s) {
   return /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(s);
 }
 
+// Busca endereço pelo CEP via API ViaCEP (gratuita, CORS habilitado).
+// Retorna {logradouro, bairro, cidade, estado} ou null em erro/inexistente.
+async function _buscarCep(cep) {
+  const limpo = String(cep || '').replace(/\D/g, '');
+  if (limpo.length !== 8) return null;
+  try {
+    const resp = await fetch(`https://viacep.com.br/ws/${limpo}/json/`);
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    if (data.erro) return null;
+    return {
+      logradouro: data.logradouro || '',
+      bairro: data.bairro || '',
+      cidade: data.localidade || '',
+      estado: data.uf || ''
+    };
+  } catch (e) {
+    console.warn('ViaCEP falhou', e);
+    return null;
+  }
+}
+
+// Compose endereco como string única (compat com clientes antigos que tinham
+// só endereco string). Útil pra buscar e exibir.
+function _composeEndereco(c) {
+  if (!c) return '';
+  const parts = [];
+  if (c.logradouro) parts.push(c.logradouro + (c.numero ? ', ' + c.numero : ''));
+  if (c.complemento) parts.push(c.complemento);
+  if (c.bairro) parts.push(c.bairro);
+  if (c.cidade) parts.push(c.cidade + (c.estado ? '/' + c.estado : ''));
+  if (c.cep) parts.push('CEP ' + c.cep);
+  return parts.join(' · ');
+}
+
 async function novoClienteFlow() {
   return _formClienteFlow(null);
 }
@@ -1104,21 +1176,57 @@ async function editarCliente(id) {
 
 async function _formClienteFlow(clienteAtual) {
   const isEdit = !!clienteAtual;
-  const r = await showModal(isEdit ? 'Editar cliente' : 'Novo cliente', [
-    { label: 'Nome (razão social ou nome completo)', default: clienteAtual?.nome || '' },
-    { label: 'Tipo de pessoa', type: 'select', default: clienteAtual?.tipoPessoa || 'PJ', options: [
+  // Compat: clientes antigos podem ter só `endereco` string (sem cep/logradouro/etc).
+  // Mantém o valor legado num placeholder mas oferece os campos novos vazios.
+  const enderecoLegacy = clienteAtual?.endereco && !clienteAtual?.logradouro
+    ? clienteAtual.endereco : null;
+
+  const fields = [
+    { label: 'Nome (razão social ou nome completo)', name: 'nome', default: clienteAtual?.nome || '' },
+    { label: 'Tipo de pessoa', name: 'tipoPessoa', type: 'select', default: clienteAtual?.tipoPessoa || 'PJ', options: [
       { value: 'PJ', label: 'Pessoa Jurídica' },
       { value: 'PF', label: 'Pessoa Física' }
     ]},
-    { label: 'CPF/CNPJ', default: clienteAtual?.cpfCnpj || '', placeholder: 'opcional, só dígitos ou formatado' },
-    { label: 'Email', default: clienteAtual?.email || '', placeholder: 'opcional' },
-    { label: 'Telefone', default: clienteAtual?.telefone || '', placeholder: 'opcional' },
-    { label: 'Endereço', default: clienteAtual?.endereco || '', placeholder: 'opcional' },
-    { label: 'Observações', default: clienteAtual?.observacoes || '' },
-    { label: 'Ativo', type: 'checkbox', default: clienteAtual ? clienteAtual.ativo !== false : true }
-  ], { confirmLabel: isEdit ? 'Salvar' : 'Cadastrar' });
+    { label: 'CPF/CNPJ', name: 'cpfCnpj', default: clienteAtual?.cpfCnpj || '', placeholder: 'opcional, só dígitos ou formatado' },
+    { label: 'Email', name: 'email', default: clienteAtual?.email || '', placeholder: 'opcional' },
+    { label: 'Telefone', name: 'telefone', default: clienteAtual?.telefone || '', placeholder: 'opcional' },
+
+    // Bloco de endereço — CEP dispara busca ViaCEP automática
+    { label: 'CEP', name: 'cep', default: clienteAtual?.cep || '', placeholder: '00000-000 — preenche automaticamente os demais',
+      onChange: async (val, ctx) => {
+        const dados = await _buscarCep(val);
+        if (dados) {
+          ctx.setByName('logradouro', dados.logradouro);
+          ctx.setByName('bairro', dados.bairro);
+          ctx.setByName('cidade', dados.cidade);
+          ctx.setByName('estado', dados.estado);
+          if (typeof toast === 'function') toast('Endereço encontrado', dados.cidade + '/' + dados.estado, 'success');
+        } else if (String(val || '').replace(/\D/g, '').length === 8) {
+          if (typeof toast === 'function') toast('CEP não encontrado', 'Preencha manualmente', 'info');
+        }
+      }
+    },
+    { label: 'Logradouro (rua/av)', name: 'logradouro', default: clienteAtual?.logradouro || '', placeholder: 'preenchido pelo CEP' },
+    { label: 'Número', name: 'numero', default: clienteAtual?.numero || '', placeholder: 'manual' },
+    { label: 'Complemento', name: 'complemento', default: clienteAtual?.complemento || '', placeholder: 'manual (sala, bloco, andar, etc.)' },
+    { label: 'Bairro', name: 'bairro', default: clienteAtual?.bairro || '', placeholder: 'preenchido pelo CEP' },
+    { label: 'Cidade', name: 'cidade', default: clienteAtual?.cidade || '', placeholder: 'preenchido pelo CEP' },
+    { label: 'Estado (UF)', name: 'estado', default: clienteAtual?.estado || '', placeholder: 'preenchido pelo CEP', maxlength: 2 },
+
+    { label: 'Observações', name: 'observacoes', default: clienteAtual?.observacoes || '' },
+    { label: 'Ativo', name: 'ativo', type: 'checkbox', default: clienteAtual ? clienteAtual.ativo !== false : true }
+  ];
+
+  const intro = enderecoLegacy
+    ? `Endereço legado (string única): <em>${escapeHtml(enderecoLegacy)}</em><br>Re-preencha pelos campos novos pra organizar.`
+    : 'Digite o CEP primeiro — logradouro, bairro, cidade e estado preenchem automaticamente.';
+
+  const r = await showModal(isEdit ? 'Editar cliente' : 'Novo cliente', fields, {
+    confirmLabel: isEdit ? 'Salvar' : 'Cadastrar',
+    intro
+  });
   if (!r) return;
-  const [nome, tipoPessoa, cpfCnpj, email, telefone, endereco, observacoes, ativo] = r;
+  const [nome, tipoPessoa, cpfCnpj, email, telefone, cep, logradouro, numero, complemento, bairro, cidade, estado, observacoes, ativo] = r;
 
   if (!nome?.trim()) { toast('Nome obrigatório', '', 'error'); return; }
   if (!_validarCpfCnpj(cpfCnpj)) { toast('CPF/CNPJ inválido', 'Use 11 dígitos pra CPF ou 14 pra CNPJ.', 'error'); return; }
@@ -1140,11 +1248,20 @@ async function _formClienteFlow(clienteAtual) {
     cpfCnpj: (cpfCnpj || '').trim() || null,
     email: (email || '').trim() || null,
     telefone: (telefone || '').trim() || null,
-    endereco: (endereco || '').trim() || null,
+    cep: (cep || '').trim() || null,
+    logradouro: (logradouro || '').trim() || null,
+    numero: (numero || '').trim() || null,
+    complemento: (complemento || '').trim() || null,
+    bairro: (bairro || '').trim() || null,
+    cidade: (cidade || '').trim() || null,
+    estado: ((estado || '').trim() || null)?.toUpperCase() || null,
     observacoes: (observacoes || '').trim() || null,
     ativo: !!ativo,
     createdAt: clienteAtual?.createdAt || Date.now()
   };
+  // Compat: gera endereco string composto pra quem ainda lê o campo antigo
+  cliente.endereco = _composeEndereco(cliente) || null;
+
   await DB.saveCliente(cliente);
   toast(isEdit ? 'Cliente atualizado' : 'Cliente cadastrado', cliente.nome, 'success');
   renderClientesList();

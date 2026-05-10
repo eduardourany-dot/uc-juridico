@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.19.1 (Limpeza de clientes da migração + flag pra desligar)
-const CACHE_NAME = 'uc-juridico-v6-19-1';
+// Service Worker — UC Jurídico v6.19.2 (Cadastro cliente: endereço auto via CEP/ViaCEP + showModal com onChange)
+const CACHE_NAME = 'uc-juridico-v6-19-2';
 const APP_SHELL = [
   './',
   './index.html',
