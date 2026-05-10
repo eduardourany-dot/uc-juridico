@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.31.0 (Petições Pet.1: versionamento + aba no processo + editor com nova versão / arquivar)
-const CACHE_NAME = 'uc-juridico-v6-31-0';
+// Service Worker — UC Jurídico v6.32.0 (Equipe: rota /equipe com indicadores individuais por advogado + drill-down de prazos vencidos)
+const CACHE_NAME = 'uc-juridico-v6-32-0';
 const APP_SHELL = [
   './',
   './index.html',

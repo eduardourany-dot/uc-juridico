@@ -264,6 +264,10 @@ body{background:var(--uc-paper);color:var(--uc-graphite);font-size:15px;-webkit-
       <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
       <span>Modelos</span>
     </a>
+    <a class="nav-item" data-route="equipe">
+      <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"/></svg>
+      <span>Equipe</span>
+    </a>
     <a class="nav-item" data-route="tools">
       <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 4a2 2 0 114 0v1a1 1 0 001 1h3a1 1 0 011 1v3a1 1 0 01-1 1h-1a2 2 0 100 4h1a1 1 0 011 1v3a1 1 0 01-1 1h-3a1 1 0 01-1-1v-1a2 2 0 10-4 0v1a1 1 0 01-1 1H6a1 1 0 01-1-1v-3a1 1 0 00-1-1H3a2 2 0 110-4h1a1 1 0 001-1V7a1 1 0 011-1h3a1 1 0 001-1V4z"/></svg>
       <span>Ferramentas PDF</span>
@@ -281,7 +285,7 @@ body{background:var(--uc-paper);color:var(--uc-graphite);font-size:15px;-webkit-
 
     <div style="margin-top:auto;padding:16px 20px;border-top:1px solid var(--uc-line-soft);font-size:11px;color:var(--uc-warm-gray);text-align:center;">
       <p class="smallcaps font-serif" style="margin:0 0 4px;">Urany de Castro · 30 anos</p>
-      <p style="margin:0;">100% local · v6.31.0</p>
+      <p style="margin:0;">100% local · v6.32.0</p>
     </div>
   </aside>
 
@@ -581,6 +585,7 @@ const routes = {
   financeiro: renderFinanceiro,
   relatorio: renderRelatorio,
   modelos: renderModelosPeticao,
+  equipe: renderEquipe,
   tools: renderTools,
   diligence: renderDiligence,
   settings: renderSettings
@@ -9690,6 +9695,306 @@ function _baixarPeticaoGerada(formato, texto, modelo, processo) {
   const fname = `${slug}${cnj}_${new Date().toISOString().slice(0,10)}.${ext}`;
   downloadBlob(new Blob([txt], { type: ext === 'md' ? 'text/markdown' : 'text/plain' }), fname);
   toast('Baixado', fname, 'success');
+}
+
+// ====================================================================
+// === MÓDULO EQUIPE — Indicadores por advogado (v6.32) ==============
+// ====================================================================
+// Drill-down individual: dado um advogado e um mês, mostra carga
+// atual + métricas do mês + listas operacionais (próximos prazos,
+// vencidos não-cumpridos, próximos compromissos, processos por papel).
+
+async function renderEquipe() {
+  // Estado: advogado selecionado + mês de referência
+  if (!state._equipeRef) {
+    const me = (window.UC_Auth?.getUser?.() || {}).email || '';
+    const meuNome = defaultAdvogado(me);
+    const hoje = new Date();
+    state._equipeRef = {
+      advogado: meuNome || ADVOGADOS[0] || '',
+      ano: hoje.getFullYear(),
+      mes: hoje.getMonth()
+    };
+  }
+  const { advogado, ano, mes } = state._equipeRef;
+  const range = _mesRange(ano, mes);
+  const rangePrev = _mesRange(mes === 0 ? ano - 1 : ano, mes === 0 ? 11 : mes - 1);
+
+  if (!advogado) {
+    $('appContent').innerHTML = `
+      <div class="page-header"><h1 class="page-title"><span class="smallcaps-prefix">Equipe</span></h1></div>
+      <div class="card empty-state">
+        <p class="empty-state-msg">Lista de advogados vazia. Configure em <code>ADVOGADO_BY_EMAIL</code> no código fonte.</p>
+      </div>
+    `;
+    return;
+  }
+
+  const [processos, prazos, compromissos, comunicacoes] = await Promise.all([
+    DB.getAllProcesses(),
+    DB.getAllDeadlines(),
+    DB.getAllCompromissos(),
+    DB.getAllComunicacoes ? DB.getAllComunicacoes() : Promise.resolve([])
+  ]);
+
+  // ====== Snapshot atual (carga ativa, independente de mês) ======
+  const today = new Date(); today.setHours(0,0,0,0);
+  const todayMs = today.getTime();
+
+  // Processos onde é titular ou suplente
+  const procsTitular = processos.filter(p => p.advogadoResponsavel === advogado);
+  const procsSuplente = processos.filter(p => p.advogadoSuplente === advogado);
+  const procsAtivosTitular = procsTitular.filter(p => p.status !== 'archived');
+
+  // Prazos ativos sob responsabilidade direta (titular do processo)
+  const ativosSnapshot = prazos.filter(d => {
+    if (!prazoEstaAtivo(d)) return false;
+    const proc = processos.find(p => p.id === d.processId);
+    return proc?.advogadoResponsavel === advogado;
+  });
+  const vencidos = ativosSnapshot.filter(d => new Date(d.deadlineDate) < today);
+  const urgentes = ativosSnapshot.filter(d => {
+    const dl = new Date(d.deadlineDate); dl.setHours(0,0,0,0);
+    const days = Math.ceil((dl - today) / 86400000);
+    return days >= 0 && days <= 3;
+  });
+
+  // ====== Métricas do mês ======
+  const cumpridos = prazos.filter(d => {
+    if (d.status !== 'cumprido') return false;
+    if (!_isDateInRange(d.cumprimento?.dataCumprimento, range)) return false;
+    const proc = processos.find(p => p.id === d.processId);
+    return proc?.advogadoResponsavel === advogado;
+  });
+  const cumpridosPrev = prazos.filter(d => {
+    if (d.status !== 'cumprido') return false;
+    if (!_isDateInRange(d.cumprimento?.dataCumprimento, rangePrev)) return false;
+    const proc = processos.find(p => p.id === d.processId);
+    return proc?.advogadoResponsavel === advogado;
+  });
+  const perdidosNoMes = prazos.filter(d => {
+    if (d.status !== 'perdido') return false;
+    if (!_isDateInRange(d.deadlineDate, range)) return false;
+    const proc = processos.find(p => p.id === d.processId);
+    return proc?.advogadoResponsavel === advogado;
+  });
+
+  const compsDoMes = compromissos.filter(c => {
+    if (!_isDateInRange(c.dataHoraInicio, range)) return false;
+    return c.responsavel === advogado || (c.participantes || []).includes(advogado);
+  });
+  const compsRealizados = compsDoMes.filter(c => c.status === 'realizado').length;
+  const compsCancelados = compsDoMes.filter(c => c.status === 'cancelado').length;
+  const compsDoMesPrev = compromissos.filter(c => {
+    if (!_isDateInRange(c.dataHoraInicio, rangePrev)) return false;
+    return c.responsavel === advogado || (c.participantes || []).includes(advogado);
+  });
+
+  const comsDoMes = (comunicacoes || []).filter(c => {
+    if (!_isInRange(c.data || c.createdAt, range)) return false;
+    return c.atendidoPor === advogado || c.criadoPor === advogado;
+  });
+
+  // ====== Próximos compromissos (futuro, status ativo) ======
+  const proxComps = compromissos.filter(c => {
+    if (c.status === 'cancelado' || c.status === 'realizado') return false;
+    if (c.responsavel !== advogado && !(c.participantes || []).includes(advogado)) return false;
+    if (!c.dataHoraInicio) return false;
+    return new Date(c.dataHoraInicio).getTime() >= todayMs;
+  }).sort((a, b) => (a.dataHoraInicio || '').localeCompare(b.dataHoraInicio || '')).slice(0, 8);
+
+  // ====== Próximos prazos (ativos, ordenados por vencimento) ======
+  const proxPrazos = ativosSnapshot.slice().sort((a, b) => new Date(a.deadlineDate) - new Date(b.deadlineDate)).slice(0, 8);
+
+  const ehMesAtual = ano === new Date().getFullYear() && mes === new Date().getMonth();
+  const cargaCor = ativosSnapshot.length >= 15 ? 'var(--uc-red)' : ativosSnapshot.length >= 8 ? 'var(--uc-amber)' : 'var(--uc-graphite)';
+
+  $('appContent').innerHTML = `
+    <div class="page-header">
+      <div>
+        <h1 class="page-title"><span class="smallcaps-prefix">Equipe</span></h1>
+        <p class="page-subtitle">Indicadores individuais · ${escapeHtml(advogado)}${ehMesAtual ? ' <span class="badge badge-gold" style="font-size:9px;">EM CURSO</span>' : ''}</p>
+      </div>
+      <div class="flex gap-2 items-center flex-wrap">
+        <select class="select" style="min-width: 200px;" onchange="_setEquipeAdvogado(this.value)">
+          ${ADVOGADOS.map(n => `<option value="${escapeHtml(n)}" ${n === advogado ? 'selected' : ''}>${escapeHtml(n)}</option>`).join('')}
+        </select>
+        <button class="btn btn-ghost btn-sm" onclick="_navegarMesEquipe(-1)" title="Mês anterior">‹</button>
+        <input type="month" class="input" style="max-width: 150px;" value="${ano}-${String(mes+1).padStart(2,'0')}" onchange="_setMesEquipe(this.value)">
+        <button class="btn btn-ghost btn-sm" onclick="_navegarMesEquipe(1)" title="Próximo mês">›</button>
+      </div>
+    </div>
+
+    <!-- Stats principais -->
+    <div class="grid gap-3 mb-4" style="grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));">
+      <div class="stat-card" style="${ativosSnapshot.length >= 15 ? 'background: var(--uc-red-soft); border-color: var(--uc-red);' : ativosSnapshot.length >= 8 ? 'background: var(--uc-amber-soft);' : ''}">
+        <div class="stat-label">Carga atual</div>
+        <div class="stat-value" style="color: ${cargaCor};">${ativosSnapshot.length}</div>
+        <div class="stat-meta">prazos ativos · titular</div>
+      </div>
+      <div class="stat-card" style="${vencidos.length > 0 ? 'background: var(--uc-red-soft); border-color: var(--uc-red);' : ''}">
+        <div class="stat-label">Vencidos</div>
+        <div class="stat-value" style="${vencidos.length > 0 ? 'color: var(--uc-red);' : ''}">${vencidos.length}</div>
+        <div class="stat-meta">${vencidos.length > 0 ? '⚠ regularizar' : 'OK'}</div>
+      </div>
+      <div class="stat-card" style="${urgentes.length > 0 ? 'background: var(--uc-amber-soft);' : ''}">
+        <div class="stat-label">Urgentes</div>
+        <div class="stat-value">${urgentes.length}</div>
+        <div class="stat-meta">≤ 3 dias</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Cumpridos no mês</div>
+        <div class="stat-value" style="color: var(--uc-green);">${cumpridos.length}</div>
+        <div class="stat-meta">vs ${cumpridosPrev.length} mês ant. · ${_renderDelta(_delta(cumpridos.length, cumpridosPrev.length))}</div>
+      </div>
+      <div class="stat-card" style="${perdidosNoMes.length > 0 ? 'background: var(--uc-red-soft);' : ''}">
+        <div class="stat-label">Perdidos no mês</div>
+        <div class="stat-value" style="${perdidosNoMes.length > 0 ? 'color: var(--uc-red);' : ''}">${perdidosNoMes.length}</div>
+        <div class="stat-meta">${perdidosNoMes.length > 0 ? '⚠ revisar' : 'Sem perdas'}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Compromissos</div>
+        <div class="stat-value">${compsDoMes.length}</div>
+        <div class="stat-meta">${compsRealizados} realizados · vs ${compsDoMesPrev.length} mês ant.</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Comunicações</div>
+        <div class="stat-value">${comsDoMes.length}</div>
+        <div class="stat-meta">no mês</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Processos · titular</div>
+        <div class="stat-value">${procsAtivosTitular.length}</div>
+        <div class="stat-meta">${procsTitular.length} no total · ${procsSuplente.length} como suplente</div>
+      </div>
+    </div>
+
+    ${vencidos.length > 0 ? `
+      <div class="card mb-4" style="border-left: 3px solid var(--uc-red); background: var(--uc-red-soft);">
+        <h3 class="font-serif text-lg font-semibold smallcaps mb-3" style="color: var(--uc-red);">⚠ Prazos vencidos não-cumpridos · ${vencidos.length}</h3>
+        ${vencidos.sort((a, b) => new Date(a.deadlineDate) - new Date(b.deadlineDate)).slice(0, 10).map(d => {
+          const proc = processos.find(p => p.id === d.processId);
+          const dl = new Date(d.deadlineDate); dl.setHours(0,0,0,0);
+          const dias = Math.abs(Math.ceil((dl - today) / 86400000));
+          return `
+            <div style="display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-bottom:1px solid rgba(168, 71, 45, 0.2); font-size:13px;">
+              <div style="flex:1; min-width:0;">
+                <div style="color: var(--uc-red); font-weight: 500;">${escapeHtml(d.description || d.type || 'Prazo')}</div>
+                <div style="font-size: 11px; color: var(--uc-warm-gray);">${escapeHtml(proc?.name || '—')}${proc?.cnj ? ' · ' + escapeHtml(proc.cnj) : ''} · vencimento ${formatDate(d.deadlineDate)}</div>
+              </div>
+              <div class="flex gap-1 items-center">
+                <span class="badge badge-red" style="font-size:9px;">há ${dias}d</span>
+                <button class="btn btn-ghost btn-sm" onclick="abrirModalCumprimento('${d.id}')" title="Marcar como cumprido" style="padding: 2px 6px;">✓</button>
+                ${proc ? `<button class="btn btn-ghost btn-sm" onclick="navigate('process', { currentProcessId: '${proc.id}' })" title="Abrir processo" style="padding: 2px 6px;">↗</button>` : ''}
+              </div>
+            </div>
+          `;
+        }).join('')}
+      </div>
+    ` : ''}
+
+    <div class="grid gap-4 mb-4" style="grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));">
+      <div class="card">
+        <h3 class="font-serif text-lg font-semibold smallcaps mb-3" style="color: var(--uc-black);">Próximos prazos · ${proxPrazos.length}</h3>
+        ${proxPrazos.length === 0 ? '<p class="help-text">Nenhum prazo ativo sob responsabilidade.</p>' : proxPrazos.map(d => {
+          const proc = processos.find(p => p.id === d.processId);
+          const dl = new Date(d.deadlineDate); dl.setHours(0,0,0,0);
+          const days = Math.ceil((dl - today) / 86400000);
+          let cls = 'safe', label = days + 'd';
+          if (days < 0) { cls = 'expired'; label = 'há ' + Math.abs(days) + 'd'; }
+          else if (days === 0) { cls = 'urgent'; label = 'HOJE'; }
+          else if (days <= 3) { cls = 'urgent'; label = days + 'd'; }
+          else if (days <= 7) { cls = 'warning'; label = days + 'd'; }
+          const badgeClass = cls === 'urgent' || cls === 'expired' ? 'badge-red' : cls === 'warning' ? 'badge-amber' : 'badge-green';
+          return `
+            <div style="display:flex; justify-content:space-between; align-items:center; padding:6px 0; border-bottom:1px solid var(--uc-line-soft); font-size:13px; cursor:pointer;" onclick="${proc ? `navigate('process', { currentProcessId: '${proc.id}' })` : ''}">
+              <div style="flex:1; min-width:0;">
+                <div style="font-weight: 500;">${escapeHtml(d.description || d.type)}</div>
+                <div style="font-size: 11px; color: var(--uc-warm-gray);">${escapeHtml(proc?.name || '—')}${proc?.cnj ? ' · ' + escapeHtml(proc.cnj) : ''}</div>
+              </div>
+              <span class="badge ${badgeClass}" style="font-size:9px;">${label}</span>
+            </div>
+          `;
+        }).join('')}
+      </div>
+
+      <div class="card">
+        <h3 class="font-serif text-lg font-semibold smallcaps mb-3" style="color: var(--uc-black);">Próximos compromissos · ${proxComps.length}</h3>
+        ${proxComps.length === 0 ? '<p class="help-text">Nenhum compromisso futuro.</p>' : proxComps.map(c => {
+          const meta = _agTipoMeta(c.tipo);
+          const dt = new Date(c.dataHoraInicio);
+          const days = Math.ceil((dt - today) / 86400000);
+          const dataLabel = days === 0 ? 'HOJE' : days === 1 ? 'AMANHÃ' : days + 'd · ' + formatDate(dt);
+          const hora = dt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+          return `
+            <div style="display:flex; justify-content:space-between; align-items:center; padding:6px 0; border-bottom:1px solid var(--uc-line-soft); font-size:13px; cursor:pointer;" onclick="navigate('agenda')">
+              <div style="flex:1; min-width:0;">
+                <div style="font-weight: 500;"><span style="color: ${meta.cor};">${meta.icon}</span> ${escapeHtml(c.titulo || meta.label)}</div>
+                <div style="font-size: 11px; color: var(--uc-warm-gray);">${dataLabel} ${hora}${c.local ? ' · ' + escapeHtml(c.local) : ''}</div>
+              </div>
+              <span class="badge ${days <= 1 ? 'badge-red' : days <= 7 ? 'badge-amber' : 'badge-green'}" style="font-size:9px;">${days <= 0 ? 'HOJE' : days + 'd'}</span>
+            </div>
+          `;
+        }).join('')}
+      </div>
+
+      <div class="card">
+        <h3 class="font-serif text-lg font-semibold smallcaps mb-3" style="color: var(--uc-black);">Processos como titular · ${procsAtivosTitular.length} ativos</h3>
+        ${procsAtivosTitular.length === 0 ? '<p class="help-text">Nenhum processo como titular ativo.</p>' : procsAtivosTitular.slice(0, 8).map(p => `
+          <div style="display:flex; justify-content:space-between; align-items:center; padding:6px 0; border-bottom:1px solid var(--uc-line-soft); font-size:13px; cursor:pointer;" onclick="navigate('process', { currentProcessId: '${p.id}' })">
+            <div style="flex:1; min-width:0;">
+              <div style="font-weight: 500;">${escapeHtml(p.name || '—')}</div>
+              <div style="font-size: 11px; color: var(--uc-warm-gray);">${p.cnj ? escapeHtml(p.cnj) : '—'}${p.area ? ' · ' + escapeHtml(p.area) : ''}</div>
+            </div>
+            <span style="font-size: 11px; color: var(--uc-warm-gray);">${formatDate(p.updatedAt, { relative: true })}</span>
+          </div>
+        `).join('')}
+        ${procsAtivosTitular.length > 8 ? `<p class="help-text" style="margin-top:6px;">+${procsAtivosTitular.length - 8} processos</p>` : ''}
+      </div>
+
+      ${procsSuplente.length > 0 ? `
+        <div class="card">
+          <h3 class="font-serif text-lg font-semibold smallcaps mb-3" style="color: var(--uc-black);">Como suplente · ${procsSuplente.length}</h3>
+          <p class="help-text" style="margin-bottom:8px;">Cobre o titular em caso de ausência.</p>
+          ${procsSuplente.slice(0, 8).map(p => `
+            <div style="display:flex; justify-content:space-between; align-items:center; padding:6px 0; border-bottom:1px solid var(--uc-line-soft); font-size:13px; cursor:pointer;" onclick="navigate('process', { currentProcessId: '${p.id}' })">
+              <div style="flex:1; min-width:0;">
+                <div style="font-weight: 500;">${escapeHtml(p.name || '—')}</div>
+                <div style="font-size: 11px; color: var(--uc-warm-gray);">${p.cnj ? escapeHtml(p.cnj) : '—'} · titular: ${escapeHtml(p.advogadoResponsavel || '—')}</div>
+              </div>
+            </div>
+          `).join('')}
+          ${procsSuplente.length > 8 ? `<p class="help-text" style="margin-top:6px;">+${procsSuplente.length - 8} processos</p>` : ''}
+        </div>
+      ` : ''}
+    </div>
+
+    <p class="help-text" style="text-align: center; margin-top: 24px;">
+      Snapshot gerado em ${formatDateTime(Date.now())}
+    </p>
+  `;
+}
+
+function _setEquipeAdvogado(nome) {
+  state._equipeRef = state._equipeRef || { ano: new Date().getFullYear(), mes: new Date().getMonth() };
+  state._equipeRef.advogado = nome;
+  renderEquipe();
+}
+function _setMesEquipe(yyyymm) {
+  const [a, m] = (yyyymm || '').split('-').map(Number);
+  if (!a || !m) return;
+  state._equipeRef = state._equipeRef || { advogado: ADVOGADOS[0] };
+  state._equipeRef.ano = a;
+  state._equipeRef.mes = m - 1;
+  renderEquipe();
+}
+function _navegarMesEquipe(delta) {
+  const ref = state._equipeRef || { ano: new Date().getFullYear(), mes: new Date().getMonth(), advogado: ADVOGADOS[0] };
+  let novoAno = ref.ano, novoMes = ref.mes + delta;
+  if (novoMes < 0) { novoMes = 11; novoAno--; }
+  if (novoMes > 11) { novoMes = 0; novoAno++; }
+  state._equipeRef = { ...ref, ano: novoAno, mes: novoMes };
+  renderEquipe();
 }
 
 async function renderTools() {

@@ -1,6 +1,6 @@
 # UC Jurídico — Instalação e operação
 
-Versão atual: **v6.31.0**
+Versão atual: **v6.32.0**
 URL pública: https://eduardourany-dot.github.io/uc-juridico/
 Repositório: https://github.com/eduardourany-dot/uc-juridico
 
@@ -267,7 +267,8 @@ Verificar:
 | v6.28.0 | ✅ entregue | Backup automático Drive — cron semanal Apps Script faz dump JSON de todas as 19 coleções para pasta privada do Drive. Rotação automática (12 mais recentes). |
 | v6.29.0 | ✅ entregue | Ações inline de prazo na agenda — botões ✓ cumprir · ⏸ suspender · ⊘ cancelar · ▶ reabrir direto no card. Funções de ação agnósticas ao contexto. |
 | v6.30.0 | ✅ entregue | Calendário visual mensal — toggle 📋 Lista / 📅 Calendário no header de `/agenda`. Grid 7×N + chips por dia. |
-| **v6.31.0** | ✅ em produção | **Petições Pet.1 — versionamento** — coleção `peticoes` com `numeroVersao` + `peticaoOriginalId`. Modal "Petição gerada" ganhou botão 💾 Salvar versão. Nova aba **"Petições"** no processo agrupando versões por linhagem (linhagens ordenadas pela data da última versão). Editor read-only abre versão existente com ações: 💾 Salvar alterações · + Nova versão · 📋 Copiar · ⬇ .md · ⬇ .txt · status (rascunho/final/arquivada) · 📦 arquivar · 🗑 remover versão. Setup operacional: deploy `firestore.rules` pra autorizar `peticoes`. |
+| v6.31.0 | ✅ entregue | Petições Pet.1 — versionamento + aba "Petições" no processo + editor com "+ Nova versão" / status / arquivar. |
+| **v6.32.0** | ✅ em produção | **Indicadores por advogado** — rota `/equipe` com picker de advogado + seletor de mês. 8 cards de stats: carga atual, vencidos, urgentes (≤3d), cumpridos no mês (vs anterior · Δ%), perdidos no mês, compromissos, comunicações, processos como titular/suplente. Lista destacada de **prazos vencidos não-cumpridos** com botão ✓ inline pra cumprir. Listas: próximos prazos, próximos compromissos, processos como titular, processos como suplente. Default abre no advogado logado. |
 | v6.22+ | planejado | Retomada Financeiro A.4 (Recorrências + Balancete) → A.5 → Agenda unificada |
 | v7.x | planejado | Módulo Petições com Claude API (briefing em [docs/BRIEFING_Peticoes.md](docs/BRIEFING_Peticoes.md)) |
 
