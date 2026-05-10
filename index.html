@@ -245,6 +245,11 @@ body{background:var(--uc-paper);color:var(--uc-graphite);font-size:15px;-webkit-
       <span>Prazos</span>
       <span id="navDeadlineCount" class="nav-badge hidden">0</span>
     </a>
+    <a class="nav-item" data-route="agenda">
+      <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+      <span>Agenda</span>
+      <span id="navAgendaCount" class="nav-badge gray hidden">0</span>
+    </a>
     <a class="nav-item" data-route="financeiro">
       <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
       <span>Financeiro</span>
@@ -268,7 +273,7 @@ body{background:var(--uc-paper);color:var(--uc-graphite);font-size:15px;-webkit-
 
     <div style="margin-top:auto;padding:16px 20px;border-top:1px solid var(--uc-line-soft);font-size:11px;color:var(--uc-warm-gray);text-align:center;">
       <p class="smallcaps font-serif" style="margin:0 0 4px;">Urany de Castro · 30 anos</p>
-      <p style="margin:0;">100% local · v6.24.0</p>
+      <p style="margin:0;">100% local · v6.25.0</p>
     </div>
   </aside>
 
@@ -472,6 +477,13 @@ const DB = {
   async saveComunicacao(c) { return c; },
   async deleteComunicacao(_id) {},
 
+  // ====== Compromissos (stub IndexedDB — sobrescrito por UC_RemoteDB no boot) ======
+  async getAllCompromissos() { return []; },
+  async getCompromissosByProcess(_pid) { return []; },
+  async getCompromissosByCliente(_cid) { return []; },
+  async saveCompromisso(c) { return c; },
+  async deleteCompromisso(_id) {},
+
   // ====== Módulo Financeiro (stubs IndexedDB — sobrescritos por UC_RemoteDB no boot) ======
   async getAllBancos() { return []; },
   async saveBanco(b) { return b; },
@@ -546,6 +558,7 @@ const routes = {
   clientes: renderClientesList,
   clienteDetalhe: renderClienteDetalhe,
   deadlines: renderDeadlines,
+  agenda: renderAgenda,
   financeiro: renderFinanceiro,
   tools: renderTools,
   diligence: renderDiligence,
@@ -791,6 +804,8 @@ function applyTheme(theme) {
 async function renderDashboard() {
   const processes = await DB.getAllProcesses();
   const deadlines = await DB.getAllDeadlines();
+  let compromissosAll = [];
+  try { compromissosAll = await DB.getAllCompromissos(); } catch (e) { console.warn('compromissos não disponíveis no dashboard', e); }
   const activeDeadlines = deadlines.filter(d => prazoEstaAtivo(d));
   const today = new Date(); today.setHours(0,0,0,0);
   const urgentDeadlines = activeDeadlines.filter(d => {
@@ -798,6 +813,15 @@ async function renderDashboard() {
     return diff <= 5 && diff >= 0;
   });
   const expiredDeadlines = activeDeadlines.filter(d => new Date(d.deadlineDate) < today);
+
+  // Próximos compromissos (próximos 7 dias, status agendado/confirmado/adiado)
+  const semanaMs = today.getTime() + 7 * 86400000;
+  const proxComps = (compromissosAll || []).filter(c => {
+    if (!c.dataHoraInicio) return false;
+    if (c.status === 'cancelado' || c.status === 'realizado') return false;
+    const ms = new Date(c.dataHoraInicio).getTime();
+    return ms >= today.getTime() && ms <= semanaMs;
+  }).sort((a, b) => (a.dataHoraInicio || '').localeCompare(b.dataHoraInicio || ''));
 
   const recentProcesses = [...processes].sort((a,b) => b.updatedAt - a.updatedAt).slice(0, 5);
   state.processes = processes;
@@ -854,6 +878,38 @@ async function renderDashboard() {
         <div class="stat-meta">No total</div>
       </div>
     </div>
+
+    ${proxComps.length > 0 ? `
+      <div class="card mb-6" style="border-left: 3px solid var(--uc-gold);">
+        <div class="flex justify-between items-center mb-3">
+          <h2 class="font-serif text-lg font-semibold smallcaps" style="color: var(--uc-black);">📅 Próximos compromissos · 7 dias</h2>
+          <a class="text-sm font-medium" style="color: var(--uc-gold); cursor: pointer;" onclick="navigate('agenda')">Ver agenda →</a>
+        </div>
+        <div class="grid gap-2" style="grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));">
+          ${proxComps.slice(0, 5).map(c => {
+            const meta = _agTipoMeta(c.tipo);
+            const dt = new Date(c.dataHoraInicio);
+            const diff = Math.ceil((dt - today) / 86400000);
+            const quando = diff === 0 ? 'HOJE' : diff === 1 ? 'AMANHÃ' : `em ${diff}d`;
+            const hora = dt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+            return `
+              <div class="card" style="padding: 10px; background: var(--uc-cream); cursor: pointer;" onclick="navigate('agenda')">
+                <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 4px;">
+                  <span style="color: ${meta.color}; font-size: 14px;">${meta.icon}</span>
+                  <strong style="font-size: 13px; color: var(--uc-black);">${escapeHtml(c.titulo || meta.label)}</strong>
+                </div>
+                <div style="font-size: 11px; color: var(--uc-warm-gray);">
+                  <strong style="color: ${diff === 0 ? 'var(--uc-red)' : diff === 1 ? 'var(--uc-amber)' : 'var(--uc-graphite)'};">${quando}</strong>
+                  · ${formatDate(dt)} ${hora}
+                  ${c.local ? '· ' + escapeHtml(c.local) : ''}
+                </div>
+              </div>
+            `;
+          }).join('')}
+        </div>
+        ${proxComps.length > 5 ? `<p class="help-text" style="margin-top: 6px;">+${proxComps.length - 5} compromissos · ver na <a onclick="navigate('agenda')" style="color: var(--uc-gold); cursor: pointer;">Agenda</a></p>` : ''}
+      </div>
+    ` : ''}
 
     <div class="grid gap-6" style="grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));">
 
@@ -1684,6 +1740,12 @@ async function renderClienteDetalhe() {
       toast('Comunicações indisponíveis', 'Rode firebase deploy --only firestore:rules', 'error');
     }
   }
+  let compromissosCli = [];
+  try {
+    compromissosCli = await DB.getCompromissosByCliente(cid);
+  } catch (e) {
+    console.warn('[compromissos] falha ao buscar:', e?.message || e);
+  }
   const cli = clientes.find(c => c.id === cid);
   if (!cli) {
     toast('Cliente não encontrado', '', 'error');
@@ -1816,6 +1878,41 @@ async function renderClienteDetalhe() {
     </div>
 
     ${renderClienteComunicacoesSection(cli, minhasComs, processos)}
+
+    ${(() => {
+      const todayMs = (() => { const t = new Date(); t.setHours(0,0,0,0); return t.getTime(); })();
+      const futCompr = (compromissosCli || []).filter(c => {
+        if (!c.dataHoraInicio) return false;
+        if (c.status === 'cancelado' || c.status === 'realizado') return false;
+        return new Date(c.dataHoraInicio).getTime() >= todayMs;
+      }).sort((a, b) => (a.dataHoraInicio || '').localeCompare(b.dataHoraInicio || ''));
+      const passCompr = (compromissosCli || []).filter(c => !futCompr.includes(c))
+        .sort((a, b) => (b.dataHoraInicio || '').localeCompare(a.dataHoraInicio || ''));
+      // procById pra link do card (cliById null — já estamos no cliente)
+      const procById = {};
+      processos.forEach(pp => { procById[pp.id] = pp; });
+      return `
+        <div class="card mb-3">
+          <div class="flex justify-between items-center mb-3">
+            <h3 class="font-serif text-lg font-semibold smallcaps" style="color: var(--uc-black);">Compromissos${futCompr.length ? ' · <span style="color: var(--uc-amber);">' + futCompr.length + ' próximo' + (futCompr.length !== 1 ? 's' : '') + '</span>' : ''}</h3>
+            <button class="btn btn-primary btn-sm" onclick="novoCompromissoFlow({ clienteIdFixo: '${cli.id}' })">+ Novo compromisso</button>
+          </div>
+          ${(compromissosCli || []).length === 0 ? `
+            <p class="help-text">Nenhum compromisso vinculado a este cliente ainda.</p>
+          ` : `
+            ${futCompr.length ? `
+              <p class="text-xs smallcaps mb-2" style="color: var(--uc-warm-gray);">Próximos</p>
+              ${futCompr.slice(0, 6).map(c => _renderCompromissoCard(c, procById, null)).join('')}
+            ` : ''}
+            ${passCompr.length ? `
+              <p class="text-xs smallcaps mb-2 mt-3" style="color: var(--uc-warm-gray);">Histórico recente</p>
+              ${passCompr.slice(0, 4).map(c => _renderCompromissoCard(c, procById, null)).join('')}
+            ` : ''}
+            ${(futCompr.length > 6 || passCompr.length > 4) ? `<p class="help-text" style="margin-top: 6px;">Ver todos em <a onclick="navigate('agenda')" style="color: var(--uc-gold); cursor: pointer;">Agenda</a></p>` : ''}
+          `}
+        </div>
+      `;
+    })()}
 
     ${minhasTrans.length > 0 ? `
       <div class="card mb-3">
@@ -2280,13 +2377,15 @@ async function renderProcessDetail() {
   const notes = await DB.getNotesByProcess(p.id);
   const jurisprudence = await DB.getJurisprudenceByProcess(p.id);
   const honorarios = await DB.getHonorariosByProcess(p.id);
+  let compromissos = [];
+  try { compromissos = await DB.getCompromissosByProcess(p.id); } catch (e) { console.warn('compromissos não disponíveis', e); }
 
   // Update counts
   p.eventCount = events.length;
   p.noteCount = notes.length;
   await DB.saveProcess(p);
 
-  state._processView = { p, events, deadlines, notes, jurisprudence, honorarios, activeTab: state._processView?.activeTab || 'overview' };
+  state._processView = { p, events, deadlines, notes, jurisprudence, honorarios, compromissos, activeTab: state._processView?.activeTab || 'overview' };
 
   $('appContent').innerHTML = `
     <div class="page-header">
@@ -2314,6 +2413,7 @@ async function renderProcessDetail() {
       <button class="detail-tab ${state._processView.activeTab === 'jurisprudence' ? 'active' : ''}" onclick="setProcessTab('jurisprudence')">Jurisprudência · ${jurisprudence.length}</button>
       <button class="detail-tab ${state._processView.activeTab === 'notes' ? 'active' : ''}" onclick="setProcessTab('notes')">Notas · ${notes.length}</button>
       <button class="detail-tab ${state._processView.activeTab === 'honorarios' ? 'active' : ''}" onclick="setProcessTab('honorarios')">Honorários · ${honorarios.length}</button>
+      <button class="detail-tab ${state._processView.activeTab === 'compromissos' ? 'active' : ''}" onclick="setProcessTab('compromissos')">Compromissos · ${compromissos.length}</button>
       <button class="detail-tab ${state._processView.activeTab === 'analysis' ? 'active' : ''}" onclick="setProcessTab('analysis')">Análise IA</button>
     </div>
 
@@ -2332,7 +2432,7 @@ function setProcessTab(tab) {
 }
 
 async function renderProcessTabContent() {
-  const { p, events, deadlines, notes, jurisprudence, honorarios, activeTab } = state._processView;
+  const { p, events, deadlines, notes, jurisprudence, honorarios, compromissos, activeTab } = state._processView;
   const c = $('processTabContent');
   if (activeTab === 'overview') c.innerHTML = renderProcessOverview(p, events, deadlines, notes, jurisprudence);
   else if (activeTab === 'cliente') c.innerHTML = await renderProcessCliente(p);
@@ -2341,7 +2441,55 @@ async function renderProcessTabContent() {
   else if (activeTab === 'jurisprudence') c.innerHTML = renderProcessJurisprudence(p, jurisprudence);
   else if (activeTab === 'notes') c.innerHTML = renderProcessNotes(p, notes);
   else if (activeTab === 'honorarios') c.innerHTML = renderProcessHonorarios(p, honorarios || []);
+  else if (activeTab === 'compromissos') c.innerHTML = await renderProcessCompromissos(p, compromissos || []);
   else if (activeTab === 'analysis') c.innerHTML = renderProcessAnalysis(p, events, deadlines, jurisprudence);
+}
+
+async function renderProcessCompromissos(p, compromissos) {
+  if (!compromissos.length) {
+    return `
+      <div class="empty-state">
+        <h3 class="empty-state-title">Nenhum compromisso vinculado</h3>
+        <p class="empty-state-msg">Cadastre audiências, reuniões com cliente, diligências ou prazos administrativos relacionados a este processo. Você receberá push e email no dia anterior e no dia.</p>
+        <button class="btn btn-primary" onclick="novoCompromissoFlow({ processoIdFixo: '${p.id}', clienteIdFixo: '${p.clienteId || ''}' })">+ Novo compromisso</button>
+      </div>
+    `;
+  }
+
+  const ordenados = [...compromissos].sort((a, b) => {
+    const ai = a.dataHoraInicio || '';
+    const bi = b.dataHoraInicio || '';
+    return ai.localeCompare(bi);
+  });
+
+  const today = new Date(); today.setHours(0,0,0,0);
+  const futuros = ordenados.filter(c => new Date(c.dataHoraInicio) >= today && c.status !== 'cancelado' && c.status !== 'realizado');
+  const passados = ordenados.filter(c => !(new Date(c.dataHoraInicio) >= today && c.status !== 'cancelado' && c.status !== 'realizado'));
+
+  // Map de cliente por id pra link do card (o link de processo é
+  // suprimido — já estamos dentro do processo). Cache de 5min em DB.
+  const cliById = {};
+  try {
+    const clientes = await DB.getAllClientes();
+    clientes.forEach(cl => { cliById[cl.id] = cl; });
+  } catch (_) {}
+
+  return `
+    <div class="flex justify-between items-center mb-3">
+      <p class="text-sm" style="color: var(--uc-warm-gray); margin: 0;">${futuros.length} futuro${futuros.length !== 1 ? 's' : ''} · ${passados.length} histórico${passados.length !== 1 ? 's' : ''}</p>
+      <button class="btn btn-primary btn-sm" onclick="novoCompromissoFlow({ processoIdFixo: '${p.id}', clienteIdFixo: '${p.clienteId || ''}' })">+ Novo</button>
+    </div>
+
+    ${futuros.length ? `
+      <h4 class="font-serif font-semibold smallcaps mb-2" style="color: var(--uc-black);">Próximos</h4>
+      ${futuros.map(c => _renderCompromissoCard(c, null, cliById)).join('')}
+    ` : ''}
+
+    ${passados.length ? `
+      <h4 class="font-serif font-semibold smallcaps mb-2 mt-4" style="color: var(--uc-warm-gray);">Histórico</h4>
+      ${passados.map(c => _renderCompromissoCard(c, null, cliById)).join('')}
+    ` : ''}
+  `;
 }
 
 async function renderProcessCliente(p) {
@@ -7734,6 +7882,421 @@ async function removerTransacao(id) {
   renderFinanceiro();
 }
 
+// ====================================================================
+// === MÓDULO AGENDA — compromissos (v6.25) ===========================
+// ====================================================================
+
+const COMPROMISSO_TIPOS = [
+  { value: 'audiencia',       label: 'Audiência',           icon: '⚖️', cor: '#a8472d' },
+  { value: 'reuniao_cliente', label: 'Reunião com cliente', icon: '🤝', cor: '#8a6f3d' },
+  { value: 'reuniao_interna', label: 'Reunião interna',     icon: '👥', cor: '#4a7c4a' },
+  { value: 'diligencia',      label: 'Diligência',          icon: '🚗', cor: '#b87f1c' },
+  { value: 'prazo_admin',     label: 'Prazo administrativo', icon: '📋', cor: '#6b6b68' },
+  { value: 'outro',           label: 'Outro',               icon: '📌', cor: '#9b9b96' }
+];
+
+const COMPROMISSO_STATUS = [
+  { value: 'agendado',    label: 'Agendado',    cor: '#6b6b68', badgeClass: 'badge-gray' },
+  { value: 'confirmado',  label: 'Confirmado',  cor: '#4a7c4a', badgeClass: 'badge-green' },
+  { value: 'realizado',   label: 'Realizado',   cor: '#4a7c4a', badgeClass: 'badge-green' },
+  { value: 'cancelado',   label: 'Cancelado',   cor: '#a8472d', badgeClass: 'badge-red' },
+  { value: 'adiado',      label: 'Adiado',      cor: '#b87f1c', badgeClass: 'badge-amber' }
+];
+
+function _agTipoMeta(tipo) {
+  return COMPROMISSO_TIPOS.find(t => t.value === tipo) || COMPROMISSO_TIPOS[5];
+}
+function _agStatusMeta(status) {
+  return COMPROMISSO_STATUS.find(s => s.value === status) || COMPROMISSO_STATUS[0];
+}
+
+// Marco de compromisso (T-1 / T-0 / T+1) baseado em dataHoraInicio.
+// Não dispara em status terminal (realizado/cancelado).
+function _marcoDoCompromisso(c, hoje) {
+  if (!c || !c.dataHoraInicio) return null;
+  if (c.status === 'realizado' || c.status === 'cancelado') return null;
+  const today = hoje || (() => { const t = new Date(); t.setHours(0,0,0,0); return t; })();
+  const inicio = new Date(c.dataHoraInicio);
+  inicio.setHours(0, 0, 0, 0);
+  const days = Math.ceil((inicio - today) / 86400000);
+  if (days === 1) return 'T-1';
+  if (days === 0) return 'T-0';
+  if (days === -1) return 'T+1';
+  return null;
+}
+
+async function renderAgenda() {
+  const [compromissos, processos, clientes] = await Promise.all([
+    DB.getAllCompromissos(), DB.getAllProcesses(), DB.getAllClientes()
+  ]);
+  const procById = {}; processos.forEach(p => procById[p.id] = p);
+  const cliById = {}; clientes.forEach(c => cliById[c.id] = c);
+
+  // Atualiza badge nav
+  const today = new Date(); today.setHours(0,0,0,0);
+  const proximos7 = compromissos.filter(c => {
+    if (c.status === 'cancelado' || c.status === 'realizado') return false;
+    const dt = new Date(c.dataHoraInicio || 0);
+    const diff = Math.ceil((dt - today) / 86400000);
+    return diff >= 0 && diff <= 7;
+  });
+  const navBadge = $('navAgendaCount');
+  if (navBadge) {
+    if (proximos7.length > 0) { navBadge.textContent = proximos7.length; navBadge.classList.remove('hidden'); }
+    else navBadge.classList.add('hidden');
+  }
+
+  state._agFiltro = state._agFiltro || {
+    periodo: 'prox30',  // semana | prox30 | mes | custom | todos
+    dataInicio: '', dataFim: '',
+    tipo: 'todos',
+    status: 'ativos',  // ativos = exclui cancelado+realizado
+    responsavel: '',
+    busca: ''
+  };
+  const f = state._agFiltro;
+
+  // Resolve range de datas
+  let dataInicioISO = '', dataFimISO = '';
+  const hoje = new Date(); hoje.setHours(0,0,0,0);
+  if (f.periodo === 'semana') {
+    dataInicioISO = hoje.toISOString().slice(0, 10);
+    dataFimISO = new Date(hoje.getTime() + 7 * 86400000).toISOString().slice(0, 10);
+  } else if (f.periodo === 'prox30') {
+    dataInicioISO = hoje.toISOString().slice(0, 10);
+    dataFimISO = new Date(hoje.getTime() + 30 * 86400000).toISOString().slice(0, 10);
+  } else if (f.periodo === 'mes') {
+    dataInicioISO = new Date(hoje.getFullYear(), hoje.getMonth(), 1).toISOString().slice(0, 10);
+    dataFimISO = new Date(hoje.getFullYear(), hoje.getMonth() + 1, 0).toISOString().slice(0, 10);
+  } else if (f.periodo === 'custom') {
+    dataInicioISO = f.dataInicio || '';
+    dataFimISO = f.dataFim || '';
+  }
+
+  let filtrados = compromissos.slice();
+  if (f.tipo !== 'todos') filtrados = filtrados.filter(c => c.tipo === f.tipo);
+  if (f.status === 'ativos') filtrados = filtrados.filter(c => c.status !== 'cancelado' && c.status !== 'realizado');
+  else if (f.status !== 'todos') filtrados = filtrados.filter(c => c.status === f.status);
+  if (f.responsavel) filtrados = filtrados.filter(c => c.responsavel === f.responsavel);
+  if (dataInicioISO) filtrados = filtrados.filter(c => (c.dataHoraInicio || '').slice(0, 10) >= dataInicioISO);
+  if (dataFimISO) filtrados = filtrados.filter(c => (c.dataHoraInicio || '').slice(0, 10) <= dataFimISO);
+  if (f.busca && f.busca.trim()) {
+    const q = f.busca.trim().toLowerCase();
+    filtrados = filtrados.filter(c =>
+      (c.titulo || '').toLowerCase().includes(q) ||
+      (c.local || '').toLowerCase().includes(q) ||
+      (c.observacoes || '').toLowerCase().includes(q)
+    );
+  }
+  filtrados.sort((a, b) => (a.dataHoraInicio || '').localeCompare(b.dataHoraInicio || ''));
+
+  // Stats
+  const venceram = compromissos.filter(c => {
+    if (c.status === 'cancelado' || c.status === 'realizado') return false;
+    return new Date(c.dataHoraInicio || 0) < new Date();
+  }).length;
+
+  // Agrupa por dia (ISO YYYY-MM-DD)
+  const porDia = {};
+  for (const c of filtrados) {
+    const dia = (c.dataHoraInicio || '').slice(0, 10);
+    if (!porDia[dia]) porDia[dia] = [];
+    porDia[dia].push(c);
+  }
+  const diasOrdenados = Object.keys(porDia).sort();
+
+  $('appContent').innerHTML = `
+    <div class="page-header">
+      <div>
+        <h1 class="page-title"><span class="smallcaps-prefix">Agenda</span></h1>
+        <p class="page-subtitle">${compromissos.length} compromisso(s) · ${proximos7.length} nos próximos 7 dias${venceram > 0 ? ' · <span style="color: var(--uc-red);">⚠ ' + venceram + ' venceu(ram) sem marcação</span>' : ''}</p>
+      </div>
+      <button class="btn btn-primary" onclick="novoCompromissoFlow()">+ Novo compromisso</button>
+    </div>
+
+    <div class="card mb-3" style="padding: 10px;">
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; align-items: end;">
+        <div>
+          <label class="label" style="font-size: 11px; margin-bottom: 4px;">Período</label>
+          <select class="select" onchange="_setAgFiltro('periodo', this.value)">
+            <option value="semana" ${f.periodo === 'semana' ? 'selected' : ''}>Próximos 7 dias</option>
+            <option value="prox30" ${f.periodo === 'prox30' ? 'selected' : ''}>Próximos 30 dias</option>
+            <option value="mes" ${f.periodo === 'mes' ? 'selected' : ''}>Este mês</option>
+            <option value="custom" ${f.periodo === 'custom' ? 'selected' : ''}>Custom</option>
+            <option value="todos" ${f.periodo === 'todos' ? 'selected' : ''}>Todos</option>
+          </select>
+        </div>
+        ${f.periodo === 'custom' ? `
+          <div><label class="label" style="font-size: 11px; margin-bottom: 4px;">De</label><input type="date" class="input" value="${f.dataInicio || ''}" onchange="_setAgFiltro('dataInicio', this.value)"></div>
+          <div><label class="label" style="font-size: 11px; margin-bottom: 4px;">Até</label><input type="date" class="input" value="${f.dataFim || ''}" onchange="_setAgFiltro('dataFim', this.value)"></div>
+        ` : ''}
+        <div>
+          <label class="label" style="font-size: 11px; margin-bottom: 4px;">Tipo</label>
+          <select class="select" onchange="_setAgFiltro('tipo', this.value)">
+            <option value="todos" ${f.tipo === 'todos' ? 'selected' : ''}>Todos</option>
+            ${COMPROMISSO_TIPOS.map(t => `<option value="${t.value}" ${f.tipo === t.value ? 'selected' : ''}>${t.icon} ${t.label}</option>`).join('')}
+          </select>
+        </div>
+        <div>
+          <label class="label" style="font-size: 11px; margin-bottom: 4px;">Status</label>
+          <select class="select" onchange="_setAgFiltro('status', this.value)">
+            <option value="ativos" ${f.status === 'ativos' ? 'selected' : ''}>Ativos</option>
+            <option value="todos" ${f.status === 'todos' ? 'selected' : ''}>Todos</option>
+            ${COMPROMISSO_STATUS.map(s => `<option value="${s.value}" ${f.status === s.value ? 'selected' : ''}>${s.label}</option>`).join('')}
+          </select>
+        </div>
+        <div>
+          <label class="label" style="font-size: 11px; margin-bottom: 4px;">Responsável</label>
+          <select class="select" onchange="_setAgFiltro('responsavel', this.value)">
+            <option value="" ${!f.responsavel ? 'selected' : ''}>Todos</option>
+            ${ADVOGADOS.map(n => `<option value="${escapeHtml(n)}" ${f.responsavel === n ? 'selected' : ''}>${escapeHtml(n.split(' ')[0])} ${escapeHtml(n.split(' ').slice(-1)[0])}</option>`).join('')}
+          </select>
+        </div>
+        <div style="grid-column: 1 / -1;">
+          <label class="label" style="font-size: 11px; margin-bottom: 4px;">Buscar</label>
+          <input type="text" class="input" value="${escapeHtml(f.busca || '')}" placeholder="Título, local, observações" oninput="_setAgFiltroDebounced('busca', this.value)">
+        </div>
+      </div>
+    </div>
+
+    ${filtrados.length === 0 ? `
+      <div class="empty-state">
+        <p class="empty-state-msg">${compromissos.length === 0 ? 'Nenhum compromisso cadastrado. Use o botão "+ Novo compromisso" para começar.' : 'Nenhum compromisso com esses filtros.'}</p>
+      </div>
+    ` : diasOrdenados.map(dia => {
+      const dt = new Date(dia + 'T12:00:00');
+      const labelDia = dt.toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' });
+      const isHoje = dia === hoje.toISOString().slice(0, 10);
+      const isPassado = dia < hoje.toISOString().slice(0, 10);
+      return `
+        <div style="margin-bottom: 18px;">
+          <h3 style="font-size: 13px; font-weight: 600; color: ${isHoje ? 'var(--uc-red)' : isPassado ? 'var(--uc-warm-gray)' : 'var(--uc-black)'}; margin: 0 0 8px; text-transform: capitalize;">
+            ${isHoje ? '📍 ' : ''}${labelDia}${isHoje ? ' (hoje)' : ''}
+          </h3>
+          ${porDia[dia].map(c => _renderCompromissoCard(c, procById, cliById)).join('')}
+        </div>
+      `;
+    }).join('')}
+  `;
+}
+
+function _renderCompromissoCard(c, procById, cliById) {
+  const tipo = _agTipoMeta(c.tipo);
+  const status = _agStatusMeta(c.status);
+  // procById/cliById podem ser null/undefined quando o caller quer
+  // suprimir o link daquele lado (ex.: dentro da aba Compromissos do
+  // processo, não precisa repetir o link pro próprio processo).
+  const proc = (c.processoId && procById && typeof procById === 'object') ? procById[c.processoId] : null;
+  const cli = (c.clienteId && cliById && typeof cliById === 'object') ? cliById[c.clienteId] : null;
+  const inicio = c.dataHoraInicio ? new Date(c.dataHoraInicio) : null;
+  const fim = c.dataHoraFim ? new Date(c.dataHoraFim) : null;
+  const horario = inicio
+    ? inicio.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) +
+      (fim ? ' – ' + fim.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '')
+    : '—';
+
+  return `
+    <div class="card" style="margin-bottom: 8px; padding: 12px; border-left: 4px solid ${tipo.cor};">
+      <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;">
+        <div style="flex: 1; min-width: 0;">
+          <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px; flex-wrap: wrap;">
+            <span style="font-size: 14px;">${tipo.icon}</span>
+            <strong style="color: var(--uc-black); font-size: 14px;">${escapeHtml(c.titulo || '—')}</strong>
+            <span class="badge ${status.badgeClass}" style="font-size: 9px;">${status.label}</span>
+            <span style="font-size: 12px; color: var(--uc-warm-gray);">⏰ ${horario}</span>
+          </div>
+          ${c.local ? `<div style="font-size: 12px; color: var(--uc-warm-gray); margin-bottom: 4px;">📍 ${escapeHtml(c.local)}</div>` : ''}
+          <div style="font-size: 12px; color: var(--uc-warm-gray);">
+            ${c.responsavel ? '👤 ' + escapeHtml(c.responsavel.split(' ')[0]) : ''}
+            ${c.participantes && c.participantes.length ? ' + ' + c.participantes.length + ' participante(s)' : ''}
+            ${proc ? ` · <a onclick="navigate('process', { currentProcessId: '${proc.id}' })" style="cursor:pointer; color:var(--uc-gold);">${escapeHtml(proc.cnj || proc.name || 'processo')}</a>` : ''}
+            ${cli ? ` · <a onclick="navigate('clienteDetalhe', { currentClienteId: '${cli.id}' })" style="cursor:pointer; color:var(--uc-gold);">${escapeHtml(cli.nome)}</a>` : ''}
+          </div>
+          ${c.observacoes ? `<details style="margin-top: 6px;"><summary style="font-size: 11px; color: var(--uc-warm-gray); cursor: pointer;">📝 observações</summary><div style="font-size: 12px; color: var(--uc-graphite); padding: 6px 0; white-space: pre-wrap; line-height: 1.5;">${escapeHtml(c.observacoes)}</div></details>` : ''}
+        </div>
+        <div style="display: flex; gap: 2px; flex-shrink: 0;">
+          ${c.status !== 'realizado' && c.status !== 'cancelado' ? `<button class="btn btn-ghost btn-sm" onclick="alterarStatusCompromisso('${c.id}')" title="Alterar status" style="padding: 2px 6px;">✓</button>` : ''}
+          <button class="btn btn-ghost btn-sm" onclick="editarCompromisso('${c.id}')" title="Editar" style="padding: 2px 6px;">✎</button>
+          <button class="btn btn-ghost btn-sm" onclick="removerCompromisso('${c.id}')" title="Remover" style="padding: 2px 6px;">🗑</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function _setAgFiltro(campo, valor) {
+  state._agFiltro = state._agFiltro || {};
+  state._agFiltro[campo] = valor;
+  renderAgenda();
+}
+let _agFiltroDebounce = null;
+function _setAgFiltroDebounced(campo, valor) {
+  state._agFiltro = state._agFiltro || {};
+  state._agFiltro[campo] = valor;
+  clearTimeout(_agFiltroDebounce);
+  _agFiltroDebounce = setTimeout(() => renderAgenda(), 300);
+}
+
+async function novoCompromissoFlow(opts) {
+  if (typeof opts === 'string') opts = { processoIdFixo: opts };
+  const { processoIdFixo, clienteIdFixo } = opts || {};
+  const [processos, clientes] = await Promise.all([
+    DB.getAllProcesses(), DB.getAllClientes()
+  ]);
+  const procOpts = [
+    { value: '', label: '— sem processo —' },
+    ...processos.sort((a,b) => (a.name || '').localeCompare(b.name || '', 'pt-BR'))
+      .map(p => ({ value: p.id, label: (p.cnj ? p.cnj + ' · ' : '') + (p.name || '—') }))
+  ];
+  const cliOpts = [
+    { value: '', label: '— sem cliente —' },
+    ...clientes.filter(c => c.ativo !== false).sort((a,b) => (a.nome || '').localeCompare(b.nome || '', 'pt-BR'))
+      .map(c => ({ value: c.id, label: c.nome }))
+  ];
+
+  // Default cliente do processo se for vinculado
+  let clienteIdInicial = clienteIdFixo || '';
+  if (processoIdFixo && !clienteIdFixo) {
+    const proc = processos.find(p => p.id === processoIdFixo);
+    if (proc?.clienteId) clienteIdInicial = proc.clienteId;
+  }
+
+  const me = (window.UC_Auth?.getUser?.() || {}).email || '';
+  const meuNome = defaultAdvogado(me) || '';
+
+  // Default próximo dia útil 9h
+  const amanha = new Date();
+  amanha.setDate(amanha.getDate() + 1);
+  amanha.setHours(9, 0, 0, 0);
+  amanha.setMinutes(amanha.getMinutes() - amanha.getTimezoneOffset());
+  const amanhaISO = amanha.toISOString().slice(0, 16);
+
+  const r = await showModal('Novo compromisso', [
+    { label: 'Tipo', name: 'tipo', type: 'select', default: 'audiencia',
+      options: COMPROMISSO_TIPOS.map(t => ({ value: t.value, label: t.icon + ' ' + t.label })) },
+    { label: 'Título', name: 'titulo', placeholder: 'Ex: Audiência de instrução · Reunião com cliente · Diligência cartório' },
+    { label: 'Início (data e hora)', name: 'dataHoraInicio', type: 'datetime-local', default: amanhaISO },
+    { label: 'Fim (opcional)', name: 'dataHoraFim', type: 'datetime-local', default: '' },
+    { label: 'Local', name: 'local', placeholder: 'Sala do tribunal · endereço · link Zoom · etc.' },
+    { label: 'Processo vinculado', name: 'processoId', type: 'select', default: processoIdFixo || '', options: procOpts },
+    { label: 'Cliente vinculado', name: 'clienteId', type: 'select', default: clienteIdInicial, options: cliOpts },
+    { label: 'Responsável', name: 'responsavel', type: 'select', default: meuNome,
+      options: [{ value: '', label: '— não atribuído —' }, ...ADVOGADOS.map(n => ({ value: n, label: n }))] },
+    { label: 'Status', name: 'status', type: 'select', default: 'agendado',
+      options: COMPROMISSO_STATUS.map(s => ({ value: s.value, label: s.label })) },
+    { label: 'Observações', name: 'observacoes', type: 'textarea', rows: 3 }
+  ], {
+    confirmLabel: 'Cadastrar',
+    intro: 'Compromissos disparam push (T-1 dia anterior) e push+email (T-0 dia/horário) automaticamente.'
+  });
+  if (!r) return;
+  const [tipo, titulo, dataHoraInicio, dataHoraFim, local, processoId, clienteId, responsavel, status, observacoes] = r;
+  if (!titulo?.trim()) { toast('Título obrigatório', '', 'error'); return; }
+  if (!dataHoraInicio) { toast('Data e hora de início obrigatórias', '', 'error'); return; }
+
+  await DB.saveCompromisso({
+    id: uid(),
+    tipo: tipo || 'outro',
+    titulo: titulo.trim(),
+    dataHoraInicio: new Date(dataHoraInicio).toISOString(),
+    dataHoraFim: dataHoraFim ? new Date(dataHoraFim).toISOString() : null,
+    local: (local || '').trim() || null,
+    processoId: processoId || null,
+    clienteId: clienteId || null,
+    responsavel: responsavel || null,
+    participantes: [],
+    status: status || 'agendado',
+    observacoes: (observacoes || '').trim() || null,
+    notificado: {},
+    createdAt: Date.now()
+  });
+  toast('Compromisso cadastrado', titulo.trim(), 'success');
+
+  // Re-render do contexto
+  if (state.currentRoute === 'agenda') renderAgenda();
+  else if (state.currentRoute === 'process') renderProcessTabContent();
+  else if (state.currentRoute === 'clienteDetalhe') renderClienteDetalhe();
+}
+
+async function editarCompromisso(id) {
+  const [compromissos, processos, clientes] = await Promise.all([
+    DB.getAllCompromissos(), DB.getAllProcesses(), DB.getAllClientes()
+  ]);
+  const c = compromissos.find(x => x.id === id);
+  if (!c) return;
+  const procOpts = [
+    { value: '', label: '— sem processo —' },
+    ...processos.map(p => ({ value: p.id, label: (p.cnj ? p.cnj + ' · ' : '') + (p.name || '—') }))
+  ];
+  const cliOpts = [
+    { value: '', label: '— sem cliente —' },
+    ...clientes.filter(x => x.ativo !== false).map(x => ({ value: x.id, label: x.nome }))
+  ];
+  const inicioLocal = c.dataHoraInicio ? new Date(c.dataHoraInicio).toISOString().slice(0, 16) : '';
+  const fimLocal = c.dataHoraFim ? new Date(c.dataHoraFim).toISOString().slice(0, 16) : '';
+  const r = await showModal('Editar compromisso', [
+    { label: 'Tipo', name: 'tipo', type: 'select', default: c.tipo || 'outro',
+      options: COMPROMISSO_TIPOS.map(t => ({ value: t.value, label: t.icon + ' ' + t.label })) },
+    { label: 'Título', name: 'titulo', default: c.titulo || '' },
+    { label: 'Início', name: 'dataHoraInicio', type: 'datetime-local', default: inicioLocal },
+    { label: 'Fim', name: 'dataHoraFim', type: 'datetime-local', default: fimLocal },
+    { label: 'Local', name: 'local', default: c.local || '' },
+    { label: 'Processo', name: 'processoId', type: 'select', default: c.processoId || '', options: procOpts },
+    { label: 'Cliente', name: 'clienteId', type: 'select', default: c.clienteId || '', options: cliOpts },
+    { label: 'Responsável', name: 'responsavel', type: 'select', default: c.responsavel || '',
+      options: [{ value: '', label: '— não atribuído —' }, ...ADVOGADOS.map(n => ({ value: n, label: n }))] },
+    { label: 'Status', name: 'status', type: 'select', default: c.status || 'agendado',
+      options: COMPROMISSO_STATUS.map(s => ({ value: s.value, label: s.label })) },
+    { label: 'Observações', name: 'observacoes', type: 'textarea', rows: 3, default: c.observacoes || '' }
+  ], { confirmLabel: 'Salvar' });
+  if (!r) return;
+  const [tipo, titulo, dataHoraInicio, dataHoraFim, local, processoId, clienteId, responsavel, status, observacoes] = r;
+  if (!titulo?.trim()) { toast('Título obrigatório', '', 'error'); return; }
+  Object.assign(c, {
+    tipo, titulo: titulo.trim(),
+    dataHoraInicio: dataHoraInicio ? new Date(dataHoraInicio).toISOString() : c.dataHoraInicio,
+    dataHoraFim: dataHoraFim ? new Date(dataHoraFim).toISOString() : null,
+    local: (local || '').trim() || null,
+    processoId: processoId || null,
+    clienteId: clienteId || null,
+    responsavel: responsavel || null,
+    status: status || 'agendado',
+    observacoes: (observacoes || '').trim() || null
+  });
+  await DB.saveCompromisso(c);
+  toast('Compromisso atualizado', '', 'success');
+  if (state.currentRoute === 'agenda') renderAgenda();
+  else if (state.currentRoute === 'process') renderProcessTabContent();
+  else if (state.currentRoute === 'clienteDetalhe') renderClienteDetalhe();
+}
+
+async function alterarStatusCompromisso(id) {
+  const compromissos = await DB.getAllCompromissos();
+  const c = compromissos.find(x => x.id === id);
+  if (!c) return;
+  const r = await showModal('Alterar status', [
+    { label: 'Novo status', name: 'status', type: 'select', default: c.status || 'agendado',
+      options: COMPROMISSO_STATUS.map(s => ({ value: s.value, label: s.label })) }
+  ], { confirmLabel: 'Salvar', intro: `<strong>${escapeHtml(c.titulo || '')}</strong>` });
+  if (!r) return;
+  const [status] = r;
+  c.status = status;
+  await DB.saveCompromisso(c);
+  toast('Status atualizado', _agStatusMeta(status).label, 'success');
+  if (state.currentRoute === 'agenda') renderAgenda();
+  else if (state.currentRoute === 'process') renderProcessTabContent();
+  else if (state.currentRoute === 'clienteDetalhe') renderClienteDetalhe();
+}
+
+async function removerCompromisso(id) {
+  const ok = await confirmDialog('Remover compromisso?', 'Ação irreversível.', true);
+  if (!ok) return;
+  await DB.deleteCompromisso(id);
+  if (state.currentRoute === 'agenda') renderAgenda();
+  else if (state.currentRoute === 'process') renderProcessTabContent();
+  else if (state.currentRoute === 'clienteDetalhe') renderClienteDetalhe();
+}
+
 async function renderTools() {
   const processes = await DB.getAllProcesses();
   state.processes = processes;
@@ -10803,6 +11366,34 @@ async function bootApp() {
     return r;
   };
 
+  // ====== Cache Compromissos (v6.25 — Sprint Agenda) ======
+  const _remoteGetAllCompromissos = DB.getAllCompromissos.bind(DB);
+  const _remoteSaveCompromisso = DB.saveCompromisso.bind(DB);
+  const _remoteDeleteCompromisso = DB.deleteCompromisso.bind(DB);
+  let _agCache = null, _agCacheAt = 0;
+  DB.getAllCompromissos = async () => {
+    if (_agCache && (Date.now() - _agCacheAt < CACHE_MS)) return _agCache;
+    _agCache = await _remoteGetAllCompromissos();
+    _agCacheAt = Date.now();
+    return _agCache;
+  };
+  DB.getCompromissosByProcess = async (pid) => {
+    return (await DB.getAllCompromissos()).filter(c => c.processoId === pid);
+  };
+  DB.getCompromissosByCliente = async (cid) => {
+    return (await DB.getAllCompromissos()).filter(c => c.clienteId === cid);
+  };
+  DB.saveCompromisso = async (c) => {
+    const r = await _remoteSaveCompromisso(c);
+    _agCache = null; _agCacheAt = 0;
+    return r;
+  };
+  DB.deleteCompromisso = async (id) => {
+    const r = await _remoteDeleteCompromisso(id);
+    _agCache = null; _agCacheAt = 0;
+    return r;
+  };
+
   // ====== Cache Financeiro (v6.16+) ======
   const _finCaches = {
     bancos: { data: null, at: 0 },
@@ -10867,6 +11458,7 @@ async function bootApp() {
     _deadCache = null; _deadCacheAt = 0;
     _cliCache = null; _cliCacheAt = 0;
     _comCache = null; _comCacheAt = 0;
+    _agCache = null; _agCacheAt = 0;
     _settingsCache.clear();
     _settingsCacheAt.clear();
     Object.keys(_finCaches).forEach(k => _finCacheBust(k));

@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.24.0 (Sprint A.5: push/email de parcela vencendo via cron Apps Script)
-const CACHE_NAME = 'uc-juridico-v6-24-0';
+// Service Worker — UC Jurídico v6.25.0 (Sprint Agenda: compromissos com push/email T-1 e T-0 via cron Apps Script)
+const CACHE_NAME = 'uc-juridico-v6-25-0';
 const APP_SHELL = [
   './',
   './index.html',

@@ -388,6 +388,17 @@ const RemoteDB = {
   async saveComunicacao(c) { return await upsert_('comunicacoes', c); },
   async deleteComunicacao(id) { return await softDelete_('comunicacoes', id); },
 
+  // ====== Compromissos / Agenda (v6.25) ======
+  async getAllCompromissos() { return await getAll_('compromissos'); },
+  async getCompromissosByProcess(pid) {
+    return (await getAll_('compromissos')).filter(c => c.processoId === pid);
+  },
+  async getCompromissosByCliente(cid) {
+    return (await getAll_('compromissos')).filter(c => c.clienteId === cid);
+  },
+  async saveCompromisso(c) { return await upsert_('compromissos', c); },
+  async deleteCompromisso(id) { return await softDelete_('compromissos', id); },
+
   // Jurisprudência
   async getJurisprudenceByProcess(pid) {
     return (await getAll_('jurisprudencia')).filter(j => j.processId === pid);

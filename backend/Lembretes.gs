@@ -913,20 +913,286 @@ function cron_lembretesDeParcelas() {
   return { honorarios: honorarios.length, processados, enviados, erros, ignorados, semCobertura, elapsed };
 }
 
+// =====================================================================
+// MÓDULO COMPROMISSOS (Sprint Agenda v6.25+) ===========================
+// =====================================================================
+
+const COMPROMISSO_MARCO_LABELS = {
+  'T-1': '📅 Compromisso AMANHÃ',
+  'T-0': '📅 Compromisso HOJE',
+  'T+1': '✗ Compromisso de ontem (não marcado)'
+};
+
+const COMPROMISSO_EMAIL_MARCOS = ['T-1', 'T-0'];
+
+const COMPROMISSO_TIPO_LABELS = {
+  'audiencia': '⚖ Audiência',
+  'reuniao_cliente': '👥 Reunião com cliente',
+  'reuniao_interna': '👥 Reunião interna',
+  'diligencia': '🚗 Diligência',
+  'prazo_admin': '📋 Prazo administrativo',
+  'outro': '📌 Compromisso'
+};
+
+const COMPROMISSO_STATUS_TERMINAIS = ['cancelado', 'realizado'];
+
+// Marco do compromisso: T-1 (véspera), T-0 (dia), T+1 (atrasado pra
+// marcar como realizado/cancelado).
+function _marcoDoCompromisso(c, todayMs) {
+  if (!c || !c.dataHoraInicio) return null;
+  if (COMPROMISSO_STATUS_TERMINAIS.indexOf(c.status) >= 0) return null;
+  const inicio = new Date(c.dataHoraInicio);
+  inicio.setHours(0, 0, 0, 0);
+  const days = Math.ceil((inicio.getTime() - todayMs) / 86400000);
+  if (days === 1) return 'T-1';
+  if (days === 0) return 'T-0';
+  if (days === -1) return 'T+1';
+  return null;
+}
+
+// Roteia destinatários do compromisso.
+// - Responsável (sempre)
+// - Participantes (todos)
+// - Sócio padrão SÓ em T-0 quando status ainda 'agendado' (escalonamento
+//   pra confirmar presença)
+function _rotearDestinatariosCompromisso(c, socio, marco) {
+  const lista = [];
+  if (c.responsavel) lista.push(c.responsavel);
+  (c.participantes || []).forEach(p => { if (p) lista.push(p); });
+  if (marco === 'T-0' && c.status === 'agendado' && socio) lista.push(socio);
+  // dedup
+  const seen = {}, out = [];
+  lista.forEach(x => { if (x && !seen[x]) { seen[x] = true; out.push(x); } });
+  return out;
+}
+
+function _montarEmailCompromisso(marco, c, proc, cli) {
+  const labels = {
+    'T-1': '📅 COMPROMISSO AMANHÃ',
+    'T-0': '📅 COMPROMISSO HOJE',
+    'T+1': '⚠ COMPROMISSO DE ONTEM (não marcado)'
+  };
+  const cores = {
+    'T-1': '#b87f1c',
+    'T-0': '#a8472d',
+    'T+1': '#a8472d'
+  };
+  const titulo = labels[marco] || marco;
+  const cor = cores[marco] || '#6b6b68';
+  const tipoLabel = COMPROMISSO_TIPO_LABELS[c.tipo] || c.tipo || 'Compromisso';
+  const dt = new Date(c.dataHoraInicio);
+  const dataFmt = dt.toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' });
+  const horaFmt = dt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+  const dataHoraFim = c.dataHoraFim ? (' até ' + new Date(c.dataHoraFim).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })) : '';
+  const participantesLabel = (c.participantes || []).join(', ');
+  const titReal = c.titulo || tipoLabel;
+  const assunto = '[' + titulo.replace(/[📅⚠]/g, '').trim() + '] ' + titReal +
+    ' · ' + dt.toLocaleDateString('pt-BR') + ' ' + horaFmt;
+
+  const html = `
+    <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 0 auto; background: #fafaf7; padding: 24px; border-radius: 8px; border: 1px solid #e8e3d4;">
+      <div style="border-left: 4px solid ${cor}; padding-left: 16px; margin-bottom: 20px;">
+        <h1 style="margin: 0 0 6px; font-size: 22px; color: ${cor}; font-weight: 600;">${_escapeEmail(titulo)}</h1>
+        <p style="margin: 0; color: #1f1f1f; font-size: 15px; font-weight: 500;">${_escapeEmail(titReal)}</p>
+        <p style="margin: 4px 0 0; color: #6b6b68; font-size: 13px;">${_escapeEmail(tipoLabel)}</p>
+      </div>
+      <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px; font-size: 14px;">
+        <tr><td style="padding: 6px 0; color: #6b6b68; width: 130px;">Quando:</td><td style="padding: 6px 0; font-weight: 600; color: #1f1f1f;">${_escapeEmail(dataFmt)} · ${_escapeEmail(horaFmt)}${_escapeEmail(dataHoraFim)}</td></tr>
+        ${c.local ? `<tr><td style="padding: 6px 0; color: #6b6b68;">Local:</td><td style="padding: 6px 0;">${_escapeEmail(c.local)}</td></tr>` : ''}
+        ${c.responsavel ? `<tr><td style="padding: 6px 0; color: #6b6b68;">Responsável:</td><td style="padding: 6px 0; font-weight: 600;">${_escapeEmail(c.responsavel)}</td></tr>` : ''}
+        ${participantesLabel ? `<tr><td style="padding: 6px 0; color: #6b6b68;">Participantes:</td><td style="padding: 6px 0; font-size: 12px;">${_escapeEmail(participantesLabel)}</td></tr>` : ''}
+        ${cli ? `<tr><td style="padding: 6px 0; color: #6b6b68;">Cliente:</td><td style="padding: 6px 0;">${_escapeEmail(cli.nome || '')}</td></tr>` : ''}
+        ${proc ? `<tr><td style="padding: 6px 0; color: #6b6b68;">Processo:</td><td style="padding: 6px 0; font-size: 12px;">${_escapeEmail((proc.cnj || proc.name || '—'))}</td></tr>` : ''}
+        ${c.observacoes ? `<tr><td style="padding: 6px 0; color: #6b6b68; vertical-align: top;">Obs:</td><td style="padding: 6px 0; color: #6b6b68; font-size: 12px; white-space: pre-wrap;">${_escapeEmail(c.observacoes)}</td></tr>` : ''}
+      </table>
+      <a href="https://eduardourany-dot.github.io/uc-juridico/#agenda" style="display: inline-block; background: #8a6f3d; color: white; padding: 12px 24px; text-decoration: none; border-radius: 4px; font-weight: 600; font-size: 14px;">Abrir Agenda no UC Jurídico →</a>
+      <p style="color: #6b6b68; font-size: 12px; margin-top: 28px; padding-top: 16px; border-top: 1px solid #e8e3d4;">
+        Lembrete automático de compromisso. Marque como realizado, cancelado ou adiado no app pra parar de receber este lembrete.
+      </p>
+      <p style="color: #9b9b96; font-size: 11px; margin-top: 12px; text-align: center;">
+        UC Jurídico · Urany de Castro Advocacia · 30 anos
+      </p>
+    </div>
+  `;
+  return { assunto, html };
+}
+
 /**
- * Cron unificado — chama prazos + parcelas em sequência.
+ * Trigger principal de compromissos. Idempotente via c.notificado.
+ * Janela [hoje-2, hoje+3] cobre T-1, T-0 e T+1 com folga.
+ */
+function cron_lembretesDeCompromissos() {
+  const startTime = Date.now();
+  const today = new Date(); today.setHours(0,0,0,0);
+  const todayMs = today.getTime();
+
+  const janelaInicio = new Date(todayMs - 2 * 86400000).toISOString();
+  const janelaFim = new Date(todayMs + 3 * 86400000).toISOString();
+
+  let compromissos = [];
+  try {
+    compromissos = _firestoreQuery('compromissos', [
+      { field: 'dataHoraInicio', op: 'GREATER_THAN_OR_EQUAL', value: janelaInicio },
+      { field: 'dataHoraInicio', op: 'LESS_THAN_OR_EQUAL', value: janelaFim }
+    ], 500);
+  } catch (e) {
+    Logger.log('cron_lembretesDeCompromissos: query falhou: ' + e.message);
+    return { compromissos: 0, processados: 0, enviados: 0, erros: 1, elapsed: Date.now() - startTime };
+  }
+
+  if (compromissos.length === 0) {
+    Logger.log('cron_lembretesDeCompromissos: nenhum compromisso na janela');
+    return { compromissos: 0, processados: 0, enviados: 0, erros: 0, elapsed: Date.now() - startTime };
+  }
+
+  // Buscar processos e clientes referenciados (1 fetch por id único)
+  const procIds = {}, cliIds = {};
+  compromissos.forEach(c => {
+    if (c.processoId) procIds[c.processoId] = true;
+    if (c.clienteId) cliIds[c.clienteId] = true;
+  });
+  const processos = {};
+  for (const pid of Object.keys(procIds)) {
+    try { const p = _firestoreGet('processos/' + pid); if (p) processos[pid] = p; } catch (_) {}
+  }
+  const clientes = {};
+  for (const cid of Object.keys(cliIds)) {
+    try { const cl = _firestoreGet('clientes/' + cid); if (cl) clientes[cid] = cl; } catch (_) {}
+  }
+
+  const fcmTokensDoc = _firestoreGet('settings/fcmTokens') || {};
+  const fcmTokens = (fcmTokensDoc && fcmTokensDoc.value) || {};
+  const socioDoc = _firestoreGet('settings/socioPadraoNome') || {};
+  const socio = (socioDoc && socioDoc.value) || null;
+
+  let processados = 0, enviados = 0, erros = 0, ignorados = 0;
+  let tokensRemovidos = false;
+
+  for (const c of compromissos) {
+    const marco = _marcoDoCompromisso(c, todayMs);
+    if (!marco) { ignorados++; continue; }
+
+    const destinatariosNomes = _rotearDestinatariosCompromisso(c, socio, marco);
+    if (!destinatariosNomes.length) { ignorados++; continue; }
+
+    const proc = c.processoId ? processos[c.processoId] : null;
+    const cli = c.clienteId ? clientes[c.clienteId] : null;
+
+    let alterado = false;
+    const notificado = c.notificado || {};
+    notificado[marco] = notificado[marco] || {};
+
+    for (const nome of destinatariosNomes) {
+      const email = NOME_EMAIL_MAP[nome];
+      if (!email) continue;
+      if (notificado[marco][email]) continue;  // anti-spam
+
+      let pushOk = false, emailOk = false;
+      const tokenInfo = fcmTokens[email];
+      const enviarEmailNesteMarco = COMPROMISSO_EMAIL_MARCOS.indexOf(marco) >= 0;
+
+      // Push FCM
+      if (tokenInfo && tokenInfo.token) {
+        processados++;
+        try {
+          const title = COMPROMISSO_MARCO_LABELS[marco] || ('Compromisso ' + marco);
+          const dt = new Date(c.dataHoraInicio);
+          const horaFmt = dt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+          const tipoLabel = COMPROMISSO_TIPO_LABELS[c.tipo] || 'Compromisso';
+          const titReal = c.titulo || tipoLabel;
+          const body = titReal + ' · ' + horaFmt + (c.local ? ' · ' + c.local : '');
+          const url = 'https://eduardourany-dot.github.io/uc-juridico/#agenda';
+          const r = enviarFcmPush(tokenInfo.token, title, body, {
+            tag: 'compromisso-' + c._docId + '-' + marco,
+            url: url,
+            requireInteraction: 'true',
+            compromissoId: c._docId,
+            marco: marco
+          });
+          if (r.ok) {
+            pushOk = true;
+          } else {
+            erros++;
+            Logger.log('FCM compromisso falha pra ' + email + ' marco ' + marco + ': ' + r.code + ' ' + r.response);
+            if (r.code === 404 || (r.code === 400 && /UNREGISTERED|INVALID_ARGUMENT|registration/i.test(r.response))) {
+              delete fcmTokens[email];
+              tokensRemovidos = true;
+            }
+          }
+        } catch (e) {
+          erros++;
+          Logger.log('FCM compromisso exceção ' + email + ' ' + marco + ': ' + e.message);
+        }
+      }
+
+      // Email (T-1, T-0 ou fallback se não tem token)
+      if (enviarEmailNesteMarco || (!pushOk && !tokenInfo)) {
+        try {
+          const conteudo = _montarEmailCompromisso(marco, c, proc, cli);
+          const r = enviarEmail(email, conteudo.assunto, conteudo.html);
+          if (r.ok) {
+            emailOk = true;
+          } else {
+            erros++;
+            Logger.log('Email compromisso falha pra ' + email + ' ' + marco + ': ' + r.error);
+          }
+        } catch (e) {
+          erros++;
+          Logger.log('Email compromisso exceção ' + email + ' ' + marco + ': ' + e.message);
+        }
+      }
+
+      if (pushOk || emailOk) {
+        notificado[marco][email] = { at: Date.now(), push: pushOk, email: emailOk };
+        alterado = true;
+        enviados++;
+      }
+    }
+
+    if (alterado) {
+      try {
+        _firestoreUpdate('compromissos/' + c._docId, { notificado: notificado, updatedAt: Date.now() });
+      } catch (e) {
+        Logger.log('update compromisso ' + c._docId + ' falhou: ' + e.message);
+      }
+    }
+  }
+
+  if (tokensRemovidos) {
+    try {
+      _firestoreUpdate('settings/fcmTokens', { value: fcmTokens, updatedAt: Date.now() });
+    } catch (e) {
+      Logger.log('cleanup fcmTokens (compromissos) falhou: ' + e.message);
+    }
+  }
+
+  const elapsed = Date.now() - startTime;
+  const summary = 'cron_lembretesDeCompromissos: total=' + compromissos.length +
+    ' processados=' + processados +
+    ' enviados=' + enviados +
+    ' erros=' + erros +
+    ' ignorados=' + ignorados +
+    ' elapsed=' + elapsed + 'ms';
+  Logger.log(summary);
+  return { compromissos: compromissos.length, processados, enviados, erros, ignorados, elapsed };
+}
+
+/**
+ * Cron unificado — chama prazos + parcelas + compromissos em sequência.
  * Use ESTE como trigger time-driven (substituindo o cron_lembretesDePrazo
  * antigo, que continua existindo pra debug isolado).
  */
 function cron_lembretesUnificado() {
   Logger.log('=== cron_lembretesUnificado iniciando ===');
-  let resPrazos = null, resParcelas = null;
+  let resPrazos = null, resParcelas = null, resCompromissos = null;
   try { resPrazos = cron_lembretesDePrazo(); }
   catch (e) { Logger.log('cron_lembretesDePrazo erro: ' + e.message); }
   try { resParcelas = cron_lembretesDeParcelas(); }
   catch (e) { Logger.log('cron_lembretesDeParcelas erro: ' + e.message); }
+  try { resCompromissos = cron_lembretesDeCompromissos(); }
+  catch (e) { Logger.log('cron_lembretesDeCompromissos erro: ' + e.message); }
   Logger.log('=== cron_lembretesUnificado concluído ===');
-  return { prazos: resPrazos, parcelas: resParcelas };
+  return { prazos: resPrazos, parcelas: resParcelas, compromissos: resCompromissos };
 }
 
 // =====================================================================
@@ -1032,6 +1298,57 @@ function _previewLembretesDeParcelas() {
     }
   }
   Logger.log('Preview parcelas (sem enviar):');
+  Logger.log(JSON.stringify(linhas, null, 2));
+  Logger.log('Total push: ' + totalPush + ' · Total email: ' + totalEmail);
+}
+
+function _previewLembretesDeCompromissos() {
+  const today = new Date(); today.setHours(0,0,0,0);
+  const todayMs = today.getTime();
+  const janelaInicio = new Date(todayMs - 2 * 86400000).toISOString();
+  const janelaFim = new Date(todayMs + 3 * 86400000).toISOString();
+  let compromissos = [];
+  try {
+    compromissos = _firestoreQuery('compromissos', [
+      { field: 'dataHoraInicio', op: 'GREATER_THAN_OR_EQUAL', value: janelaInicio },
+      { field: 'dataHoraInicio', op: 'LESS_THAN_OR_EQUAL', value: janelaFim }
+    ], 500);
+  } catch (e) {
+    Logger.log('Preview falhou: ' + e.message);
+    return;
+  }
+  const socioDoc = _firestoreGet('settings/socioPadraoNome') || {};
+  const socio = (socioDoc && socioDoc.value) || null;
+  const tokensDoc = _firestoreGet('settings/fcmTokens') || {};
+  const fcmTokens = (tokensDoc && tokensDoc.value) || {};
+
+  Logger.log('Janela: ' + janelaInicio.slice(0,10) + ' a ' + janelaFim.slice(0,10) + ' · ' + compromissos.length + ' compromissos');
+  const linhas = [];
+  let totalPush = 0, totalEmail = 0;
+  for (const c of compromissos) {
+    const marco = _marcoDoCompromisso(c, todayMs);
+    if (!marco) continue;
+    const dest = _rotearDestinatariosCompromisso(c, socio, marco);
+    const destEmails = dest.map(n => NOME_EMAIL_MAP[n]).filter(Boolean);
+    const notificado = c.notificado || {};
+    const pendentes = destEmails.filter(e => !(notificado[marco] && notificado[marco][e]));
+    if (pendentes.length === 0) continue;
+    const enviarEmailNesteMarco = COMPROMISSO_EMAIL_MARCOS.indexOf(marco) >= 0;
+    const enviarPush = pendentes.filter(e => fcmTokens[e] && fcmTokens[e].token);
+    const enviarEmailLista = pendentes.filter(e => enviarEmailNesteMarco || !(fcmTokens[e] && fcmTokens[e].token));
+    totalPush += enviarPush.length;
+    totalEmail += enviarEmailLista.length;
+    linhas.push({
+      titulo: (c.titulo || c.tipo || '').slice(0, 40),
+      tipo: c.tipo,
+      marco: marco,
+      quando: (c.dataHoraInicio || '').slice(0, 16),
+      status: c.status,
+      push: enviarPush.join(', ') || '—',
+      email: enviarEmailLista.join(', ') || '—'
+    });
+  }
+  Logger.log('Preview compromissos (sem enviar):');
   Logger.log(JSON.stringify(linhas, null, 2));
   Logger.log('Total push: ' + totalPush + ' · Total email: ' + totalEmail);
 }

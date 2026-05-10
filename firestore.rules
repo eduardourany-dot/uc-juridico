@@ -107,6 +107,9 @@ service cloud.firestore {
     match /comunicacoes/{id} {
       allow read, create, update, delete: if isAllowed();
     }
+    match /compromissos/{id} {
+      allow read, create, update, delete: if isAllowed();
+    }
 
     // Negar tudo o que não estiver explicitamente acima.
     match /{document=**} {
