@@ -268,7 +268,7 @@ body{background:var(--uc-paper);color:var(--uc-graphite);font-size:15px;-webkit-
 
     <div style="margin-top:auto;padding:16px 20px;border-top:1px solid var(--uc-line-soft);font-size:11px;color:var(--uc-warm-gray);text-align:center;">
       <p class="smallcaps font-serif" style="margin:0 0 4px;">Urany de Castro · 30 anos</p>
-      <p style="margin:0;">100% local · v6.19.0</p>
+      <p style="margin:0;">100% local · v6.19.1</p>
     </div>
   </aside>
 
@@ -890,8 +890,13 @@ function _findClienteByNome(clientes, nome) {
 
 // Migração lazy: se processo tem `client` string mas não tem `clienteId`,
 // cria/vincula cliente correspondente. Idempotente. Roda em background.
+// Pode ser desligada via setting `migracaoClientesDesligada` (true) — útil
+// quando Eduardo limpa clientes migrados e quer cadastrar manualmente.
 async function _migrarProcessosParaClientes() {
   try {
+    const desligada = await DB.getSetting('migracaoClientesDesligada', false);
+    if (desligada) return 0;
+
     const processos = await DB.getAllProcesses();
     const semCliente = processos.filter(p => p.client && !p.clienteId);
     if (semCliente.length === 0) return 0;
@@ -1161,6 +1166,84 @@ async function removerCliente(id) {
   if (!ok) return;
   await DB.deleteCliente(id);
   renderClientesList();
+}
+
+// Limpeza em massa — apaga TODOS os clientes + desvincula clienteId de
+// todos os processos. Util quando a migração lazy criou registros que
+// não condizem com a realidade (ex.: 'A definir', strings vazias).
+// Liga setting migracaoClientesDesligada=true pra não recriar no
+// próximo abre.
+async function limparClientesEDesligarMigracao() {
+  const [clientes, processos, honorarios] = await Promise.all([
+    DB.getAllClientes(), DB.getAllProcesses(), DB.getAllHonorarios()
+  ]);
+  if (clientes.length === 0) {
+    toast('Nada a limpar', 'Não há clientes cadastrados.', 'info');
+    return;
+  }
+  const procsVinculados = processos.filter(p => p.clienteId).length;
+  const honsVinculados = honorarios.filter(h => h.clienteId).length;
+
+  const aviso = `
+    Esta ação vai:
+    <ul style="margin: 8px 0 8px 20px;">
+      <li>Apagar <strong>${clientes.length} cliente(s)</strong></li>
+      <li>Desvincular <strong>${procsVinculados} processo(s)</strong> (campo clienteId)</li>
+      ${honsVinculados > 0 ? `<li>⚠ <strong>${honsVinculados} honorário(s)</strong> ficam órfãos (clienteId apaga, mas o honorário fica)</li>` : ''}
+      <li>Desligar a migração automática para não recriar no próximo abre</li>
+    </ul>
+    Use para limpar dados ruins da migração lazy. Cadastre os clientes reais manualmente depois.
+    Continuar?
+  `;
+  const ok = await confirmDialog('Limpar todos os clientes?', aviso, true);
+  if (!ok) return;
+
+  let apagadosClientes = 0, processosLimpos = 0, honorariosLimpos = 0, erros = 0;
+
+  // 1. Limpa clienteId dos processos
+  for (const p of processos.filter(x => x.clienteId)) {
+    try {
+      delete p.clienteId;
+      await DB.saveProcess(p);
+      processosLimpos++;
+    } catch (e) { console.warn('falha ao limpar processo', p.id, e); erros++; }
+  }
+
+  // 2. Limpa clienteId dos honorários (mas mantém o honorário)
+  for (const h of honorarios.filter(x => x.clienteId)) {
+    try {
+      delete h.clienteId;
+      await DB.saveHonorario(h);
+      honorariosLimpos++;
+    } catch (e) { console.warn('falha ao limpar honorário', h.id, e); erros++; }
+  }
+
+  // 3. Apaga todos os clientes
+  for (const c of clientes) {
+    try {
+      await DB.deleteCliente(c.id);
+      apagadosClientes++;
+    } catch (e) { console.warn('falha ao apagar cliente', c.id, e); erros++; }
+  }
+
+  // 4. Desliga migração automática
+  await DB.setSetting('migracaoClientesDesligada', true);
+
+  toast('Limpeza concluída',
+    `${apagadosClientes} cliente(s) apagado(s) · ${processosLimpos} processo(s) desvinculado(s)${erros > 0 ? ' · ' + erros + ' erro(s)' : ''}`,
+    erros > 0 ? 'error' : 'success');
+
+  // Re-render onde estiver
+  if (state.currentRoute === 'clientes') renderClientesList();
+  else if (state.currentRoute === 'settings') renderSettings();
+}
+
+// Reabilita a migração automática (desfaz o efeito de limparClientesEDesligarMigracao).
+// Disponível em window pra poder chamar do console; também acessível via UI.
+async function reabilitarMigracaoClientes() {
+  await DB.setSetting('migracaoClientesDesligada', false);
+  toast('Migração reabilitada', 'Próximo abre de /clientes vai recriar clientes a partir de processos sem vínculo.', 'success');
+  if (state.currentRoute === 'settings') renderSettings();
 }
 
 // ====================================================================
@@ -6834,6 +6917,8 @@ function renderSettingsTab(tab, prompts, defaultPromptId) {
     `;
   }
   if (tab === 'maintenance') {
+    const cache = state._manutencaoCache || {};
+    const migDesligada = cache.migracaoClientesDesligada;
     return `
       <div class="card mb-3">
         <h3 class="font-serif text-lg font-semibold smallcaps mb-3" style="color: var(--uc-black);">Limpeza de duplicatas</h3>
@@ -6847,6 +6932,24 @@ function renderSettingsTab(tab, prompts, defaultPromptId) {
         <div class="flex gap-2 flex-wrap">
           <button class="btn btn-outline" onclick="scanDuplicates()">Buscar duplicatas</button>
           <button class="btn btn-primary" onclick="mergeAllDuplicates()" id="mergeAllBtn" style="display:none">Mesclar todas</button>
+        </div>
+      </div>
+
+      <div class="card mb-3" style="border-left: 3px solid var(--uc-amber);">
+        <h3 class="font-serif text-lg font-semibold smallcaps mb-3" style="color: var(--uc-amber);">Migração de clientes</h3>
+        <p class="help-text mb-3">
+          A primeira abertura de <strong>/clientes</strong> populou a coleção a partir do campo
+          <code>processo.client</code> (string). Se os registros criados não condizem com a realidade
+          (ex.: "A definir", strings genéricas), use os botões abaixo pra limpar e cadastrar manualmente.
+        </p>
+        <p style="font-size: 13px; margin-bottom: 12px;">
+          Status atual: ${migDesligada === undefined ? '<em>carregando…</em>'
+            : migDesligada ? '<span style="color: var(--uc-red);">⏸ desligada</span> — não cria clientes automaticamente'
+            : '<span style="color: var(--uc-green);">▶ ativa</span> — cria clientes automaticamente ao abrir /clientes'}
+        </p>
+        <div class="flex gap-2 flex-wrap">
+          <button class="btn btn-danger" onclick="limparClientesEDesligarMigracao()">🗑 Limpar todos os clientes + desligar migração</button>
+          <button class="btn btn-outline" onclick="reabilitarMigracaoClientes()" ${!migDesligada ? 'disabled' : ''}>↺ Reabilitar migração automática</button>
         </div>
       </div>
     `;
@@ -6911,6 +7014,14 @@ function renderSettingsTab(tab, prompts, defaultPromptId) {
 }
 
 function setupSettingsHandlers(tab) {
+  if (tab === 'maintenance') {
+    (async () => {
+      const migracaoClientesDesligada = await DB.getSetting('migracaoClientesDesligada', false);
+      const fresh = !state._manutencaoCache;
+      state._manutencaoCache = { migracaoClientesDesligada };
+      if (fresh) renderSettings();
+    })();
+  }
   if (tab === 'equipe') {
     // Carrega cache lazy (mesma estratégia do djen)
     (async () => {

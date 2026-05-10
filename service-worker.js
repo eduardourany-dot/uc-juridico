@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.19.0 (Sprint Cli.1: Cliente vira entidade dedicada + migração lazy)
-const CACHE_NAME = 'uc-juridico-v6-19-0';
+// Service Worker — UC Jurídico v6.19.1 (Limpeza de clientes da migração + flag pra desligar)
+const CACHE_NAME = 'uc-juridico-v6-19-1';
 const APP_SHELL = [
   './',
   './index.html',
