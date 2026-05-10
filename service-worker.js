@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.26.0 (Relatório executivo: rota /relatorio com resumo mensal financeiro + processual + clientes + equipe)
-const CACHE_NAME = 'uc-juridico-v6-26-0';
+// Service Worker — UC Jurídico v6.27.0 (Modelos de petição com placeholders: rota /modelos + botão Gerar petição no processo)
+const CACHE_NAME = 'uc-juridico-v6-27-0';
 const APP_SHELL = [
   './',
   './index.html',

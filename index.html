@@ -260,6 +260,10 @@ body{background:var(--uc-paper);color:var(--uc-graphite);font-size:15px;-webkit-
     </a>
 
     <div class="nav-section" style="margin-top:16px;">Operacional</div>
+    <a class="nav-item" data-route="modelos">
+      <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+      <span>Modelos</span>
+    </a>
     <a class="nav-item" data-route="tools">
       <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 4a2 2 0 114 0v1a1 1 0 001 1h3a1 1 0 011 1v3a1 1 0 01-1 1h-1a2 2 0 100 4h1a1 1 0 011 1v3a1 1 0 01-1 1h-3a1 1 0 01-1-1v-1a2 2 0 10-4 0v1a1 1 0 01-1 1H6a1 1 0 01-1-1v-3a1 1 0 00-1-1H3a2 2 0 110-4h1a1 1 0 001-1V7a1 1 0 011-1h3a1 1 0 001-1V4z"/></svg>
       <span>Ferramentas PDF</span>
@@ -277,7 +281,7 @@ body{background:var(--uc-paper);color:var(--uc-graphite);font-size:15px;-webkit-
 
     <div style="margin-top:auto;padding:16px 20px;border-top:1px solid var(--uc-line-soft);font-size:11px;color:var(--uc-warm-gray);text-align:center;">
       <p class="smallcaps font-serif" style="margin:0 0 4px;">Urany de Castro · 30 anos</p>
-      <p style="margin:0;">100% local · v6.26.0</p>
+      <p style="margin:0;">100% local · v6.27.0</p>
     </div>
   </aside>
 
@@ -488,6 +492,11 @@ const DB = {
   async saveCompromisso(c) { return c; },
   async deleteCompromisso(_id) {},
 
+  // ====== Petições / Modelos (stub IndexedDB — sobrescrito por UC_RemoteDB no boot) ======
+  async getAllPeticaoModelos() { return []; },
+  async savePeticaoModelo(m) { return m; },
+  async deletePeticaoModelo(_id) {},
+
   // ====== Módulo Financeiro (stubs IndexedDB — sobrescritos por UC_RemoteDB no boot) ======
   async getAllBancos() { return []; },
   async saveBanco(b) { return b; },
@@ -565,6 +574,7 @@ const routes = {
   agenda: renderAgenda,
   financeiro: renderFinanceiro,
   relatorio: renderRelatorio,
+  modelos: renderModelosPeticao,
   tools: renderTools,
   diligence: renderDiligence,
   settings: renderSettings
@@ -678,8 +688,8 @@ function showModal(title, fields, options = {}) {
           ${fields.map((f, i) => renderModalField(f, i)).join('')}
         </div>
         <div class="flex gap-2">
-          <button class="btn btn-outline" id="_modalCancel" style="flex:1">Cancelar</button>
-          <button class="btn btn-primary" id="_modalConfirm" style="flex:1">${options.confirmLabel || 'Confirmar'}</button>
+          ${options.cancelLabel === null ? '' : `<button class="btn btn-outline" id="_modalCancel" style="flex:1">${escapeHtml(options.cancelLabel || 'Cancelar')}</button>`}
+          <button class="btn btn-primary" id="_modalConfirm" style="flex:1">${escapeHtml(options.confirmLabel || 'Confirmar')}</button>
         </div>
       </div>`;
     $('modalContainer').appendChild(modal);
@@ -750,7 +760,8 @@ function showModal(title, fields, options = {}) {
       });
     });
 
-    $('_modalCancel').onclick = () => { cleanup(); resolve(null); };
+    const cancelBtn = $('_modalCancel');
+    if (cancelBtn) cancelBtn.onclick = () => { cleanup(); resolve(null); };
     $('_modalConfirm').onclick = () => {
       const values = fields.map((f, i) => getValue(i));
       cleanup(); resolve(values);
@@ -768,7 +779,7 @@ function renderModalField(f, i) {
     return `<div style="display: flex; gap: 8px; align-items: flex-start;"><input type="checkbox" id="${id}" ${f.default ? 'checked' : ''} style="margin-top: 3px;"><div><label for="${id}" style="font-weight: 500; cursor: pointer;">${escapeHtml(f.label)}</label>${f.help ? `<p class="help-text">${f.help}</p>` : ''}</div></div>`;
   }
   if (f.type === 'textarea') {
-    return `<div><label class="label">${escapeHtml(f.label)}</label>${f.help ? `<p class="help-text" style="margin-bottom: 6px;">${f.help}</p>` : ''}<textarea class="textarea" id="${id}" rows="${f.rows || 4}">${escapeHtml(f.default || '')}</textarea></div>`;
+    return `<div><label class="label">${escapeHtml(f.label)}</label>${f.help ? `<p class="help-text" style="margin-bottom: 6px;">${f.help}</p>` : ''}<textarea class="textarea" id="${id}" rows="${f.rows || 4}" ${f.readOnly ? 'readonly' : ''} ${f.placeholder ? `placeholder="${escapeHtml(f.placeholder)}"` : ''} style="font-family: ${f.mono === false ? 'inherit' : 'ui-monospace, Menlo, Consolas, monospace'}; font-size: ${f.mono === false ? '13px' : '12px'};">${escapeHtml(f.default || '')}</textarea></div>`;
   }
   return `<div><label class="label">${escapeHtml(f.label)}</label>${f.help ? `<p class="help-text" style="margin-bottom: 6px;">${f.help}</p>` : ''}<input type="${f.type || 'text'}" class="input" id="${id}" value="${escapeHtml(f.default || '')}" ${f.placeholder ? `placeholder="${escapeHtml(f.placeholder)}"` : ''} ${f.min !== undefined ? `min="${f.min}"` : ''} ${f.max !== undefined ? `max="${f.max}"` : ''} ${f.step !== undefined ? `step="${f.step}"` : ''}></div>`;
 }
@@ -2407,6 +2418,7 @@ async function renderProcessDetail() {
         ${p.cnj ? `<button class="btn btn-secondary btn-sm" onclick="datajudRefreshProcess('${p.id}')" title="Atualizar dados deste processo via API DataJud do CNJ">🔄 DataJud</button>` : ''}
         <button class="btn btn-outline btn-sm" onclick="editProcessFlow()">Editar</button>
         <button class="btn btn-secondary btn-sm" onclick="generateProcessFiche()">Gerar ficha</button>
+        <button class="btn btn-primary btn-sm" onclick="gerarPeticaoFlow()" title="Gerar petição a partir de modelo cadastrado">📝 Gerar petição</button>
       </div>
     </div>
 
@@ -8752,6 +8764,375 @@ async function _exportarRelatorioCsv() {
   toast('Exportado', '', 'success');
 }
 
+// ====================================================================
+// === MÓDULO MODELOS DE PETIÇÃO (v6.27 — Sprint Pet.0) ==============
+// ====================================================================
+// Templates Markdown com placeholders {{processo.cnj}}, {{cliente.nome}},
+// etc. Não usa Claude API — substituição literal. MVP do Pet.1 do
+// briefing /docs/BRIEFING_Peticoes.md, sem versionamento nem geração IA.
+
+const PETICAO_TIPOS = [
+  { value: 'contestacao',     label: 'Contestação' },
+  { value: 'manifestacao',    label: 'Manifestação' },
+  { value: 'apelacao',        label: 'Apelação' },
+  { value: 'emb_exec_fiscal', label: 'Embargos à execução fiscal' },
+  { value: 'epe',             label: 'Exceção de pré-executividade' },
+  { value: 'recurso',         label: 'Recurso' },
+  { value: 'requerimento',    label: 'Requerimento simples' },
+  { value: 'procuracao',      label: 'Procuração / Substabelecimento' },
+  { value: 'declaracao',      label: 'Declaração / Termo' },
+  { value: 'outro',           label: 'Outro' }
+];
+
+// Catálogo de placeholders disponíveis. Cada um sabe extrair seu valor
+// do contexto montado por _montarContextoPeticao.
+const PETICAO_PLACEHOLDERS = [
+  { grupo: 'Processo', tag: '{{processo.cnj}}',                desc: 'CNJ do processo' },
+  { grupo: 'Processo', tag: '{{processo.name}}',               desc: 'Identificação do processo' },
+  { grupo: 'Processo', tag: '{{processo.area}}',               desc: 'Área (cível, trabalhista…)' },
+  { grupo: 'Processo', tag: '{{processo.tipo}}',               desc: 'Tipo de ação' },
+  { grupo: 'Processo', tag: '{{processo.court}}',              desc: 'Vara/Tribunal' },
+  { grupo: 'Processo', tag: '{{processo.comarca}}',            desc: 'Comarca' },
+  { grupo: 'Processo', tag: '{{processo.parteAdversa}}',       desc: 'Parte adversa' },
+  { grupo: 'Processo', tag: '{{processo.advogadoResponsavel}}',desc: 'Advogado titular' },
+  { grupo: 'Processo', tag: '{{processo.advogadoSuplente}}',   desc: 'Advogado suplente' },
+  { grupo: 'Cliente',  tag: '{{cliente.nome}}',                desc: 'Nome do cliente' },
+  { grupo: 'Cliente',  tag: '{{cliente.cpfCnpj}}',             desc: 'CPF/CNPJ' },
+  { grupo: 'Cliente',  tag: '{{cliente.email}}',               desc: 'Email do cliente' },
+  { grupo: 'Cliente',  tag: '{{cliente.telefone}}',            desc: 'Telefone do cliente' },
+  { grupo: 'Cliente',  tag: '{{cliente.endereco}}',            desc: 'Endereço composto' },
+  { grupo: 'Cliente',  tag: '{{cliente.tipoPessoa}}',          desc: 'PF ou PJ' },
+  { grupo: 'Data',     tag: '{{data.hoje}}',                   desc: 'Data atual (DD/MM/AAAA)' },
+  { grupo: 'Data',     tag: '{{data.hojeExtenso}}',            desc: 'Data por extenso' },
+  { grupo: 'Data',     tag: '{{data.cidadeData}}',             desc: 'Cidade, DD de mês de AAAA' },
+  { grupo: 'Escritório', tag: '{{escritorio.nome}}',           desc: 'Urany de Castro Advocacia' },
+  { grupo: 'Escritório', tag: '{{escritorio.enderecoAnapolis}}',desc: 'Endereço Anápolis' },
+  { grupo: 'Escritório', tag: '{{escritorio.enderecoGoiania}}', desc: 'Endereço Goiânia' },
+  { grupo: 'Escritório', tag: '{{escritorio.oabSocio}}',        desc: 'OAB do sócio principal' }
+];
+
+const MES_EXTENSO = ['janeiro','fevereiro','março','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro'];
+
+// Compõe endereço em uma linha
+function _composeEnderecoCli(cli) {
+  if (!cli) return '';
+  if (typeof _composeEndereco === 'function') return _composeEndereco(cli);
+  const partes = [];
+  if (cli.logradouro) partes.push(cli.logradouro + (cli.numero ? ', ' + cli.numero : ''));
+  if (cli.complemento) partes.push(cli.complemento);
+  if (cli.bairro) partes.push(cli.bairro);
+  if (cli.cidade) partes.push(cli.cidade + (cli.uf ? '/' + cli.uf : ''));
+  if (cli.cep) partes.push('CEP ' + cli.cep);
+  return partes.join(' · ');
+}
+
+function _montarContextoPeticao(processo, cliente) {
+  const hoje = new Date();
+  const dia = String(hoje.getDate()).padStart(2, '0');
+  const mesNum = String(hoje.getMonth() + 1).padStart(2, '0');
+  const ano = hoje.getFullYear();
+  const mesExt = MES_EXTENSO[hoje.getMonth()];
+  const cidade = 'Goiânia';
+
+  return {
+    'processo.cnj':                 processo?.cnj || '',
+    'processo.name':                processo?.name || '',
+    'processo.area':                processo?.area || '',
+    'processo.tipo':                processo?.type || processo?.tipo || '',
+    'processo.court':               processo?.court || '',
+    'processo.comarca':             processo?.comarca || '',
+    'processo.parteAdversa':        processo?.parteAdversa || '',
+    'processo.advogadoResponsavel': processo?.advogadoResponsavel || '',
+    'processo.advogadoSuplente':    processo?.advogadoSuplente || '',
+    'cliente.nome':                 cliente?.nome || processo?.client || '',
+    'cliente.cpfCnpj':              cliente?.cpfCnpj || processo?.clientDoc || '',
+    'cliente.email':                cliente?.email || '',
+    'cliente.telefone':             cliente?.telefone || '',
+    'cliente.endereco':             _composeEnderecoCli(cliente),
+    'cliente.tipoPessoa':           cliente?.tipoPessoa || 'PJ',
+    'data.hoje':                    `${dia}/${mesNum}/${ano}`,
+    'data.hojeExtenso':             `${parseInt(dia,10)} de ${mesExt} de ${ano}`,
+    'data.cidadeData':              `${cidade}, ${parseInt(dia,10)} de ${mesExt} de ${ano}`,
+    'escritorio.nome':              'Urany de Castro Advocacia',
+    'escritorio.enderecoAnapolis':  'Rua Conde Afonso Celso, 557 · Centro · Anápolis/GO · CEP 75.025-030',
+    'escritorio.enderecoGoiania':   'Av. Deputado Jamel Cecílio, 2690 · Ed. Metropolitan Mall · sala 2903 · Jardim Goiás · Goiânia/GO · CEP 74.810-100',
+    'escritorio.oabSocio':          'OAB/GO 16.539 · OAB/DF 87.243'
+  };
+}
+
+// Substitui {{tag}} pelos valores. Tags não resolvidos viram `[FALTANDO: tag]`
+// (visível no preview pra forçar correção manual).
+function _aplicarPlaceholders(template, ctx) {
+  return String(template || '').replace(/\{\{\s*([\w.]+)\s*\}\}/g, (_, key) => {
+    const v = ctx[key];
+    if (v === undefined) return `[FALTANDO: ${key}]`;
+    return v === null ? '' : String(v);
+  });
+}
+
+async function renderModelosPeticao() {
+  let modelos = [];
+  try { modelos = await DB.getAllPeticaoModelos(); }
+  catch (e) {
+    console.warn('[modelos] falha ao buscar:', e?.message || e);
+    toast('Modelos indisponíveis', 'Rode firebase deploy --only firestore:rules', 'error');
+  }
+  modelos.sort((a, b) => (a.nome || '').localeCompare(b.nome || '', 'pt-BR'));
+
+  const porTipo = {};
+  modelos.forEach(m => {
+    const t = m.tipo || 'outro';
+    if (!porTipo[t]) porTipo[t] = [];
+    porTipo[t].push(m);
+  });
+
+  $('appContent').innerHTML = `
+    <div class="page-header">
+      <div>
+        <h1 class="page-title"><span class="smallcaps-prefix">Modelos</span></h1>
+        <p class="page-subtitle">Templates de petição com placeholders · ${modelos.length} cadastrado(s)</p>
+      </div>
+      <button class="btn btn-primary" onclick="novoModeloPeticaoFlow()">+ Novo modelo</button>
+    </div>
+
+    ${modelos.length === 0 ? `
+      <div class="card empty-state">
+        <h3 class="empty-state-title">Nenhum modelo cadastrado</h3>
+        <p class="empty-state-msg">Cadastre templates de petição com placeholders tipo <code>{{cliente.nome}}</code>, <code>{{processo.cnj}}</code>. Use no processo via "Gerar petição" — o app substitui automaticamente os placeholders pelos dados reais.</p>
+        <button class="btn btn-primary" onclick="novoModeloPeticaoFlow()">+ Cadastrar primeiro modelo</button>
+      </div>
+    ` : Object.keys(porTipo).sort().map(tipo => {
+      const tipoLabel = (PETICAO_TIPOS.find(t => t.value === tipo) || {}).label || tipo;
+      return `
+        <div class="card mb-3">
+          <h3 class="font-serif font-semibold smallcaps mb-2" style="color: var(--uc-graphite); font-size: 12px;">${escapeHtml(tipoLabel)} · ${porTipo[tipo].length}</h3>
+          ${porTipo[tipo].map(m => `
+            <div style="display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--uc-line-soft);">
+              <div style="flex: 1; min-width: 0;">
+                <strong style="color: var(--uc-black); font-size: 14px;">${escapeHtml(m.nome || '(sem nome)')}</strong>
+                ${m.ativo === false ? ' <span class="badge badge-gray" style="font-size:9px;">inativo</span>' : ''}
+                ${m.descricao ? `<div style="font-size: 12px; color: var(--uc-warm-gray); margin-top: 2px;">${escapeHtml(m.descricao)}</div>` : ''}
+                <div style="font-size: 11px; color: var(--uc-warm-gray); margin-top: 2px;">
+                  ${(m.conteudo || '').length} caractere(s) · atualizado ${formatDate(m.updatedAt || m.createdAt, { relative: true })}
+                </div>
+              </div>
+              <div class="flex gap-2 items-center">
+                <button class="btn btn-ghost btn-sm" onclick="previewModeloPeticao('${m.id}')" title="Ver template" style="padding: 2px 8px;">👁</button>
+                <button class="btn btn-ghost btn-sm" onclick="editarModeloPeticao('${m.id}')" title="Editar" style="padding: 2px 8px;">✎</button>
+                <button class="btn btn-ghost btn-sm" onclick="duplicarModeloPeticao('${m.id}')" title="Duplicar" style="padding: 2px 8px;">⎘</button>
+                <button class="btn btn-ghost btn-sm" onclick="removerModeloPeticao('${m.id}')" title="Remover" style="padding: 2px 8px;">🗑</button>
+              </div>
+            </div>
+          `).join('')}
+        </div>
+      `;
+    }).join('')}
+
+    <div class="card mt-4" style="background: var(--uc-cream);">
+      <h4 class="font-serif font-semibold smallcaps mb-2" style="color: var(--uc-warm-gray); font-size: 12px;">Placeholders disponíveis</h4>
+      <p class="text-xs" style="color: var(--uc-warm-gray); margin-bottom: 8px;">Cole no conteúdo do modelo. Ao gerar a petição em um processo, o app substitui automaticamente.</p>
+      ${(() => {
+        const grupos = {};
+        PETICAO_PLACEHOLDERS.forEach(p => { (grupos[p.grupo] = grupos[p.grupo] || []).push(p); });
+        return Object.entries(grupos).map(([g, items]) => `
+          <div style="margin-bottom: 8px;">
+            <strong style="font-size: 11px; color: var(--uc-graphite);">${escapeHtml(g)}:</strong>
+            <div style="display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px;">
+              ${items.map(p => `<code style="font-size: 11px; padding: 2px 6px; background: white; border: 1px solid var(--uc-line); border-radius: 3px; cursor: copy;" onclick="navigator.clipboard.writeText('${p.tag}'); toast('Copiado', '${p.tag}', 'success')" title="${escapeHtml(p.desc)}">${escapeHtml(p.tag)}</code>`).join('')}
+            </div>
+          </div>
+        `).join('');
+      })()}
+    </div>
+  `;
+}
+
+async function novoModeloPeticaoFlow(prefill) {
+  await _modeloFormFlow({
+    titulo: 'Novo modelo de petição',
+    modelo: prefill || { tipo: 'manifestacao', ativo: true, conteudo: '' },
+    isNovo: true
+  });
+}
+
+async function editarModeloPeticao(id) {
+  const modelos = await DB.getAllPeticaoModelos();
+  const m = modelos.find(x => x.id === id);
+  if (!m) { toast('Modelo não encontrado', '', 'error'); return; }
+  await _modeloFormFlow({
+    titulo: 'Editar modelo · ' + (m.nome || ''),
+    modelo: { ...m },
+    isNovo: false
+  });
+}
+
+async function duplicarModeloPeticao(id) {
+  const modelos = await DB.getAllPeticaoModelos();
+  const m = modelos.find(x => x.id === id);
+  if (!m) return;
+  const copia = { ...m, id: undefined, nome: (m.nome || '') + ' (cópia)', createdAt: undefined, updatedAt: undefined };
+  await novoModeloPeticaoFlow(copia);
+}
+
+async function _modeloFormFlow({ titulo, modelo, isNovo }) {
+  const tipoOpts = PETICAO_TIPOS.map(t => ({ value: t.value, label: t.label }));
+  const r = await showModal(titulo, [
+    { label: 'Nome', name: 'nome', placeholder: 'Ex: Contestação tributária base · Manifestação simples', default: modelo.nome || '' },
+    { label: 'Tipo', name: 'tipo', type: 'select', default: modelo.tipo || 'manifestacao', options: tipoOpts },
+    { label: 'Descrição (opcional)', name: 'descricao', placeholder: 'Quando usar este modelo', default: modelo.descricao || '' },
+    { label: 'Ativo', name: 'ativo', type: 'checkbox', default: modelo.ativo !== false },
+    { label: 'Conteúdo (Markdown · use {{placeholders}})', name: 'conteudo', type: 'textarea', rows: 18,
+      placeholder: 'EXCELENTÍSSIMO SENHOR DOUTOR JUIZ DE DIREITO DA {{processo.court}}\n\nProcesso nº {{processo.cnj}}\n\n{{cliente.nome}}, já qualificado nos autos…\n\n{{data.cidadeData}}.',
+      default: modelo.conteudo || '' }
+  ], {
+    confirmLabel: isNovo ? 'Cadastrar' : 'Salvar',
+    intro: 'Use placeholders como <code>{{cliente.nome}}</code>, <code>{{processo.cnj}}</code>, <code>{{data.hojeExtenso}}</code>. Lista completa em "Modelos" na sidebar.'
+  });
+  if (!r) return;
+  const [nome, tipo, descricao, ativo, conteudo] = r;
+  if (!nome?.trim()) { toast('Nome obrigatório', '', 'error'); return; }
+  if (!conteudo?.trim()) { toast('Conteúdo vazio', '', 'error'); return; }
+
+  const now = Date.now();
+  const m = {
+    ...(modelo.id ? { id: modelo.id } : { id: uid() }),
+    escritorio_id: 'UC',
+    nome: nome.trim(),
+    tipo: tipo || 'outro',
+    descricao: descricao?.trim() || '',
+    conteudo: conteudo,
+    ativo: !!ativo,
+    createdAt: modelo.createdAt || now,
+    updatedAt: now,
+    criadoPor: modelo.criadoPor || (window.UC_Auth?.getUser?.() || {}).email || ''
+  };
+  await DB.savePeticaoModelo(m);
+  toast(isNovo ? 'Modelo cadastrado' : 'Modelo atualizado', m.nome, 'success');
+  if (state.currentRoute === 'modelos') renderModelosPeticao();
+}
+
+async function removerModeloPeticao(id) {
+  const ok = await confirmDialog('Remover modelo?', 'Ação irreversível. Petições já geradas a partir deste modelo não são afetadas (não armazenamos histórico).', true);
+  if (!ok) return;
+  await DB.deletePeticaoModelo(id);
+  toast('Modelo removido', '', 'success');
+  if (state.currentRoute === 'modelos') renderModelosPeticao();
+}
+
+async function previewModeloPeticao(id) {
+  const modelos = await DB.getAllPeticaoModelos();
+  const m = modelos.find(x => x.id === id);
+  if (!m) return;
+  await showModal('Preview do template · ' + (m.nome || ''), [
+    { label: 'Conteúdo (placeholders não substituídos)', type: 'textarea', rows: 22, default: m.conteudo || '', readOnly: true }
+  ], { confirmLabel: 'Fechar', cancelLabel: null, intro: '<em>Este é o template cru — ao gerar petição em um processo, os placeholders viram dados reais.</em>' });
+}
+
+// Botão "Gerar petição" no processo — escolhe modelo, gera com substituição,
+// abre preview com ações de cópia / download .md.
+async function gerarPeticaoFlow() {
+  const proc = state._processView?.p;
+  if (!proc) { toast('Abra um processo primeiro', '', 'error'); return; }
+
+  let modelos = [];
+  try { modelos = await DB.getAllPeticaoModelos(); }
+  catch (e) { toast('Falha ao buscar modelos', e?.message || '', 'error'); return; }
+  const ativos = modelos.filter(m => m.ativo !== false)
+    .sort((a, b) => (a.nome || '').localeCompare(b.nome || '', 'pt-BR'));
+  if (ativos.length === 0) {
+    const ok = await confirmDialog('Nenhum modelo cadastrado',
+      'Você ainda não tem modelos de petição. Quer cadastrar agora?');
+    if (ok) navigate('modelos');
+    return;
+  }
+
+  // Carrega cliente vinculado se houver
+  let cliente = null;
+  if (proc.clienteId) {
+    try {
+      const clientes = await DB.getAllClientes();
+      cliente = clientes.find(c => c.id === proc.clienteId) || null;
+    } catch (_) {}
+  }
+
+  const modeloOpts = ativos.map(m => {
+    const tipoLabel = (PETICAO_TIPOS.find(t => t.value === m.tipo) || {}).label || m.tipo;
+    return { value: m.id, label: `[${tipoLabel}] ${m.nome}` };
+  });
+
+  const escolha = await showModal('Gerar petição', [
+    { label: 'Modelo', name: 'modeloId', type: 'select', default: modeloOpts[0].value, options: modeloOpts }
+  ], {
+    confirmLabel: 'Gerar',
+    intro: `Processo: <strong>${escapeHtml(proc.name || proc.cnj || '—')}</strong>${cliente ? ' · Cliente: <strong>' + escapeHtml(cliente.nome) + '</strong>' : ''}`
+  });
+  if (!escolha) return;
+  const [modeloId] = escolha;
+  const modelo = ativos.find(m => m.id === modeloId);
+  if (!modelo) return;
+
+  const ctx = _montarContextoPeticao(proc, cliente);
+  const conteudoGerado = _aplicarPlaceholders(modelo.conteudo, ctx);
+
+  // Detecta placeholders faltando
+  const faltando = [...conteudoGerado.matchAll(/\[FALTANDO:\s*([\w.]+)\]/g)].map(m => m[1]);
+  const faltUnicos = [...new Set(faltando)];
+
+  state._peticaoGerada = { conteudo: conteudoGerado, modelo, processo: proc, cliente };
+  _abrirModalPeticaoGerada(conteudoGerado, modelo, proc, faltUnicos);
+}
+
+function _abrirModalPeticaoGerada(conteudo, modelo, processo, faltUnicos) {
+  const modal = document.createElement('div');
+  modal.className = 'modal-backdrop';
+  modal.innerHTML = `
+    <div class="modal scroll-thin" style="max-width: 800px;">
+      <h3 class="modal-title">Petição gerada · ${escapeHtml(modelo.nome)}</h3>
+      <p class="help-text" style="margin-bottom: 12px;">
+        ${faltUnicos.length > 0
+          ? `⚠ <strong>${faltUnicos.length} placeholder(s) sem dado</strong>: <code>${faltUnicos.map(escapeHtml).join('</code>, <code>')}</code> — preencha o cadastro do processo/cliente ou edite manualmente abaixo.`
+          : 'Conteúdo pronto · revise antes de protocolar.'}
+      </p>
+      <div style="margin-bottom: 16px;">
+        <label class="label">Texto gerado (editável)</label>
+        <textarea id="_pgConteudo" class="textarea" rows="22" style="font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px;">${escapeHtml(conteudo)}</textarea>
+      </div>
+      <div class="flex gap-2 flex-wrap">
+        <button class="btn btn-primary" id="_pgCopiar" style="flex: 1; min-width: 140px;">📋 Copiar texto</button>
+        <button class="btn btn-secondary" id="_pgMd" style="min-width: 120px;">⬇ Baixar .md</button>
+        <button class="btn btn-secondary" id="_pgTxt" style="min-width: 120px;">⬇ Baixar .txt</button>
+        <button class="btn btn-outline" id="_pgFechar" style="min-width: 100px;">Fechar</button>
+      </div>
+    </div>
+  `;
+  $('modalContainer').appendChild(modal);
+  const cleanup = () => modal.remove();
+  const getTexto = () => document.getElementById('_pgConteudo').value;
+
+  document.getElementById('_pgCopiar').onclick = () => {
+    navigator.clipboard.writeText(getTexto()).then(
+      () => toast('Copiado para área de transferência', modelo.nome, 'success'),
+      () => toast('Falha ao copiar', '', 'error')
+    );
+  };
+  document.getElementById('_pgMd').onclick = () => _baixarPeticaoGerada('md', getTexto(), modelo, processo);
+  document.getElementById('_pgTxt').onclick = () => _baixarPeticaoGerada('txt', getTexto(), modelo, processo);
+  document.getElementById('_pgFechar').onclick = cleanup;
+}
+
+function _baixarPeticaoGerada(formato, texto, modelo, processo) {
+  const g = state._peticaoGerada;
+  const txt = texto || g?.conteudo || '';
+  const m = modelo || g?.modelo || { nome: 'peticao' };
+  const p = processo || g?.processo || {};
+  const ext = formato === 'md' ? 'md' : 'txt';
+  const slug = (m.nome || 'peticao').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  const cnj = p.cnj ? '_' + p.cnj.replace(/[^0-9]/g, '') : '';
+  const fname = `${slug}${cnj}_${new Date().toISOString().slice(0,10)}.${ext}`;
+  downloadBlob(new Blob([txt], { type: ext === 'md' ? 'text/markdown' : 'text/plain' }), fname);
+  toast('Baixado', fname, 'success');
+}
+
 async function renderTools() {
   const processes = await DB.getAllProcesses();
   state.processes = processes;
@@ -11849,6 +12230,28 @@ async function bootApp() {
     return r;
   };
 
+  // ====== Cache Modelos de Petição (v6.27 — Sprint Pet.0) ======
+  const _remoteGetAllPeticaoModelos = DB.getAllPeticaoModelos.bind(DB);
+  const _remoteSavePeticaoModelo = DB.savePeticaoModelo.bind(DB);
+  const _remoteDeletePeticaoModelo = DB.deletePeticaoModelo.bind(DB);
+  let _modCache = null, _modCacheAt = 0;
+  DB.getAllPeticaoModelos = async () => {
+    if (_modCache && (Date.now() - _modCacheAt < CACHE_MS)) return _modCache;
+    _modCache = await _remoteGetAllPeticaoModelos();
+    _modCacheAt = Date.now();
+    return _modCache;
+  };
+  DB.savePeticaoModelo = async (m) => {
+    const r = await _remoteSavePeticaoModelo(m);
+    _modCache = null; _modCacheAt = 0;
+    return r;
+  };
+  DB.deletePeticaoModelo = async (id) => {
+    const r = await _remoteDeletePeticaoModelo(id);
+    _modCache = null; _modCacheAt = 0;
+    return r;
+  };
+
   // ====== Cache Financeiro (v6.16+) ======
   const _finCaches = {
     bancos: { data: null, at: 0 },
@@ -11914,6 +12317,7 @@ async function bootApp() {
     _cliCache = null; _cliCacheAt = 0;
     _comCache = null; _comCacheAt = 0;
     _agCache = null; _agCacheAt = 0;
+    _modCache = null; _modCacheAt = 0;
     _settingsCache.clear();
     _settingsCacheAt.clear();
     Object.keys(_finCaches).forEach(k => _finCacheBust(k));

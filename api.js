@@ -399,6 +399,11 @@ const RemoteDB = {
   async saveCompromisso(c) { return await upsert_('compromissos', c); },
   async deleteCompromisso(id) { return await softDelete_('compromissos', id); },
 
+  // ====== Módulo Petições — Modelos (v6.27) ======
+  async getAllPeticaoModelos() { return await getAll_('peticao_modelos'); },
+  async savePeticaoModelo(m) { return await upsert_('peticao_modelos', m); },
+  async deletePeticaoModelo(id) { return await softDelete_('peticao_modelos', id); },
+
   // Jurisprudência
   async getJurisprudenceByProcess(pid) {
     return (await getAll_('jurisprudencia')).filter(j => j.processId === pid);

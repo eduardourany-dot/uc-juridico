@@ -111,6 +111,11 @@ service cloud.firestore {
       allow read, create, update, delete: if isAllowed();
     }
 
+    // ====== Módulo Petições — Modelos (v6.27+) ======
+    match /peticao_modelos/{id} {
+      allow read, create, update, delete: if isAllowed();
+    }
+
     // Negar tudo o que não estiver explicitamente acima.
     match /{document=**} {
       allow read, write: if false;
