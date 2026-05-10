@@ -1,6 +1,6 @@
 # UC Jurídico — Instalação e operação
 
-Versão atual: **v6.15.0**
+Versão atual: **v6.16.0**
 URL pública: https://eduardourany-dot.github.io/uc-juridico/
 Repositório: https://github.com/eduardourany-dot/uc-juridico
 
@@ -200,10 +200,11 @@ Verificar:
 | v6.7–v6.10 | ✅ entregue | Módulo Prazos: state machine completo + cumprimento explícito + auto-perdido + UI de Equipe |
 | v6.11–v6.13 | ✅ entregue | Lembretes via Web Notifications in-app (B.1) |
 | v6.14 | ✅ entregue | FCM real (B.2) — push 24/7 com app fechado + cache em memória |
-| v6.15 | ✅ em produção | Sprint 3 C — email Gmail Workspace nos marcos críticos (T-1/T-0/T+1) |
-| **v6.16** | **próxima** | Módulo Financeiro: receitas, despesas, bancos, cartões, parcelamento de honorários, balancete |
-| v6.17+ | planejado | CRM de clientes (Cliente vira entidade), agenda unificada, tarefas/projetos, formulário de atendimento |
-| v7.x | futuro | Módulo Petições com integração Claude API |
+| v6.15 | ✅ entregue | Sprint 3 C — email Gmail Workspace nos marcos críticos (T-1/T-0/T+1) |
+| v6.16 | ✅ em produção | **Módulo Financeiro A.1** — Bancos + Transações + Visão Geral (briefing em [docs/BRIEFING_Financeiro.md](docs/BRIEFING_Financeiro.md)) |
+| **v6.17** | **próxima** | Módulo Financeiro A.2 — Cartões + Categorias com orçamento + filtros avançados |
+| v6.18+ | planejado | A.3 (Honorários parcelados) → A.4 (Recorrências + Balancete) → CRM clientes → Agenda unificada |
+| v7.x | planejado | Módulo Petições com Claude API (briefing em [docs/BRIEFING_Peticoes.md](docs/BRIEFING_Peticoes.md)) |
 
 Pendências menores:
 - Reescrita do `INSTALACAO.md` (este documento — feita em v6.14.2)

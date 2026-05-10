@@ -82,6 +82,26 @@ service cloud.firestore {
       allow read, create, update, delete: if isAllowed();
     }
 
+    // ====== Módulo Financeiro (v6.16+) ======
+    match /bancos/{id} {
+      allow read, create, update, delete: if isAllowed();
+    }
+    match /cartoes/{id} {
+      allow read, create, update, delete: if isAllowed();
+    }
+    match /categorias_fin/{id} {
+      allow read, create, update, delete: if isAllowed();
+    }
+    match /transacoes/{id} {
+      allow read, create, update, delete: if isAllowed();
+    }
+    match /recorrencias/{id} {
+      allow read, create, update, delete: if isAllowed();
+    }
+    match /honorarios/{id} {
+      allow read, create, update, delete: if isAllowed();
+    }
+
     // Negar tudo o que não estiver explicitamente acima.
     match /{document=**} {
       allow read, write: if false;

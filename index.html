@@ -240,6 +240,10 @@ body{background:var(--uc-paper);color:var(--uc-graphite);font-size:15px;-webkit-
       <span>Prazos</span>
       <span id="navDeadlineCount" class="nav-badge hidden">0</span>
     </a>
+    <a class="nav-item" data-route="financeiro">
+      <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+      <span>Financeiro</span>
+    </a>
 
     <div class="nav-section" style="margin-top:16px;">Operacional</div>
     <a class="nav-item" data-route="tools">
@@ -259,7 +263,7 @@ body{background:var(--uc-paper);color:var(--uc-graphite);font-size:15px;-webkit-
 
     <div style="margin-top:auto;padding:16px 20px;border-top:1px solid var(--uc-line-soft);font-size:11px;color:var(--uc-warm-gray);text-align:center;">
       <p class="smallcaps font-serif" style="margin:0 0 4px;">Urany de Castro · 30 anos</p>
-      <p style="margin:0;">100% local · v6.15.0</p>
+      <p style="margin:0;">100% local · v6.16.0</p>
     </div>
   </aside>
 
@@ -281,6 +285,10 @@ body{background:var(--uc-paper);color:var(--uc-graphite);font-size:15px;-webkit-
   <a class="mobile-nav-item" data-route="deadlines">
     <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
     <span>Prazos</span>
+  </a>
+  <a class="mobile-nav-item" data-route="financeiro">
+    <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+    <span>Financeiro</span>
   </a>
   <a class="mobile-nav-item" data-route="tools">
     <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 4a2 2 0 114 0v1a1 1 0 001 1h3a1 1 0 011 1v3a1 1 0 01-1 1h-1a2 2 0 100 4h1a1 1 0 011 1v3a1 1 0 01-1 1h-3a1 1 0 01-1-1v-1a2 2 0 10-4 0v1a1 1 0 01-1 1H6a1 1 0 01-1-1v-3a1 1 0 00-1-1H3a2 2 0 110-4h1a1 1 0 001-1V7a1 1 0 011-1h3a1 1 0 001-1V4z"/></svg>
@@ -448,6 +456,28 @@ const DB = {
     await dbPromise('history', 'readwrite', s => s.add({ timestamp: Date.now(), action, data }));
   },
 
+  // ====== Módulo Financeiro (stubs IndexedDB — sobrescritos por UC_RemoteDB no boot) ======
+  async getAllBancos() { return []; },
+  async saveBanco(b) { return b; },
+  async deleteBanco(_id) {},
+  async getAllCartoes() { return []; },
+  async saveCartao(c) { return c; },
+  async deleteCartao(_id) {},
+  async getAllCategoriasFin() { return []; },
+  async saveCategoriaFin(c) { return c; },
+  async deleteCategoriaFin(_id) {},
+  async getAllTransacoes() { return []; },
+  async getTransacoesByProcess(_pid) { return []; },
+  async saveTransacao(t) { return t; },
+  async deleteTransacao(_id) {},
+  async getAllRecorrencias() { return []; },
+  async saveRecorrencia(r) { return r; },
+  async deleteRecorrencia(_id) {},
+  async getAllHonorarios() { return []; },
+  async getHonorariosByProcess(_pid) { return []; },
+  async saveHonorario(h) { return h; },
+  async deleteHonorario(_id) {},
+
   // DJEN publications
   async getAllDjenPublications() {
     return await dbPromise('djen_publications', 'readonly', s => new Promise(res => { const r = s.getAll(); r.onsuccess = () => res(r.result); }));
@@ -497,6 +527,7 @@ const routes = {
   processes: renderProcessList,
   process: renderProcessDetail,
   deadlines: renderDeadlines,
+  financeiro: renderFinanceiro,
   tools: renderTools,
   diligence: renderDiligence,
   settings: renderSettings
@@ -4120,6 +4151,521 @@ const _toolsState = {
   _batchTotal: 0
 };
 
+// ====================================================================
+// === MÓDULO FINANCEIRO (v6.16+, Sprint A.1) =========================
+// ====================================================================
+
+const CATEGORIAS_SEED = [
+  // Despesas
+  { nome: 'Aluguel',           tipo: 'despesa', orcamentoMensal: null, cor: '#a8472d' },
+  { nome: 'Energia',           tipo: 'despesa', orcamentoMensal: null, cor: '#b87f1c' },
+  { nome: 'Internet',          tipo: 'despesa', orcamentoMensal: null, cor: '#b87f1c' },
+  { nome: 'Telefonia',         tipo: 'despesa', orcamentoMensal: null, cor: '#b87f1c' },
+  { nome: 'Contabilidade',     tipo: 'despesa', orcamentoMensal: null, cor: '#6b6b68' },
+  { nome: 'Impostos',          tipo: 'despesa', orcamentoMensal: null, cor: '#a8472d' },
+  { nome: 'Pró-labore',        tipo: 'despesa', orcamentoMensal: null, cor: '#8a6f3d' },
+  { nome: 'Cursos / Pós',      tipo: 'despesa', orcamentoMensal: null, cor: '#4a7c4a' },
+  { nome: 'Viagens',           tipo: 'despesa', orcamentoMensal: null, cor: '#4a7c4a' },
+  { nome: 'Software',          tipo: 'despesa', orcamentoMensal: null, cor: '#6b6b68' },
+  { nome: 'Manutenção',        tipo: 'despesa', orcamentoMensal: null, cor: '#6b6b68' },
+  { nome: 'Outros (despesa)',  tipo: 'despesa', orcamentoMensal: null, cor: '#9b9b96' },
+  // Receitas
+  { nome: 'Honorários',        tipo: 'receita', orcamentoMensal: null, cor: '#4a7c4a' },
+  { nome: 'Honorários (êxito)',tipo: 'receita', orcamentoMensal: null, cor: '#4a7c4a' },
+  { nome: 'Outros (receita)',  tipo: 'receita', orcamentoMensal: null, cor: '#9b9b96' }
+];
+
+async function _seedCategoriasFinSeNecessario() {
+  const cats = await DB.getAllCategoriasFin();
+  if (cats && cats.length > 0) return cats;
+  // Primeira abertura — cria todas as categorias seed
+  for (const c of CATEGORIAS_SEED) {
+    await DB.saveCategoriaFin({
+      id: uid(),
+      nome: c.nome,
+      tipo: c.tipo,
+      orcamentoMensal: c.orcamentoMensal,
+      cor: c.cor,
+      ativo: true,
+      createdAt: Date.now()
+    });
+  }
+  toast('Categorias financeiras criadas', `${CATEGORIAS_SEED.length} categorias padrão`, 'success');
+  return await DB.getAllCategoriasFin();
+}
+
+function brl(n) {
+  if (n == null || isNaN(n)) return 'R$ 0,00';
+  return n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+}
+
+function _calcularSaldoBanco(banco, transacoes) {
+  // Soma realizadas: receitas (+), despesas (-)
+  let saldo = banco.saldoInicial || 0;
+  for (const t of transacoes) {
+    if (t.contaId !== banco.id || t.tipoConta !== 'banco') continue;
+    if (t.status !== 'realizado') continue;
+    saldo += (t.tipo === 'receita' ? Number(t.valor) : -Number(t.valor));
+  }
+  return saldo;
+}
+
+async function renderFinanceiro() {
+  await _seedCategoriasFinSeNecessario();
+  const tab = state._finTab || 'visao';
+  $('appContent').innerHTML = `
+    <div class="page-header">
+      <div>
+        <h1 class="page-title"><span class="smallcaps-prefix">Financeiro</span></h1>
+        <p class="page-subtitle">Controle de caixa, bancos e honorários</p>
+      </div>
+    </div>
+    <div class="tabs">
+      <button class="tab ${tab === 'visao' ? 'active' : ''}" onclick="setFinTab('visao')">Visão geral</button>
+      <button class="tab ${tab === 'transacoes' ? 'active' : ''}" onclick="setFinTab('transacoes')">Transações</button>
+      <button class="tab ${tab === 'bancos' ? 'active' : ''}" onclick="setFinTab('bancos')">Bancos</button>
+    </div>
+    <div id="finContent"><p style="color: var(--uc-warm-gray);">Carregando…</p></div>
+  `;
+  if (tab === 'visao') return renderFinVisaoGeral();
+  if (tab === 'transacoes') return renderFinTransacoes();
+  if (tab === 'bancos') return renderFinBancos();
+}
+
+function setFinTab(tab) {
+  state._finTab = tab;
+  renderFinanceiro();
+}
+
+async function renderFinVisaoGeral() {
+  const [bancos, transacoes, categorias] = await Promise.all([
+    DB.getAllBancos(),
+    DB.getAllTransacoes(),
+    DB.getAllCategoriasFin()
+  ]);
+  const catById = {};
+  categorias.forEach(c => { catById[c.id] = c; });
+
+  const hoje = new Date();
+  const inicioMes = new Date(hoje.getFullYear(), hoje.getMonth(), 1).toISOString().slice(0,10);
+  const fimMes = new Date(hoje.getFullYear(), hoje.getMonth()+1, 0).toISOString().slice(0,10);
+  const noMes = transacoes.filter(t => t.data >= inicioMes && t.data <= fimMes && t.status === 'realizado');
+  const receitasMes = noMes.filter(t => t.tipo === 'receita').reduce((s,t) => s + Number(t.valor), 0);
+  const despesasMes = noMes.filter(t => t.tipo === 'despesa').reduce((s,t) => s + Number(t.valor), 0);
+  const saldoTotal = bancos.reduce((s, b) => s + _calcularSaldoBanco(b, transacoes), 0);
+
+  // Top 5 categorias do mês (despesa)
+  const porCat = {};
+  noMes.filter(t => t.tipo === 'despesa').forEach(t => {
+    const k = t.categoriaId || '_';
+    porCat[k] = (porCat[k] || 0) + Number(t.valor);
+  });
+  const topCat = Object.entries(porCat).sort((a,b) => b[1] - a[1]).slice(0, 5);
+
+  // Próximas previstas
+  const proximas = transacoes
+    .filter(t => t.status === 'previsto' && t.data >= inicioMes)
+    .sort((a,b) => a.data.localeCompare(b.data))
+    .slice(0, 5);
+
+  $('finContent').innerHTML = `
+    <div class="grid gap-3" style="grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); margin-bottom: 16px;">
+      <div class="card">
+        <p class="text-xs smallcaps" style="color: var(--uc-warm-gray); margin: 0 0 6px;">Saldo total</p>
+        <p style="font-size: 24px; font-weight: 600; color: var(--uc-black); margin: 0;">${brl(saldoTotal)}</p>
+        <p class="text-xs" style="color: var(--uc-warm-gray); margin: 4px 0 0;">${bancos.length} conta(s)</p>
+      </div>
+      <div class="card">
+        <p class="text-xs smallcaps" style="color: var(--uc-warm-gray); margin: 0 0 6px;">Receitas do mês</p>
+        <p style="font-size: 24px; font-weight: 600; color: var(--uc-green); margin: 0;">${brl(receitasMes)}</p>
+      </div>
+      <div class="card">
+        <p class="text-xs smallcaps" style="color: var(--uc-warm-gray); margin: 0 0 6px;">Despesas do mês</p>
+        <p style="font-size: 24px; font-weight: 600; color: var(--uc-red); margin: 0;">${brl(despesasMes)}</p>
+      </div>
+      <div class="card">
+        <p class="text-xs smallcaps" style="color: var(--uc-warm-gray); margin: 0 0 6px;">Resultado do mês</p>
+        <p style="font-size: 24px; font-weight: 600; color: ${receitasMes - despesasMes >= 0 ? 'var(--uc-green)' : 'var(--uc-red)'}; margin: 0;">${brl(receitasMes - despesasMes)}</p>
+      </div>
+    </div>
+
+    <div class="grid gap-3" style="grid-template-columns: 1fr 1fr;">
+      <div class="card">
+        <h3 class="font-serif text-lg font-semibold smallcaps mb-3" style="color: var(--uc-black);">Top categorias (despesa, mês)</h3>
+        ${topCat.length === 0 ? '<p class="help-text">Nenhuma despesa no mês.</p>' : topCat.map(([k, v]) => {
+          const cat = catById[k];
+          const cor = cat?.cor || '#6b6b68';
+          const pct = (v / despesasMes * 100).toFixed(0);
+          return `
+            <div style="margin-bottom: 8px;">
+              <div style="display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 4px;">
+                <span style="color: ${cor};">${escapeHtml(cat?.nome || '— sem categoria —')}</span>
+                <span style="color: var(--uc-warm-gray);">${brl(v)} · ${pct}%</span>
+              </div>
+              <div style="height: 6px; background: var(--uc-cream); border-radius: 3px; overflow: hidden;">
+                <div style="width: ${pct}%; height: 100%; background: ${cor};"></div>
+              </div>
+            </div>
+          `;
+        }).join('')}
+      </div>
+
+      <div class="card">
+        <h3 class="font-serif text-lg font-semibold smallcaps mb-3" style="color: var(--uc-black);">Próximas previstas</h3>
+        ${proximas.length === 0 ? '<p class="help-text">Nenhuma transação prevista.</p>' : proximas.map(t => `
+          <div style="display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid var(--uc-line-soft); font-size: 13px;">
+            <div>
+              <div>${escapeHtml(t.descricao || '—')}</div>
+              <div style="color: var(--uc-warm-gray); font-size: 11px;">${formatDate(t.data)} · ${escapeHtml(catById[t.categoriaId]?.nome || '—')}</div>
+            </div>
+            <div style="font-weight: 600; color: ${t.tipo === 'receita' ? 'var(--uc-green)' : 'var(--uc-red)'};">
+              ${t.tipo === 'receita' ? '+' : '−'}${brl(t.valor)}
+            </div>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+
+    ${bancos.length === 0 ? `
+      <div class="empty-state" style="margin-top: 20px;">
+        <h3 class="empty-state-title">Comece cadastrando um banco</h3>
+        <p class="empty-state-msg">Sem bancos cadastrados, transações não conseguem ser registradas.</p>
+        <button class="btn btn-primary" onclick="setFinTab('bancos')">Ir para Bancos</button>
+      </div>
+    ` : ''}
+  `;
+}
+
+async function renderFinTransacoes() {
+  const [transacoes, bancos, cartoes, categorias, processos] = await Promise.all([
+    DB.getAllTransacoes(), DB.getAllBancos(), DB.getAllCartoes(),
+    DB.getAllCategoriasFin(), DB.getAllProcesses()
+  ]);
+  const catById = {}; categorias.forEach(c => catById[c.id] = c);
+  const bancoById = {}; bancos.forEach(b => bancoById[b.id] = b);
+  const cartaoById = {}; cartoes.forEach(c => cartaoById[c.id] = c);
+  const procById = {}; processos.forEach(p => procById[p.id] = p);
+
+  state._finTransacoesFiltro = state._finTransacoesFiltro || { tipo: 'todos', status: 'todos' };
+  const f = state._finTransacoesFiltro;
+  let filtradas = transacoes.slice();
+  if (f.tipo !== 'todos') filtradas = filtradas.filter(t => t.tipo === f.tipo);
+  if (f.status !== 'todos') filtradas = filtradas.filter(t => t.status === f.status);
+  filtradas.sort((a,b) => (b.data || '').localeCompare(a.data || ''));
+
+  $('finContent').innerHTML = `
+    <div class="flex justify-between items-center mb-3" style="flex-wrap: wrap; gap: 8px;">
+      <div class="flex gap-2" style="flex-wrap: wrap;">
+        <select class="select" onchange="_setFinFiltro('tipo', this.value)" style="max-width: 160px;">
+          <option value="todos" ${f.tipo === 'todos' ? 'selected' : ''}>Todos os tipos</option>
+          <option value="receita" ${f.tipo === 'receita' ? 'selected' : ''}>Receitas</option>
+          <option value="despesa" ${f.tipo === 'despesa' ? 'selected' : ''}>Despesas</option>
+        </select>
+        <select class="select" onchange="_setFinFiltro('status', this.value)" style="max-width: 160px;">
+          <option value="todos" ${f.status === 'todos' ? 'selected' : ''}>Todos os status</option>
+          <option value="previsto" ${f.status === 'previsto' ? 'selected' : ''}>Previstas</option>
+          <option value="realizado" ${f.status === 'realizado' ? 'selected' : ''}>Realizadas</option>
+        </select>
+      </div>
+      <button class="btn btn-primary btn-sm" onclick="novaTransacaoFlow()" ${bancos.length === 0 && cartoes.length === 0 ? 'disabled title="Cadastre um banco primeiro"' : ''}>+ Nova transação</button>
+    </div>
+
+    ${filtradas.length === 0 ? `
+      <div class="empty-state">
+        <p class="empty-state-msg">Nenhuma transação ${f.tipo !== 'todos' || f.status !== 'todos' ? 'com esses filtros' : 'cadastrada ainda'}.</p>
+      </div>
+    ` : `
+      <div style="overflow-x: auto;">
+        <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
+          <thead>
+            <tr style="border-bottom: 1px solid var(--uc-line); text-align: left;">
+              <th style="padding: 8px 6px; color: var(--uc-warm-gray); font-weight: 500;">Data</th>
+              <th style="padding: 8px 6px; color: var(--uc-warm-gray); font-weight: 500;">Descrição</th>
+              <th style="padding: 8px 6px; color: var(--uc-warm-gray); font-weight: 500;">Categoria</th>
+              <th style="padding: 8px 6px; color: var(--uc-warm-gray); font-weight: 500;">Conta</th>
+              <th style="padding: 8px 6px; color: var(--uc-warm-gray); font-weight: 500; text-align: right;">Valor</th>
+              <th style="padding: 8px 6px; color: var(--uc-warm-gray); font-weight: 500;">Status</th>
+              <th style="padding: 8px 6px;"></th>
+            </tr>
+          </thead>
+          <tbody>
+            ${filtradas.map(t => {
+              const conta = t.tipoConta === 'cartao' ? cartaoById[t.contaId] : bancoById[t.contaId];
+              const cat = catById[t.categoriaId];
+              return `
+                <tr style="border-bottom: 1px solid var(--uc-line-soft);">
+                  <td style="padding: 8px 6px;">${formatDate(t.data)}</td>
+                  <td style="padding: 8px 6px;">${escapeHtml(t.descricao || '—')}${t.processoId && procById[t.processoId] ? `<br><span style="font-size: 11px; color: var(--uc-warm-gray);">↳ ${escapeHtml(procById[t.processoId].name || procById[t.processoId].cnj || '')}</span>` : ''}</td>
+                  <td style="padding: 8px 6px;"><span style="color: ${cat?.cor || '#6b6b68'};">${escapeHtml(cat?.nome || '—')}</span></td>
+                  <td style="padding: 8px 6px;">${escapeHtml(conta?.nome || '—')} ${t.tipoConta === 'cartao' ? '<span class="badge badge-gray" style="font-size: 9px;">cartão</span>' : ''}</td>
+                  <td style="padding: 8px 6px; text-align: right; font-weight: 600; color: ${t.tipo === 'receita' ? 'var(--uc-green)' : 'var(--uc-red)'};">
+                    ${t.tipo === 'receita' ? '+' : '−'}${brl(t.valor)}
+                  </td>
+                  <td style="padding: 8px 6px;">
+                    ${t.status === 'realizado'
+                      ? '<span class="badge badge-green" style="font-size: 10px;">✓ realizado</span>'
+                      : `<button class="btn btn-ghost btn-sm" onclick="confirmarTransacao('${t.id}')" title="Marcar como realizada" style="padding: 2px 8px; font-size: 11px;">○ marcar paga</button>`
+                    }
+                  </td>
+                  <td style="padding: 8px 6px; text-align: right;">
+                    <button class="btn btn-ghost btn-sm" onclick="editarTransacao('${t.id}')" title="Editar">✎</button>
+                    <button class="btn btn-ghost btn-sm" onclick="removerTransacao('${t.id}')" title="Remover">🗑</button>
+                  </td>
+                </tr>
+              `;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>
+    `}
+  `;
+}
+
+function _setFinFiltro(campo, valor) {
+  state._finTransacoesFiltro = state._finTransacoesFiltro || {};
+  state._finTransacoesFiltro[campo] = valor;
+  renderFinTransacoes();
+}
+
+async function renderFinBancos() {
+  const [bancos, transacoes] = await Promise.all([
+    DB.getAllBancos(), DB.getAllTransacoes()
+  ]);
+
+  $('finContent').innerHTML = `
+    <div class="flex justify-between items-center mb-3">
+      <p class="text-sm" style="color: var(--uc-warm-gray);">${bancos.length} conta(s) cadastrada(s)</p>
+      <button class="btn btn-primary btn-sm" onclick="novoBancoFlow()">+ Novo banco</button>
+    </div>
+
+    ${bancos.length === 0 ? `
+      <div class="empty-state">
+        <p class="empty-state-msg">Nenhum banco cadastrado. Adicione contas correntes, poupança ou caixa.</p>
+      </div>
+    ` : `
+      <div class="grid gap-3" style="grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));">
+        ${bancos.map(b => {
+          const saldo = _calcularSaldoBanco(b, transacoes);
+          const movs = transacoes.filter(t => t.contaId === b.id && t.tipoConta === 'banco' && t.status === 'realizado').length;
+          return `
+            <div class="card">
+              <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px;">
+                <div>
+                  <h3 class="font-serif text-lg font-semibold" style="color: var(--uc-black); margin: 0;">${escapeHtml(b.nome)}</h3>
+                  <p class="text-xs smallcaps" style="color: var(--uc-warm-gray); margin: 2px 0 0;">${b.tipo || 'corrente'}</p>
+                </div>
+                <div style="display: flex; gap: 4px;">
+                  <button class="btn btn-ghost btn-sm" onclick="editarBanco('${b.id}')" title="Editar">✎</button>
+                  <button class="btn btn-ghost btn-sm" onclick="removerBanco('${b.id}')" title="Remover">🗑</button>
+                </div>
+              </div>
+              <p style="font-size: 22px; font-weight: 600; color: ${saldo >= 0 ? 'var(--uc-black)' : 'var(--uc-red)'}; margin: 8px 0 4px;">${brl(saldo)}</p>
+              <p class="text-xs" style="color: var(--uc-warm-gray); margin: 0;">${movs} movimentação(ões) realizada(s)</p>
+            </div>
+          `;
+        }).join('')}
+      </div>
+    `}
+  `;
+}
+
+// ===== Modais e ações =====
+
+async function novoBancoFlow() {
+  const r = await showModal('Novo banco', [
+    { label: 'Nome', placeholder: 'Ex: Caixa Econômica · Inter · Nubank' },
+    { label: 'Tipo', type: 'select', default: 'corrente', options: [
+      { value: 'corrente', label: 'Conta corrente' },
+      { value: 'poupanca', label: 'Poupança' },
+      { value: 'caixa', label: 'Caixa (dinheiro físico)' }
+    ]},
+    { label: 'Saldo inicial (R$)', type: 'number', default: '0', placeholder: 'Saldo no momento do cadastro' }
+  ], { confirmLabel: 'Cadastrar' });
+  if (!r) return;
+  const [nome, tipo, saldoInicial] = r;
+  if (!nome?.trim()) { toast('Nome obrigatório', '', 'error'); return; }
+  await DB.saveBanco({
+    id: uid(),
+    nome: nome.trim(),
+    tipo: tipo || 'corrente',
+    saldoInicial: parseFloat(saldoInicial) || 0,
+    ativo: true,
+    createdAt: Date.now()
+  });
+  toast('Banco cadastrado', nome.trim(), 'success');
+  renderFinanceiro();
+}
+
+async function editarBanco(id) {
+  const bancos = await DB.getAllBancos();
+  const b = bancos.find(x => x.id === id);
+  if (!b) return;
+  const r = await showModal('Editar banco', [
+    { label: 'Nome', default: b.nome },
+    { label: 'Tipo', type: 'select', default: b.tipo || 'corrente', options: [
+      { value: 'corrente', label: 'Conta corrente' },
+      { value: 'poupanca', label: 'Poupança' },
+      { value: 'caixa', label: 'Caixa (dinheiro físico)' }
+    ]},
+    { label: 'Saldo inicial (R$)', type: 'number', default: String(b.saldoInicial || 0) }
+  ], { confirmLabel: 'Salvar' });
+  if (!r) return;
+  const [nome, tipo, saldoInicial] = r;
+  if (!nome?.trim()) { toast('Nome obrigatório', '', 'error'); return; }
+  b.nome = nome.trim();
+  b.tipo = tipo || b.tipo;
+  b.saldoInicial = parseFloat(saldoInicial) || 0;
+  await DB.saveBanco(b);
+  toast('Banco atualizado', '', 'success');
+  renderFinanceiro();
+}
+
+async function removerBanco(id) {
+  const transacoes = await DB.getAllTransacoes();
+  const tem = transacoes.some(t => t.contaId === id && t.tipoConta === 'banco');
+  if (tem) {
+    toast('Banco tem transações', 'Remova as transações primeiro ou desative o banco.', 'error');
+    return;
+  }
+  const ok = await confirmDialog('Remover banco?', 'O banco será apagado. Ação irreversível.', true);
+  if (!ok) return;
+  await DB.deleteBanco(id);
+  renderFinanceiro();
+}
+
+async function novaTransacaoFlow() {
+  const [bancos, cartoes, categorias, processos] = await Promise.all([
+    DB.getAllBancos(), DB.getAllCartoes(),
+    DB.getAllCategoriasFin(), DB.getAllProcesses()
+  ]);
+  const contasOpts = [
+    ...bancos.map(b => ({ value: 'banco:' + b.id, label: '🏦 ' + b.nome })),
+    ...cartoes.map(c => ({ value: 'cartao:' + c.id, label: '💳 ' + c.nome }))
+  ];
+  if (contasOpts.length === 0) {
+    toast('Cadastre um banco primeiro', '', 'error');
+    setFinTab('bancos');
+    return;
+  }
+  const catReceitas = categorias.filter(c => c.tipo === 'receita').map(c => ({ value: c.id, label: c.nome }));
+  const catDespesas = categorias.filter(c => c.tipo === 'despesa').map(c => ({ value: c.id, label: c.nome }));
+  const procOpts = [
+    { value: '', label: '— sem processo —' },
+    ...processos.map(p => ({ value: p.id, label: (p.cnj ? p.cnj + ' · ' : '') + (p.name || '—') }))
+  ];
+
+  const hojeISO = new Date().toISOString().slice(0,10);
+  const r = await showModal('Nova transação', [
+    { label: 'Tipo', type: 'select', default: 'despesa', options: [
+      { value: 'despesa', label: 'Despesa (saída)' },
+      { value: 'receita', label: 'Receita (entrada)' }
+    ]},
+    { label: 'Descrição', placeholder: 'Ex: Aluguel maio · Honorário Cliente X' },
+    { label: 'Valor (R$)', type: 'number', default: '', placeholder: '0,00' },
+    { label: 'Data', type: 'date', default: hojeISO },
+    { label: 'Categoria (escolha conforme tipo)', type: 'select', default: '', options: [
+      { value: '', label: '— escolher —' },
+      ...catDespesas, ...catReceitas
+    ]},
+    { label: 'Conta', type: 'select', default: contasOpts[0].value, options: contasOpts },
+    { label: 'Vinculado a processo (opcional)', type: 'select', default: '', options: procOpts },
+    { label: 'Status', type: 'select', default: 'realizado', options: [
+      { value: 'realizado', label: 'Realizado (já caiu)' },
+      { value: 'previsto', label: 'Previsto (vai cair)' }
+    ]}
+  ], { confirmLabel: 'Cadastrar' });
+  if (!r) return;
+  const [tipo, descricao, valor, data, categoriaId, contaCombo, processoId, status] = r;
+  if (!descricao?.trim()) { toast('Descrição obrigatória', '', 'error'); return; }
+  if (!valor || parseFloat(valor) <= 0) { toast('Valor inválido', '', 'error'); return; }
+  const [tipoConta, contaId] = (contaCombo || '').split(':');
+
+  await DB.saveTransacao({
+    id: uid(),
+    tipo,
+    valor: parseFloat(valor),
+    data: data || hojeISO,
+    categoriaId: categoriaId || null,
+    contaId: contaId || null,
+    tipoConta: tipoConta || 'banco',
+    processoId: processoId || null,
+    descricao: descricao.trim(),
+    status: status || 'realizado',
+    createdAt: Date.now()
+  });
+  toast('Transação cadastrada', '', 'success');
+  renderFinanceiro();
+}
+
+async function editarTransacao(id) {
+  const [transacoes, bancos, cartoes, categorias, processos] = await Promise.all([
+    DB.getAllTransacoes(), DB.getAllBancos(), DB.getAllCartoes(),
+    DB.getAllCategoriasFin(), DB.getAllProcesses()
+  ]);
+  const t = transacoes.find(x => x.id === id);
+  if (!t) return;
+  const contasOpts = [
+    ...bancos.map(b => ({ value: 'banco:' + b.id, label: '🏦 ' + b.nome })),
+    ...cartoes.map(c => ({ value: 'cartao:' + c.id, label: '💳 ' + c.nome }))
+  ];
+  const catOpts = [
+    { value: '', label: '— sem categoria —' },
+    ...categorias.map(c => ({ value: c.id, label: c.nome + ' (' + c.tipo + ')' }))
+  ];
+  const procOpts = [
+    { value: '', label: '— sem processo —' },
+    ...processos.map(p => ({ value: p.id, label: (p.cnj ? p.cnj + ' · ' : '') + (p.name || '—') }))
+  ];
+  const r = await showModal('Editar transação', [
+    { label: 'Tipo', type: 'select', default: t.tipo, options: [
+      { value: 'despesa', label: 'Despesa' }, { value: 'receita', label: 'Receita' }
+    ]},
+    { label: 'Descrição', default: t.descricao || '' },
+    { label: 'Valor (R$)', type: 'number', default: String(t.valor) },
+    { label: 'Data', type: 'date', default: (t.data || '').slice(0,10) },
+    { label: 'Categoria', type: 'select', default: t.categoriaId || '', options: catOpts },
+    { label: 'Conta', type: 'select', default: (t.tipoConta || 'banco') + ':' + (t.contaId || ''), options: contasOpts },
+    { label: 'Vinculado a processo', type: 'select', default: t.processoId || '', options: procOpts },
+    { label: 'Status', type: 'select', default: t.status || 'realizado', options: [
+      { value: 'realizado', label: 'Realizado' }, { value: 'previsto', label: 'Previsto' }
+    ]}
+  ], { confirmLabel: 'Salvar' });
+  if (!r) return;
+  const [tipo, descricao, valor, data, categoriaId, contaCombo, processoId, status] = r;
+  const [tipoConta, contaId] = (contaCombo || '').split(':');
+  Object.assign(t, {
+    tipo,
+    descricao: descricao.trim(),
+    valor: parseFloat(valor),
+    data,
+    categoriaId: categoriaId || null,
+    contaId: contaId || null,
+    tipoConta: tipoConta || 'banco',
+    processoId: processoId || null,
+    status
+  });
+  await DB.saveTransacao(t);
+  toast('Transação atualizada', '', 'success');
+  renderFinanceiro();
+}
+
+async function confirmarTransacao(id) {
+  const transacoes = await DB.getAllTransacoes();
+  const t = transacoes.find(x => x.id === id);
+  if (!t) return;
+  t.status = 'realizado';
+  await DB.saveTransacao(t);
+  toast('Transação confirmada', '', 'success');
+  renderFinanceiro();
+}
+
+async function removerTransacao(id) {
+  const ok = await confirmDialog('Remover transação?', 'Ação irreversível.', true);
+  if (!ok) return;
+  await DB.deleteTransacao(id);
+  renderFinanceiro();
+}
+
 async function renderTools() {
   const processes = await DB.getAllProcesses();
   state.processes = processes;
@@ -7114,12 +7660,71 @@ async function bootApp() {
     return r;
   };
 
+  // ====== Cache Financeiro (v6.16+) ======
+  const _finCaches = {
+    bancos: { data: null, at: 0 },
+    cartoes: { data: null, at: 0 },
+    categorias_fin: { data: null, at: 0 },
+    transacoes: { data: null, at: 0 },
+    recorrencias: { data: null, at: 0 },
+    honorarios: { data: null, at: 0 }
+  };
+  function _finCacheGet(key, fetcher) {
+    const c = _finCaches[key];
+    if (c.data && (Date.now() - c.at < CACHE_MS)) return Promise.resolve(c.data);
+    return fetcher().then(d => { c.data = d; c.at = Date.now(); return d; });
+  }
+  function _finCacheBust(key) {
+    if (_finCaches[key]) { _finCaches[key].data = null; _finCaches[key].at = 0; }
+  }
+
+  // Wrappers cacheados — sobrescrevem RemoteDB
+  const _r = {
+    getAllBancos: DB.getAllBancos.bind(DB),
+    saveBanco: DB.saveBanco.bind(DB),
+    deleteBanco: DB.deleteBanco.bind(DB),
+    getAllCartoes: DB.getAllCartoes.bind(DB),
+    saveCartao: DB.saveCartao.bind(DB),
+    deleteCartao: DB.deleteCartao.bind(DB),
+    getAllCategoriasFin: DB.getAllCategoriasFin.bind(DB),
+    saveCategoriaFin: DB.saveCategoriaFin.bind(DB),
+    deleteCategoriaFin: DB.deleteCategoriaFin.bind(DB),
+    getAllTransacoes: DB.getAllTransacoes.bind(DB),
+    saveTransacao: DB.saveTransacao.bind(DB),
+    deleteTransacao: DB.deleteTransacao.bind(DB),
+    getAllRecorrencias: DB.getAllRecorrencias.bind(DB),
+    saveRecorrencia: DB.saveRecorrencia.bind(DB),
+    deleteRecorrencia: DB.deleteRecorrencia.bind(DB),
+    getAllHonorarios: DB.getAllHonorarios.bind(DB),
+    saveHonorario: DB.saveHonorario.bind(DB),
+    deleteHonorario: DB.deleteHonorario.bind(DB)
+  };
+  DB.getAllBancos = () => _finCacheGet('bancos', _r.getAllBancos);
+  DB.saveBanco = async (b) => { const r = await _r.saveBanco(b); _finCacheBust('bancos'); return r; };
+  DB.deleteBanco = async (id) => { const r = await _r.deleteBanco(id); _finCacheBust('bancos'); return r; };
+  DB.getAllCartoes = () => _finCacheGet('cartoes', _r.getAllCartoes);
+  DB.saveCartao = async (c) => { const r = await _r.saveCartao(c); _finCacheBust('cartoes'); return r; };
+  DB.deleteCartao = async (id) => { const r = await _r.deleteCartao(id); _finCacheBust('cartoes'); return r; };
+  DB.getAllCategoriasFin = () => _finCacheGet('categorias_fin', _r.getAllCategoriasFin);
+  DB.saveCategoriaFin = async (c) => { const r = await _r.saveCategoriaFin(c); _finCacheBust('categorias_fin'); return r; };
+  DB.deleteCategoriaFin = async (id) => { const r = await _r.deleteCategoriaFin(id); _finCacheBust('categorias_fin'); return r; };
+  DB.getAllTransacoes = () => _finCacheGet('transacoes', _r.getAllTransacoes);
+  DB.saveTransacao = async (t) => { const r = await _r.saveTransacao(t); _finCacheBust('transacoes'); _finCacheBust('bancos'); return r; };
+  DB.deleteTransacao = async (id) => { const r = await _r.deleteTransacao(id); _finCacheBust('transacoes'); _finCacheBust('bancos'); return r; };
+  DB.getAllRecorrencias = () => _finCacheGet('recorrencias', _r.getAllRecorrencias);
+  DB.saveRecorrencia = async (r) => { const x = await _r.saveRecorrencia(r); _finCacheBust('recorrencias'); return x; };
+  DB.deleteRecorrencia = async (id) => { const r2 = await _r.deleteRecorrencia(id); _finCacheBust('recorrencias'); return r2; };
+  DB.getAllHonorarios = () => _finCacheGet('honorarios', _r.getAllHonorarios);
+  DB.saveHonorario = async (h) => { const r = await _r.saveHonorario(h); _finCacheBust('honorarios'); _finCacheBust('transacoes'); return r; };
+  DB.deleteHonorario = async (id) => { const r = await _r.deleteHonorario(id); _finCacheBust('honorarios'); return r; };
+
   // Helper exposto pra invalidar manualmente (DJEN sync, refresh do user, etc)
   window._ucInvalidateCaches = () => {
     _procCache = null; _procCacheAt = 0;
     _deadCache = null; _deadCacheAt = 0;
     _settingsCache.clear();
     _settingsCacheAt.clear();
+    Object.keys(_finCaches).forEach(k => _finCacheBust(k));
     console.log('[cache] invalidado manualmente');
   };
 

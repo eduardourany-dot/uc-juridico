@@ -381,6 +381,43 @@ const RemoteDB = {
   },
   async saveJurisprudence(j) { return await upsert_('jurisprudencia', j); },
 
+  // ====== Módulo Financeiro (v6.16+) ======
+  // Bancos
+  async getAllBancos() { return await getAll_('bancos'); },
+  async saveBanco(b) { return await upsert_('bancos', b); },
+  async deleteBanco(id) { return await softDelete_('bancos', id); },
+
+  // Cartões
+  async getAllCartoes() { return await getAll_('cartoes'); },
+  async saveCartao(c) { return await upsert_('cartoes', c); },
+  async deleteCartao(id) { return await softDelete_('cartoes', id); },
+
+  // Categorias financeiras
+  async getAllCategoriasFin() { return await getAll_('categorias_fin'); },
+  async saveCategoriaFin(c) { return await upsert_('categorias_fin', c); },
+  async deleteCategoriaFin(id) { return await softDelete_('categorias_fin', id); },
+
+  // Transações
+  async getAllTransacoes() { return await getAll_('transacoes'); },
+  async getTransacoesByProcess(pid) {
+    return (await getAll_('transacoes')).filter(t => t.processoId === pid);
+  },
+  async saveTransacao(t) { return await upsert_('transacoes', t); },
+  async deleteTransacao(id) { return await softDelete_('transacoes', id); },
+
+  // Recorrências
+  async getAllRecorrencias() { return await getAll_('recorrencias'); },
+  async saveRecorrencia(r) { return await upsert_('recorrencias', r); },
+  async deleteRecorrencia(id) { return await softDelete_('recorrencias', id); },
+
+  // Honorários
+  async getAllHonorarios() { return await getAll_('honorarios'); },
+  async getHonorariosByProcess(pid) {
+    return (await getAll_('honorarios')).filter(h => h.processoId === pid);
+  },
+  async saveHonorario(h) { return await upsert_('honorarios', h); },
+  async deleteHonorario(id) { return await softDelete_('honorarios', id); },
+
   // PDFs (Drive via Apps Script)
   async getPdf(id) {
     try {

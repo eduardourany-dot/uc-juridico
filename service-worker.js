@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.15.0 (Sprint 3 C: email Gmail Workspace nos marcos críticos)
-const CACHE_NAME = 'uc-juridico-v6-15-0';
+// Service Worker — UC Jurídico v6.16.0 (Módulo Financeiro Sprint A.1: bancos + transações + visão geral)
+const CACHE_NAME = 'uc-juridico-v6-16-0';
 const APP_SHELL = [
   './',
   './index.html',
