@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.19.3 (Cadastro cliente: nome em CAIXA ALTA + máscaras CPF/CNPJ + telefone em tempo real)
-const CACHE_NAME = 'uc-juridico-v6-19-3';
+// Service Worker — UC Jurídico v6.20.0 (Sprint Cli.2: honorários vinculados a Cliente + processosCobertos[] multi-vinculação)
+const CACHE_NAME = 'uc-juridico-v6-20-0';
 const APP_SHELL = [
   './',
   './index.html',

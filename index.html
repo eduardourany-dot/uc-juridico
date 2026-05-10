@@ -268,7 +268,7 @@ body{background:var(--uc-paper);color:var(--uc-graphite);font-size:15px;-webkit-
 
     <div style="margin-top:auto;padding:16px 20px;border-top:1px solid var(--uc-line-soft);font-size:11px;color:var(--uc-warm-gray);text-align:center;">
       <p class="smallcaps font-serif" style="margin:0 0 4px;">Urany de Castro · 30 anos</p>
-      <p style="margin:0;">100% local · v6.19.3</p>
+      <p style="margin:0;">100% local · v6.20.0</p>
     </div>
   </aside>
 
@@ -485,6 +485,7 @@ const DB = {
   async deleteRecorrencia(_id) {},
   async getAllHonorarios() { return []; },
   async getHonorariosByProcess(_pid) { return []; },
+  async getHonorariosByCliente(_cid) { return []; },
   async saveHonorario(h) { return h; },
   async deleteHonorario(_id) {},
 
@@ -4814,6 +4815,64 @@ async function renderFinanceiro() {
   if (tab === 'categorias') return renderFinCategorias();
 }
 
+// Lê processos cobertos por um honorário, com compat para schema legado
+// (anterior ao Cli.2 — quando honorário tinha apenas `processoId` único).
+function _processosDoHonorario(h) {
+  if (!h) return [];
+  if (Array.isArray(h.processosCobertos)) return h.processosCobertos.filter(Boolean);
+  if (h.processoId) return [h.processoId];
+  return [];
+}
+
+// Migração lazy de honorários (Cli.2): converte schema antigo (processoId único)
+// para novo (clienteId + processosCobertos[]). Idempotente. Roda em background
+// ao abrir página de honorários.
+async function _migrarHonorariosParaClientes() {
+  try {
+    const honorarios = await DB.getAllHonorarios();
+    const aMigrar = honorarios.filter(h =>
+      (h.processoId && !Array.isArray(h.processosCobertos)) ||
+      (h.processoId && !h.clienteId)
+    );
+    if (aMigrar.length === 0) return 0;
+
+    const processos = await DB.getAllProcesses();
+    const procById = {};
+    processos.forEach(p => procById[p.id] = p);
+
+    let migrados = 0, semCliente = 0;
+    for (const h of aMigrar) {
+      const proc = procById[h.processoId];
+      if (!Array.isArray(h.processosCobertos)) {
+        h.processosCobertos = [h.processoId];
+      }
+      if (!h.clienteId) {
+        if (proc && proc.clienteId) {
+          h.clienteId = proc.clienteId;
+          if (!h.clienteNome) h.clienteNome = proc.client || '';
+        } else {
+          semCliente++;
+        }
+      }
+      // Mantém processoId legado por enquanto (compat). Pode ser removido em sprint futuro.
+      try { await DB.saveHonorario(h); migrados++; }
+      catch (e) { console.warn('falha ao migrar honorário', h.id, e); }
+    }
+
+    if (migrados > 0) {
+      console.log(`[honorarios] migração: ${migrados} honorário(s) migrado(s)`);
+      if (semCliente > 0 && typeof toast === 'function') {
+        toast(`${semCliente} honorário(s) sem cliente`,
+          'O processo vinculado não tem clienteId — cadastre o cliente em /clientes e re-edite o honorário', 'info');
+      }
+    }
+    return migrados;
+  } catch (e) {
+    console.warn('Migração honorários falhou', e);
+    return 0;
+  }
+}
+
 // Calcula totais agregados de um honorário (recebido / em aberto / vencido)
 function _agregarHonorario(h, hoje) {
   const today = hoje || new Date().toISOString().slice(0,10);
@@ -5341,10 +5400,15 @@ async function renderFinCategorias() {
 }
 
 async function renderFinHonorarios() {
-  const [honorarios, processos] = await Promise.all([
-    DB.getAllHonorarios(), DB.getAllProcesses()
+  // Migração lazy (Cli.2): se há honorários antigos com schema processoId único,
+  // converte pra clienteId + processosCobertos[] usando o cliente do processo.
+  await _migrarHonorariosParaClientes();
+
+  const [honorarios, processos, clientes] = await Promise.all([
+    DB.getAllHonorarios(), DB.getAllProcesses(), DB.getAllClientes()
   ]);
   const procById = {}; processos.forEach(p => procById[p.id] = p);
+  const cliById = {}; clientes.forEach(c => cliById[c.id] = c);
   const hoje = new Date().toISOString().slice(0,10);
 
   // Totais consolidados
@@ -5357,17 +5421,34 @@ async function renderFinHonorarios() {
     totalVencido += agg.vencido;
   });
 
-  // Filtros: por processo + status
-  state._finHonFiltro = state._finHonFiltro || { processoId: '', status: 'todos' };
+  // Filtros: por cliente + status
+  state._finHonFiltro = state._finHonFiltro || { clienteId: '', status: 'todos' };
+  // Migração de filtro antigo (processoId → clienteId)
+  if (state._finHonFiltro.processoId !== undefined) delete state._finHonFiltro.processoId;
+  if (state._finHonFiltro.clienteId === undefined) state._finHonFiltro.clienteId = '';
   const f = state._finHonFiltro;
   let filtrados = honorarios.slice();
-  if (f.processoId) filtrados = filtrados.filter(h => h.processoId === f.processoId);
+  if (f.clienteId) filtrados = filtrados.filter(h => h.clienteId === f.clienteId);
   if (f.status === 'comAberto') filtrados = filtrados.filter(h => _agregarHonorario(h, hoje).emAberto > 0);
   if (f.status === 'comVencido') filtrados = filtrados.filter(h => _agregarHonorario(h, hoje).vencido > 0);
   if (f.status === 'quitado') filtrados = filtrados.filter(h => {
     const a = _agregarHonorario(h, hoje); return a.emAberto === 0 && a.vencido === 0 && a.recebido > 0;
   });
-  filtrados.sort((a,b) => (b.criadoEm || 0) - (a.criadoEm || 0));
+
+  // Agrupa por clienteId. Honorários sem cliente (órfãos) ficam num grupo separado.
+  const grupos = {};
+  for (const h of filtrados) {
+    const k = h.clienteId || '__orfao__';
+    if (!grupos[k]) grupos[k] = [];
+    grupos[k].push(h);
+  }
+  const idsOrdenados = Object.keys(grupos).sort((a, b) => {
+    if (a === '__orfao__') return 1;
+    if (b === '__orfao__') return -1;
+    const na = (cliById[a]?.nome || '').toLowerCase();
+    const nb = (cliById[b]?.nome || '').toLowerCase();
+    return na.localeCompare(nb, 'pt-BR');
+  });
 
   $('finContent').innerHTML = `
     <div class="grid gap-3" style="grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); margin-bottom: 16px;">
@@ -5392,10 +5473,10 @@ async function renderFinHonorarios() {
     <div class="card mb-3" style="padding: 10px;">
       <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 8px; align-items: end;">
         <div>
-          <label class="label" style="font-size: 11px; margin-bottom: 4px;">Processo</label>
-          <select class="select" onchange="_setFinHonFiltro('processoId', this.value)">
+          <label class="label" style="font-size: 11px; margin-bottom: 4px;">Cliente</label>
+          <select class="select" onchange="_setFinHonFiltro('clienteId', this.value)">
             <option value="">Todos</option>
-            ${processos.map(p => `<option value="${p.id}" ${f.processoId === p.id ? 'selected' : ''}>${escapeHtml((p.cnj ? p.cnj + ' · ' : '') + (p.name || p.client || '—'))}</option>`).join('')}
+            ${clientes.filter(c => c.ativo !== false).sort((a,b) => (a.nome||'').localeCompare(b.nome||'', 'pt-BR')).map(c => `<option value="${c.id}" ${f.clienteId === c.id ? 'selected' : ''}>${escapeHtml(c.nome)}</option>`).join('')}
           </select>
         </div>
         <div>
@@ -5411,44 +5492,78 @@ async function renderFinHonorarios() {
     </div>
 
     <div class="flex justify-between items-center mb-3">
-      <p class="text-sm" style="color: var(--uc-warm-gray);">${filtrados.length} honorário(s) ${f.processoId || f.status !== 'todos' ? '(filtrado)' : ''}</p>
-      <button class="btn btn-primary btn-sm" onclick="novoHonorarioFlow()" ${processos.length === 0 ? 'disabled title="Cadastre um processo primeiro"' : ''}>+ Novo honorário</button>
+      <p class="text-sm" style="color: var(--uc-warm-gray);">${filtrados.length} honorário(s) em ${idsOrdenados.length} cliente(s) ${f.clienteId || f.status !== 'todos' ? '(filtrado)' : ''}</p>
+      <button class="btn btn-primary btn-sm" onclick="novoHonorarioFlow()" ${clientes.length === 0 ? 'disabled title="Cadastre um cliente primeiro"' : ''}>+ Novo honorário</button>
     </div>
 
     ${filtrados.length === 0 ? `
       <div class="empty-state">
-        <p class="empty-state-msg">Nenhum honorário cadastrado. Vincule honorários a processos pra controlar parcelas e recebimentos.</p>
+        <p class="empty-state-msg">${honorarios.length === 0 ? 'Nenhum honorário cadastrado. Vincule honorários a clientes pra controlar parcelas e recebimentos.' : 'Nenhum honorário com esses filtros.'}</p>
       </div>
-    ` : filtrados.map(h => {
-      const proc = procById[h.processoId];
-      const agg = _agregarHonorario(h, hoje);
+    ` : idsOrdenados.map(cliId => {
+      const cli = cliById[cliId];
+      const hsCli = grupos[cliId];
+      // Totais por cliente
+      let recCli = 0, abertoCli = 0, vencCli = 0, totCli = 0;
+      hsCli.forEach(h => {
+        const a = _agregarHonorario(h, hoje);
+        recCli += a.recebido; abertoCli += a.emAberto; vencCli += a.vencido; totCli += a.total;
+      });
+      const headerCli = cliId === '__orfao__'
+        ? `<span style="color: var(--uc-red);">⚠ Honorários sem cliente vinculado</span>`
+        : `<a onclick="navigate('clientes')" style="cursor:pointer; color:var(--uc-gold);">${escapeHtml(cli?.nome || '—')}</a>`;
+
       return `
-        <div class="card mb-3">
-          <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; margin-bottom: 10px;">
-            <div style="min-width: 0; flex: 1;">
-              <h3 class="font-serif text-lg font-semibold" style="color: var(--uc-black); margin: 0;">${escapeHtml(h.clienteNome || '—')}</h3>
-              <p class="text-xs" style="color: var(--uc-warm-gray); margin: 4px 0 0;">
-                ${proc ? `<a onclick="navigate('process', { currentProcessId: '${proc.id}' })" style="cursor:pointer; color:var(--uc-gold);">${escapeHtml(proc.cnj || proc.name || '—')}</a>` : '— processo removido —'}
-                · ${escapeHtml(TIPO_HONORARIO_LABEL[h.tipoHonorario] || h.tipoHonorario || 'Fixo')}
-                · ${(h.parcelas || []).length} parcela(s)
-              </p>
-            </div>
-            <div style="display: flex; gap: 4px; flex-shrink: 0;">
-              <button class="btn btn-ghost btn-sm" onclick="editarHonorario('${h.id}')" title="Editar">✎</button>
-              <button class="btn btn-ghost btn-sm" onclick="removerHonorario('${h.id}')" title="Remover">🗑</button>
+        <div style="margin-bottom: 16px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; background: var(--uc-cream); border-radius: 6px 6px 0 0; border: 1px solid var(--uc-line-soft); border-bottom: none;">
+            <div>
+              <h3 class="font-serif text-lg font-semibold" style="margin: 0; color: var(--uc-black);">${headerCli}</h3>
+              <p class="text-xs" style="color: var(--uc-warm-gray); margin: 2px 0 0;">${hsCli.length} honorário(s) · total ${brl(totCli)}${recCli > 0 ? ' · recebido ' + brl(recCli) : ''}${abertoCli > 0 ? ' · em aberto ' + brl(abertoCli) : ''}${vencCli > 0 ? ' · <span style="color:var(--uc-red);">vencido ' + brl(vencCli) + '</span>' : ''}</p>
             </div>
           </div>
+          ${hsCli.sort((a,b) => (b.createdAt || b.criadoEm || 0) - (a.createdAt || a.criadoEm || 0)).map(h => {
+            const procsCobertos = _processosDoHonorario(h).map(pid => procById[pid]).filter(Boolean);
+            const agg = _agregarHonorario(h, hoje);
+            return `
+              <div class="card" style="margin: 0 0 0 0; border-radius: 0; border-top: none;">
+                <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; margin-bottom: 10px;">
+                  <div style="min-width: 0; flex: 1;">
+                    <h4 class="font-serif font-semibold" style="margin: 0; font-size: 15px;">
+                      ${escapeHtml(TIPO_HONORARIO_LABEL[h.tipoHonorario] || h.tipoHonorario || 'Fixo')} · ${brl(h.valorTotal)}
+                    </h4>
+                    <p class="text-xs" style="color: var(--uc-warm-gray); margin: 4px 0 0;">
+                      ${(h.parcelas || []).length} parcela(s)
+                    </p>
+                    <div style="margin-top: 6px; font-size: 12px;">
+                      <span style="color: var(--uc-warm-gray);">Processos cobertos:</span>
+                      ${procsCobertos.length === 0
+                        ? ' <em style="color: var(--uc-warm-gray);">nenhum</em>'
+                        : ' ' + procsCobertos.map(p => `
+                            <span style="display: inline-block; background: var(--uc-cream); padding: 2px 6px; border-radius: 3px; margin: 2px 4px 2px 0;">
+                              <a onclick="navigate('process', { currentProcessId: '${p.id}' })" style="cursor:pointer; color:var(--uc-gold);">${escapeHtml(p.cnj || p.name || '—')}</a>
+                              <button onclick="desvincularProcessoHonorario('${h.id}', '${p.id}')" title="Desvincular" style="background:none; border:none; color: var(--uc-red); cursor: pointer; padding: 0 0 0 4px; font-size: 11px;">×</button>
+                            </span>
+                          `).join('')
+                      }
+                      <button class="btn btn-ghost btn-sm" onclick="vincularProcessoHonorario('${h.id}')" title="Vincular processo" style="padding: 2px 8px; font-size: 10px; margin-left: 4px;">+ vincular processo</button>
+                    </div>
+                  </div>
+                  <div style="display: flex; gap: 4px; flex-shrink: 0;">
+                    <button class="btn btn-ghost btn-sm" onclick="editarHonorario('${h.id}')" title="Editar">✎</button>
+                    <button class="btn btn-ghost btn-sm" onclick="removerHonorario('${h.id}')" title="Remover">🗑</button>
+                  </div>
+                </div>
 
-          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; margin-bottom: 10px; font-size: 12px;">
-            <div><span style="color: var(--uc-warm-gray);">Total:</span> <strong>${brl(agg.total)}</strong></div>
-            <div><span style="color: var(--uc-warm-gray);">Recebido:</span> <strong style="color: var(--uc-green);">${brl(agg.recebido)}</strong></div>
-            <div><span style="color: var(--uc-warm-gray);">Em aberto:</span> <strong style="color: var(--uc-amber);">${brl(agg.emAberto)}</strong></div>
-            ${agg.vencido > 0 ? `<div><span style="color: var(--uc-warm-gray);">Vencido:</span> <strong style="color: var(--uc-red);">${brl(agg.vencido)}</strong></div>` : ''}
-          </div>
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; margin-bottom: 10px; font-size: 12px;">
+                  <div><span style="color: var(--uc-warm-gray);">Total:</span> <strong>${brl(agg.total)}</strong></div>
+                  <div><span style="color: var(--uc-warm-gray);">Recebido:</span> <strong style="color: var(--uc-green);">${brl(agg.recebido)}</strong></div>
+                  <div><span style="color: var(--uc-warm-gray);">Em aberto:</span> <strong style="color: var(--uc-amber);">${brl(agg.emAberto)}</strong></div>
+                  ${agg.vencido > 0 ? `<div><span style="color: var(--uc-warm-gray);">Vencido:</span> <strong style="color: var(--uc-red);">${brl(agg.vencido)}</strong></div>` : ''}
+                </div>
 
-          ${(h.parcelas || []).length > 0 ? `
-            <details style="font-size: 12px;">
-              <summary style="cursor: pointer; color: var(--uc-warm-gray);">Ver ${h.parcelas.length} parcela(s)</summary>
+                ${(h.parcelas || []).length > 0 ? `
+                  <details style="font-size: 12px;">
+                    <summary style="cursor: pointer; color: var(--uc-warm-gray);">Ver ${h.parcelas.length} parcela(s)</summary>
               <table style="width: 100%; border-collapse: collapse; margin-top: 8px;">
                 <thead>
                   <tr style="border-bottom: 1px solid var(--uc-line-soft); text-align: left;">
@@ -5487,6 +5602,9 @@ async function renderFinHonorarios() {
               </table>
             </details>
           ` : ''}
+              </div>
+            `;
+          }).join('')}
         </div>
       `;
     }).join('')}
@@ -5499,11 +5617,16 @@ function _setFinHonFiltro(campo, valor) {
   renderFinHonorarios();
 }
 
-// Aba "Honorários" dentro de um processo (renderProcessDetail)
+// Aba "Honorários" dentro de um processo (renderProcessDetail).
+// Mostra honorários onde o processo aparece em processosCobertos[]
+// (ou no campo legado processoId).
 function renderProcessHonorarios(p, honorarios) {
   const hoje = new Date().toISOString().slice(0,10);
+  // Filtra apenas honorários que cobrem este processo
+  const honsDoProcesso = honorarios.filter(h => _processosDoHonorario(h).includes(p.id));
+
   let totalPrevisto = 0, totalRecebido = 0, totalEmAberto = 0, totalVencido = 0;
-  honorarios.forEach(h => {
+  honsDoProcesso.forEach(h => {
     const agg = _agregarHonorario(h, hoje);
     totalPrevisto += agg.total;
     totalRecebido += agg.recebido;
@@ -5520,26 +5643,32 @@ function renderProcessHonorarios(p, honorarios) {
     </div>
 
     <div class="flex justify-between items-center mb-3">
-      <p class="text-sm" style="color: var(--uc-warm-gray);">${honorarios.length} honorário(s) cadastrado(s)</p>
+      <p class="text-sm" style="color: var(--uc-warm-gray);">${honsDoProcesso.length} honorário(s) cobrindo este processo</p>
       <button class="btn btn-primary btn-sm" onclick="novoHonorarioFlow('${p.id}')">+ Novo honorário</button>
     </div>
 
-    ${honorarios.length === 0 ? `
+    ${honsDoProcesso.length === 0 ? `
       <div class="empty-state">
-        <p class="empty-state-msg">Nenhum honorário cadastrado para este processo.</p>
+        <p class="empty-state-msg">Nenhum honorário cobre este processo. Cadastre um novo (será vinculado ao cliente do processo) ou vincule um honorário existente do mesmo cliente em /financeiro/honorarios.</p>
       </div>
-    ` : honorarios.map(h => {
+    ` : honsDoProcesso.map(h => {
+      const procsCobertos = _processosDoHonorario(h);
+      const cobreOutros = procsCobertos.length > 1;
       const agg = _agregarHonorario(h, hoje);
       return `
         <div class="card mb-3">
           <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px;">
             <div>
               <h4 class="font-serif font-semibold" style="margin: 0;">${escapeHtml(TIPO_HONORARIO_LABEL[h.tipoHonorario] || h.tipoHonorario)} · ${brl(h.valorTotal)}</h4>
-              <p class="text-xs" style="color: var(--uc-warm-gray); margin: 4px 0 0;">${(h.parcelas || []).length} parcela(s) · ${escapeHtml(h.clienteNome || p.client || '—')}</p>
+              <p class="text-xs" style="color: var(--uc-warm-gray); margin: 4px 0 0;">
+                ${(h.parcelas || []).length} parcela(s) · cliente <strong>${escapeHtml(h.clienteNome || p.client || '—')}</strong>
+                ${cobreOutros ? ` · <span style="color: var(--uc-amber);">cobre ${procsCobertos.length} processos</span>` : ''}
+              </p>
             </div>
             <div style="display: flex; gap: 4px;">
               <button class="btn btn-ghost btn-sm" onclick="editarHonorario('${h.id}')" title="Editar">✎</button>
-              <button class="btn btn-ghost btn-sm" onclick="removerHonorario('${h.id}')" title="Remover">🗑</button>
+              <button class="btn btn-ghost btn-sm" onclick="desvincularProcessoHonorario('${h.id}', '${p.id}')" title="Desvincular este processo do honorário">⊘</button>
+              <button class="btn btn-ghost btn-sm" onclick="removerHonorario('${h.id}')" title="Remover honorário">🗑</button>
             </div>
           </div>
           ${h.observacoes ? `<p style="font-size: 12px; color: var(--uc-graphite); margin-bottom: 8px;">${escapeHtml(h.observacoes)}</p>` : ''}
@@ -5823,61 +5952,94 @@ function _gerarParcelas(valorTotal, numParcelas, primeiroVencimento) {
   return parcelas;
 }
 
-async function novoHonorarioFlow(processoIdFixo) {
-  const processos = await DB.getAllProcesses();
-  if (processos.length === 0) {
-    toast('Cadastre um processo primeiro', '', 'error');
+async function novoHonorarioFlow(opts) {
+  // Compat: chamada com string = processoIdFixo (forma antiga, ainda usada
+  // pela aba "Honorários" do processo). Forma nova: { processoIdFixo?, clienteIdFixo? }.
+  if (typeof opts === 'string') opts = { processoIdFixo: opts };
+  const { processoIdFixo, clienteIdFixo } = opts || {};
+
+  const [clientes, processos] = await Promise.all([
+    DB.getAllClientes(), DB.getAllProcesses()
+  ]);
+  if (clientes.length === 0) {
+    toast('Cadastre um cliente primeiro', 'Vá em /clientes e adicione', 'error');
     return;
   }
-  const procOpts = processos.map(p => ({
-    value: p.id,
-    label: (p.cnj ? p.cnj + ' · ' : '') + (p.name || p.client || '—')
-  }));
+
+  // Determina cliente padrão
+  let clienteIdInicial = clienteIdFixo || '';
+  let processosCobertosIniciais = [];
+  if (processoIdFixo) {
+    const proc = processos.find(p => p.id === processoIdFixo);
+    if (proc) {
+      clienteIdInicial = clienteIdInicial || proc.clienteId || '';
+      processosCobertosIniciais = [processoIdFixo];
+    }
+  }
+
+  const cliOpts = clientes
+    .filter(c => c.ativo !== false)
+    .sort((a,b) => (a.nome || '').localeCompare(b.nome || '', 'pt-BR'))
+    .map(c => ({ value: c.id, label: c.nome }));
+
   const hojeISO = new Date().toISOString().slice(0,10);
   const proxMes = _addMonthsISO(hojeISO, 1);
 
   const fields = [
-    ...(processoIdFixo ? [] : [
-      { label: 'Processo', type: 'select', default: '', options: [{ value: '', label: '— escolher —' }, ...procOpts] }
+    ...(clienteIdFixo ? [] : [
+      { label: 'Cliente', name: 'clienteId', type: 'select', default: clienteIdInicial,
+        options: [{ value: '', label: '— escolher —' }, ...cliOpts] }
     ]),
-    { label: 'Tipo de honorário', type: 'select', default: 'fixo', options: [
+    { label: 'Tipo de honorário', name: 'tipoHonorario', type: 'select', default: 'fixo', options: [
       { value: 'fixo', label: 'Fixo (valor pré-definido)' },
       { value: 'percentual', label: 'Percentual sobre valor da causa' },
       { value: 'exito', label: 'Êxito (success fee)' },
       { value: 'misto', label: 'Misto (combinação)' }
     ]},
-    { label: 'Valor total (R$)', type: 'number', default: '', placeholder: '5000,00' },
-    { label: 'Número de parcelas', type: 'number', default: '1', min: '1', max: '60' },
-    { label: 'Vencimento da 1ª parcela', type: 'date', default: proxMes },
-    { label: 'Observações (opcional)', placeholder: 'Forma de pagamento, condições, etc.' }
+    { label: 'Valor total (R$)', name: 'valorTotal', type: 'number', default: '', placeholder: '5000,00' },
+    { label: 'Número de parcelas', name: 'numParcelas', type: 'number', default: '1', min: '1', max: '60' },
+    { label: 'Vencimento da 1ª parcela', name: 'primeiroVencimento', type: 'date', default: proxMes },
+    { label: 'Observações (opcional)', name: 'observacoes', placeholder: 'Forma de pagamento, condições, etc.' }
   ];
-  const r = await showModal('Novo honorário', fields, {
-    confirmLabel: 'Cadastrar',
-    intro: processoIdFixo
-      ? `Para o processo: <strong>${escapeHtml((processos.find(p => p.id === processoIdFixo) || {}).name || '—')}</strong>`
-      : 'Vincule honorário a um processo do escritório.'
-  });
+
+  // Intro contextual
+  const intro = (() => {
+    const partes = [];
+    if (clienteIdFixo) {
+      const c = clientes.find(x => x.id === clienteIdFixo);
+      if (c) partes.push(`Cliente: <strong>${escapeHtml(c.nome)}</strong>`);
+    }
+    if (processoIdFixo) {
+      const p = processos.find(x => x.id === processoIdFixo);
+      if (p) partes.push(`Processo coberto: <strong>${escapeHtml(p.cnj || p.name || '—')}</strong>`);
+    }
+    if (partes.length === 0) partes.push('Vincule honorário a um cliente. Lista de processos cobertos pode ser editada depois.');
+    return partes.join(' · ');
+  })();
+
+  const r = await showModal('Novo honorário', fields, { confirmLabel: 'Cadastrar', intro });
   if (!r) return;
 
-  let processoId, tipo, valor, numParcelas, primeiroVenc, observacoes;
-  if (processoIdFixo) {
+  let clienteId, tipo, valor, numParcelas, primeiroVenc, observacoes;
+  if (clienteIdFixo) {
     [tipo, valor, numParcelas, primeiroVenc, observacoes] = r;
-    processoId = processoIdFixo;
+    clienteId = clienteIdFixo;
   } else {
-    [processoId, tipo, valor, numParcelas, primeiroVenc, observacoes] = r;
+    [clienteId, tipo, valor, numParcelas, primeiroVenc, observacoes] = r;
   }
 
-  if (!processoId) { toast('Escolha um processo', '', 'error'); return; }
+  if (!clienteId) { toast('Escolha um cliente', '', 'error'); return; }
   const valorNum = parseFloat(valor);
   if (!valorNum || valorNum <= 0) { toast('Valor inválido', '', 'error'); return; }
   const n = Math.max(1, Math.min(60, parseInt(numParcelas) || 1));
   if (!primeiroVenc) { toast('Data de vencimento obrigatória', '', 'error'); return; }
 
-  const proc = processos.find(p => p.id === processoId);
+  const cliente = clientes.find(c => c.id === clienteId);
   const honorario = {
     id: uid(),
-    processoId,
-    clienteNome: proc?.client || '',
+    clienteId,
+    clienteNome: cliente?.nome || '',
+    processosCobertos: processosCobertosIniciais,
     tipoHonorario: tipo || 'fixo',
     valorTotal: valorNum,
     parcelas: _gerarParcelas(valorNum, n, primeiroVenc),
@@ -5889,7 +6051,7 @@ async function novoHonorarioFlow(processoIdFixo) {
 
   // Re-renderiza onde está
   if (state.currentRoute === 'process') {
-    state._processView.honorarios = await DB.getHonorariosByProcess(processoId);
+    state._processView.honorarios = await DB.getHonorariosByProcess(state.currentProcessId);
     renderProcessTabContent();
   } else {
     renderFinanceiro();
@@ -5897,34 +6059,115 @@ async function novoHonorarioFlow(processoIdFixo) {
 }
 
 async function editarHonorario(id) {
-  const honorarios = await DB.getAllHonorarios();
+  const [honorarios, clientes, processos] = await Promise.all([
+    DB.getAllHonorarios(), DB.getAllClientes(), DB.getAllProcesses()
+  ]);
   const h = honorarios.find(x => x.id === id);
   if (!h) return;
+  const cliOpts = [
+    { value: '', label: '— sem cliente vinculado —' },
+    ...clientes.filter(c => c.ativo !== false).sort((a,b) => (a.nome||'').localeCompare(b.nome||'', 'pt-BR'))
+      .map(c => ({ value: c.id, label: c.nome }))
+  ];
+
+  const procsCobertos = _processosDoHonorario(h);
+  const procsLabels = procsCobertos
+    .map(pid => processos.find(p => p.id === pid))
+    .filter(Boolean)
+    .map(p => p.cnj || p.name || '—').join(', ') || 'nenhum';
+
   const r = await showModal('Editar honorário', [
-    { label: 'Tipo de honorário', type: 'select', default: h.tipoHonorario || 'fixo', options: [
+    { label: 'Cliente', name: 'clienteId', type: 'select', default: h.clienteId || '', options: cliOpts },
+    { label: 'Tipo de honorário', name: 'tipoHonorario', type: 'select', default: h.tipoHonorario || 'fixo', options: [
       { value: 'fixo', label: 'Fixo' },
       { value: 'percentual', label: 'Percentual' },
       { value: 'exito', label: 'Êxito' },
       { value: 'misto', label: 'Misto' }
     ]},
-    { label: 'Cliente', default: h.clienteNome || '' },
-    { label: 'Observações', default: h.observacoes || '' }
-  ], { confirmLabel: 'Salvar', intro: 'Pra alterar valores ou parcelas, remova e cadastre novo.' });
+    { label: 'Observações', name: 'observacoes', default: h.observacoes || '' }
+  ], {
+    confirmLabel: 'Salvar',
+    intro: `Processos cobertos atualmente: <strong>${escapeHtml(procsLabels)}</strong><br>Pra alterar processos cobertos use os botões "+ vincular" e "× desvincular" na sub-aba Honorários. Pra alterar valores/parcelas, remova e cadastre novo.`
+  });
   if (!r) return;
-  const [tipo, cliente, obs] = r;
+  const [clienteId, tipo, obs] = r;
+  const cli = clientes.find(c => c.id === clienteId);
   Object.assign(h, {
+    clienteId: clienteId || null,
+    clienteNome: cli ? cli.nome : (h.clienteNome || ''),
     tipoHonorario: tipo,
-    clienteNome: cliente.trim(),
     observacoes: (obs || '').trim()
   });
   await DB.saveHonorario(h);
   toast('Honorário atualizado', '', 'success');
   if (state.currentRoute === 'process') {
-    state._processView.honorarios = await DB.getHonorariosByProcess(h.processoId);
+    state._processView.honorarios = await DB.getHonorariosByProcess(state.currentProcessId);
     renderProcessTabContent();
   } else {
     renderFinanceiro();
   }
+}
+
+// Vincula/desvincula processo do array processosCobertos do honorário.
+async function vincularProcessoHonorario(honorarioId) {
+  const [honorarios, processos, clientes] = await Promise.all([
+    DB.getAllHonorarios(), DB.getAllProcesses(), DB.getAllClientes()
+  ]);
+  const h = honorarios.find(x => x.id === honorarioId);
+  if (!h) return;
+
+  // Mostra processos do mesmo cliente prioritariamente, mas permite escolher qualquer um
+  const procsDoCliente = h.clienteId ? processos.filter(p => p.clienteId === h.clienteId) : [];
+  const outrosProcs = processos.filter(p => !procsDoCliente.includes(p));
+  const cobertos = new Set(_processosDoHonorario(h));
+
+  const opts = [
+    { value: '', label: '— escolher processo pra vincular —' },
+    ...procsDoCliente.filter(p => !cobertos.has(p.id)).map(p => ({
+      value: p.id, label: '★ ' + (p.cnj ? p.cnj + ' · ' : '') + (p.name || '—') + ' (mesmo cliente)'
+    })),
+    ...outrosProcs.filter(p => !cobertos.has(p.id)).map(p => ({
+      value: p.id, label: (p.cnj ? p.cnj + ' · ' : '') + (p.name || '—') + (p.client ? ' · ' + p.client : '')
+    }))
+  ];
+
+  if (opts.length === 1) {
+    toast('Nenhum processo disponível', 'Todos os processos já estão vinculados ou não há processos cadastrados.', 'info');
+    return;
+  }
+
+  const cli = h.clienteId ? clientes.find(c => c.id === h.clienteId) : null;
+  const r = await showModal('Vincular processo ao honorário', [
+    { label: 'Processo', name: 'processoId', type: 'select', default: '', options: opts }
+  ], {
+    confirmLabel: 'Vincular',
+    intro: cli
+      ? `Cliente: <strong>${escapeHtml(cli.nome)}</strong> · ★ = processos do mesmo cliente`
+      : 'Honorário sem cliente vinculado — qualquer processo aparece na lista'
+  });
+  if (!r) return;
+  const [processoId] = r;
+  if (!processoId) { toast('Escolha um processo', '', 'error'); return; }
+
+  if (!Array.isArray(h.processosCobertos)) h.processosCobertos = _processosDoHonorario(h);
+  if (!h.processosCobertos.includes(processoId)) h.processosCobertos.push(processoId);
+  await DB.saveHonorario(h);
+  toast('Processo vinculado', '', 'success');
+  renderFinanceiro();
+}
+
+async function desvincularProcessoHonorario(honorarioId, processoId) {
+  const honorarios = await DB.getAllHonorarios();
+  const h = honorarios.find(x => x.id === honorarioId);
+  if (!h) return;
+  const ok = await confirmDialog('Desvincular processo?',
+    'O processo deixa de estar coberto por este honorário, mas as transações de pagamento já criadas permanecem.', false);
+  if (!ok) return;
+  if (!Array.isArray(h.processosCobertos)) h.processosCobertos = _processosDoHonorario(h);
+  h.processosCobertos = h.processosCobertos.filter(pid => pid !== processoId);
+  await DB.saveHonorario(h);
+  toast('Processo desvinculado', '', 'success');
+  renderFinanceiro();
 }
 
 async function removerHonorario(id) {
@@ -5940,7 +6183,7 @@ async function removerHonorario(id) {
   await DB.deleteHonorario(id);
   toast('Honorário removido', '', 'success');
   if (state.currentRoute === 'process') {
-    state._processView.honorarios = await DB.getHonorariosByProcess(h.processoId);
+    state._processView.honorarios = await DB.getHonorariosByProcess(state.currentProcessId);
     renderProcessTabContent();
   } else {
     renderFinanceiro();
@@ -5978,6 +6221,18 @@ async function marcarParcelaPaga(honorarioId, numeroParcela) {
   const [dataRecebimento, contaId, valor, obs] = r;
   const valorRecebido = parseFloat(valor) || parc.valor;
 
+  // Determina processoId pra transação:
+  // - Se está abrindo dentro de um processo, usa esse
+  // - Senão, se há exatamente 1 processo coberto, usa ele
+  // - Senão, deixa null (cliente sem processo específico)
+  const procsCobertos = _processosDoHonorario(h);
+  let processoIdTransacao = null;
+  if (state.currentRoute === 'process' && state.currentProcessId && procsCobertos.includes(state.currentProcessId)) {
+    processoIdTransacao = state.currentProcessId;
+  } else if (procsCobertos.length === 1) {
+    processoIdTransacao = procsCobertos[0];
+  }
+
   // Cria transação de receita automaticamente
   const transacao = {
     id: uid(),
@@ -5987,8 +6242,9 @@ async function marcarParcelaPaga(honorarioId, numeroParcela) {
     categoriaId: catReceita?.id || null,
     contaId,
     tipoConta: 'banco',
-    processoId: h.processoId,
+    clienteId: h.clienteId || null,
     clienteNome: h.clienteNome || null,
+    processoId: processoIdTransacao,
     honorarioId: h.id,
     parcelaNumero: numeroParcela,
     descricao: `Honorário · parcela ${numeroParcela}/${h.parcelas.length}${obs ? ' · ' + obs : ''}`,
@@ -6006,7 +6262,7 @@ async function marcarParcelaPaga(honorarioId, numeroParcela) {
 
   toast('Pagamento registrado', `${brl(valorRecebido)} · transação criada em receita`, 'success');
   if (state.currentRoute === 'process') {
-    state._processView.honorarios = await DB.getHonorariosByProcess(h.processoId);
+    state._processView.honorarios = await DB.getHonorariosByProcess(state.currentProcessId);
     renderProcessTabContent();
   } else {
     renderFinanceiro();
@@ -6033,7 +6289,7 @@ async function desfazerPagamentoParcela(honorarioId, numeroParcela) {
   await DB.saveHonorario(h);
   toast('Pagamento desfeito', '', 'info');
   if (state.currentRoute === 'process') {
-    state._processView.honorarios = await DB.getHonorariosByProcess(h.processoId);
+    state._processView.honorarios = await DB.getHonorariosByProcess(state.currentProcessId);
     renderProcessTabContent();
   } else {
     renderFinanceiro();

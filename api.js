@@ -418,7 +418,13 @@ const RemoteDB = {
   // Honorários
   async getAllHonorarios() { return await getAll_('honorarios'); },
   async getHonorariosByProcess(pid) {
-    return (await getAll_('honorarios')).filter(h => h.processoId === pid);
+    return (await getAll_('honorarios')).filter(h =>
+      h.processoId === pid ||  // legado (Cli.1 e anterior)
+      (Array.isArray(h.processosCobertos) && h.processosCobertos.includes(pid))  // Cli.2+
+    );
+  },
+  async getHonorariosByCliente(cid) {
+    return (await getAll_('honorarios')).filter(h => h.clienteId === cid);
   },
   async saveHonorario(h) { return await upsert_('honorarios', h); },
   async deleteHonorario(id) { return await softDelete_('honorarios', id); },
