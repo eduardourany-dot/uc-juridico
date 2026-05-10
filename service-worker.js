@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.17.1 (fix: fatura do cartão inclui previstas — limite ocupa no lançamento)
-const CACHE_NAME = 'uc-juridico-v6-17-1';
+// Service Worker — UC Jurídico v6.17.2 (fix: marcar transação cartão como realizado libera limite proporcional)
+const CACHE_NAME = 'uc-juridico-v6-17-2';
 const APP_SHELL = [
   './',
   './index.html',
