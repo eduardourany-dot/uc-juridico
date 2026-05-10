@@ -254,6 +254,10 @@ body{background:var(--uc-paper);color:var(--uc-graphite);font-size:15px;-webkit-
       <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
       <span>Financeiro</span>
     </a>
+    <a class="nav-item" data-route="relatorio">
+      <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+      <span>Relatório</span>
+    </a>
 
     <div class="nav-section" style="margin-top:16px;">Operacional</div>
     <a class="nav-item" data-route="tools">
@@ -273,7 +277,7 @@ body{background:var(--uc-paper);color:var(--uc-graphite);font-size:15px;-webkit-
 
     <div style="margin-top:auto;padding:16px 20px;border-top:1px solid var(--uc-line-soft);font-size:11px;color:var(--uc-warm-gray);text-align:center;">
       <p class="smallcaps font-serif" style="margin:0 0 4px;">Urany de Castro · 30 anos</p>
-      <p style="margin:0;">100% local · v6.25.1</p>
+      <p style="margin:0;">100% local · v6.26.0</p>
     </div>
   </aside>
 
@@ -560,6 +564,7 @@ const routes = {
   deadlines: renderDeadlines,
   agenda: renderAgenda,
   financeiro: renderFinanceiro,
+  relatorio: renderRelatorio,
   tools: renderTools,
   diligence: renderDiligence,
   settings: renderSettings
@@ -8373,6 +8378,378 @@ async function removerCompromisso(id) {
   if (state.currentRoute === 'agenda') renderAgenda();
   else if (state.currentRoute === 'process') renderProcessTabContent();
   else if (state.currentRoute === 'clienteDetalhe') renderClienteDetalhe();
+}
+
+// ====================================================================
+// === MÓDULO RELATÓRIO EXECUTIVO (v6.26) ============================
+// ====================================================================
+// Resumo consolidado do mês: pulso financeiro, processual, cliente e
+// equipe. Diferente do dashboard inicial (tático/urgente), este é
+// estratégico e retrospectivo. Comparativo automático com mês anterior.
+
+// Helpers de range mensal
+function _mesRange(ano, mes /* 0-11 */) {
+  const inicio = new Date(ano, mes, 1);
+  const fim = new Date(ano, mes + 1, 0, 23, 59, 59, 999);
+  return { inicioMs: inicio.getTime(), fimMs: fim.getTime(),
+    inicioISO: inicio.toISOString().slice(0,10), fimISO: fim.toISOString().slice(0,10) };
+}
+function _mesLabel(ano, mes) {
+  return new Date(ano, mes, 1).toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
+}
+function _isInRange(ts, range) {
+  if (!ts) return false;
+  const ms = typeof ts === 'number' ? ts : new Date(ts).getTime();
+  return ms >= range.inicioMs && ms <= range.fimMs;
+}
+function _isDateInRange(iso, range) {
+  if (!iso) return false;
+  const s = String(iso).slice(0, 10);
+  return s >= range.inicioISO && s <= range.fimISO;
+}
+function _delta(atual, anterior) {
+  if (anterior === 0) return atual === 0 ? 0 : 100;
+  return ((atual - anterior) / Math.abs(anterior)) * 100;
+}
+function _renderDelta(d, casas) {
+  if (d === 0) return '<span style="color: var(--uc-warm-gray);">—</span>';
+  const s = (d > 0 ? '+' : '') + d.toFixed(casas || 1) + '%';
+  const cor = d > 0 ? 'var(--uc-green)' : 'var(--uc-red)';
+  return `<span style="color: ${cor}; font-weight: 600;">${s}</span>`;
+}
+
+async function renderRelatorio() {
+  // Estado: mês selecionado (default = mês atual)
+  if (!state._relatorioRef) {
+    const hoje = new Date();
+    state._relatorioRef = { ano: hoje.getFullYear(), mes: hoje.getMonth() };
+  }
+  const { ano, mes } = state._relatorioRef;
+  const range = _mesRange(ano, mes);
+  const rangePrev = _mesRange(mes === 0 ? ano - 1 : ano, mes === 0 ? 11 : mes - 1);
+
+  // Carrega tudo em paralelo
+  const [processos, prazos, honorarios, compromissos, transacoes, clientes, comunicacoes] = await Promise.all([
+    DB.getAllProcesses(),
+    DB.getAllDeadlines(),
+    DB.getAllHonorarios(),
+    DB.getAllCompromissos(),
+    DB.getAllTransacoes(),
+    DB.getAllClientes(),
+    DB.getAllComunicacoes ? DB.getAllComunicacoes() : Promise.resolve([])
+  ]);
+
+  // ====== Stats principais ======
+  const procsNovos = processos.filter(p => _isInRange(p.createdAt, range));
+  const procsNovosPrev = processos.filter(p => _isInRange(p.createdAt, rangePrev));
+
+  const prazosCumpridos = prazos.filter(d => d.status === 'cumprido' && _isDateInRange(d.cumprimento?.dataCumprimento, range));
+  const prazosCumpridosPrev = prazos.filter(d => d.status === 'cumprido' && _isDateInRange(d.cumprimento?.dataCumprimento, rangePrev));
+  const prazosPerdidos = prazos.filter(d => d.status === 'perdido' && _isDateInRange(d.deadlineDate, range));
+  const prazosCancelados = prazos.filter(d => d.status === 'cancelado' && _isInRange(d.cancelamento?.canceladoEm, range));
+
+  // Honorários recebidos = parcelas com status 'pago' cuja data de pagamento cai no mês
+  let honRecebido = 0, honRecebidoPrev = 0, parcelasPagas = 0, parcelasPagasPrev = 0;
+  honorarios.forEach(h => {
+    (h.parcelas || []).forEach(p => {
+      if (p.status !== 'pago') return;
+      const dataPg = p.dataPagamento || p.dataPg || p.pagoEm;
+      if (_isDateInRange(dataPg, range) || _isInRange(dataPg, range)) {
+        honRecebido += Number(p.valor) || 0;
+        parcelasPagas++;
+      } else if (_isDateInRange(dataPg, rangePrev) || _isInRange(dataPg, rangePrev)) {
+        honRecebidoPrev += Number(p.valor) || 0;
+        parcelasPagasPrev++;
+      }
+    });
+  });
+
+  // Honorários a receber neste mês (vencimento)
+  let honAReceber = 0, parcelasAReceber = 0;
+  honorarios.forEach(h => {
+    (h.parcelas || []).forEach(p => {
+      if (p.status === 'pago') return;
+      if (_isDateInRange(p.vencimento, range)) {
+        honAReceber += Number(p.valor) || 0;
+        parcelasAReceber++;
+      }
+    });
+  });
+
+  const compsDoMes = compromissos.filter(c => _isDateInRange(c.dataHoraInicio, range));
+  const compsDoMesPrev = compromissos.filter(c => _isDateInRange(c.dataHoraInicio, rangePrev));
+  const compsRealizados = compsDoMes.filter(c => c.status === 'realizado').length;
+  const compsCancelados = compsDoMes.filter(c => c.status === 'cancelado').length;
+
+  // Financeiro consolidado (mês corrente)
+  const transMes = transacoes.filter(t => _isDateInRange(t.data, range) && t.status === 'realizado');
+  const transMesPrev = transacoes.filter(t => _isDateInRange(t.data, rangePrev) && t.status === 'realizado');
+  const receita = transMes.filter(t => t.tipo === 'receita').reduce((s, t) => s + Number(t.valor || 0), 0);
+  const despesa = transMes.filter(t => t.tipo === 'despesa').reduce((s, t) => s + Number(t.valor || 0), 0);
+  const saldo = receita - despesa;
+  const receitaPrev = transMesPrev.filter(t => t.tipo === 'receita').reduce((s, t) => s + Number(t.valor || 0), 0);
+  const despesaPrev = transMesPrev.filter(t => t.tipo === 'despesa').reduce((s, t) => s + Number(t.valor || 0), 0);
+
+  // Cliente
+  const cliNovos = clientes.filter(c => _isInRange(c.createdAt, range));
+  const comsDoMes = (comunicacoes || []).filter(c => _isInRange(c.data || c.createdAt, range));
+  const followUpsPendentes = (comunicacoes || []).filter(c => c.proximaAcao && !c.proximaAcaoFeita).length;
+
+  // ====== Distribuições ======
+  // Por advogado: prazos cumpridos no mês
+  const cumpridosPorAdv = {};
+  prazosCumpridos.forEach(d => {
+    const proc = processos.find(p => p.id === d.processId);
+    const adv = proc?.advogadoResponsavel || '— sem titular —';
+    cumpridosPorAdv[adv] = (cumpridosPorAdv[adv] || 0) + 1;
+  });
+  const topAdvCumpridos = Object.entries(cumpridosPorAdv).sort((a, b) => b[1] - a[1]).slice(0, 5);
+
+  // Carga atual: prazos ativos por advogado (estado atual, não do mês)
+  const cargaPorAdv = {};
+  prazos.filter(prazoEstaAtivo).forEach(d => {
+    const proc = processos.find(p => p.id === d.processId);
+    const adv = proc?.advogadoResponsavel || '— sem titular —';
+    cargaPorAdv[adv] = (cargaPorAdv[adv] || 0) + 1;
+  });
+  const cargaSorted = Object.entries(cargaPorAdv).sort((a, b) => b[1] - a[1]);
+
+  // Distribuição por área dos novos processos
+  const porArea = {};
+  procsNovos.forEach(p => {
+    const area = p.area || '— sem área —';
+    porArea[area] = (porArea[area] || 0) + 1;
+  });
+  const areaSorted = Object.entries(porArea).sort((a, b) => b[1] - a[1]);
+
+  // Top clientes (por nº processos no mês ou honorários no mês)
+  const cliNovosProc = {};
+  procsNovos.forEach(p => {
+    if (!p.clienteId) return;
+    cliNovosProc[p.clienteId] = (cliNovosProc[p.clienteId] || 0) + 1;
+  });
+  const topClientesProc = Object.entries(cliNovosProc).sort((a, b) => b[1] - a[1]).slice(0, 5)
+    .map(([cid, n]) => ({ cli: clientes.find(c => c.id === cid), n })).filter(x => x.cli);
+
+  // Compromissos por advogado (responsável) no mês
+  const compsPorAdv = {};
+  compsDoMes.forEach(c => {
+    const adv = c.responsavel || '— sem responsável —';
+    compsPorAdv[adv] = (compsPorAdv[adv] || 0) + 1;
+  });
+  const compsSorted = Object.entries(compsPorAdv).sort((a, b) => b[1] - a[1]);
+
+  const ehMesAtual = ano === new Date().getFullYear() && mes === new Date().getMonth();
+
+  $('appContent').innerHTML = `
+    <div class="page-header">
+      <div>
+        <h1 class="page-title"><span class="smallcaps-prefix">Relatório</span></h1>
+        <p class="page-subtitle">Resumo executivo · ${_mesLabel(ano, mes)}${ehMesAtual ? ' <span class="badge badge-gold" style="font-size:9px;">EM CURSO</span>' : ''}</p>
+      </div>
+      <div class="flex gap-2 items-center">
+        <button class="btn btn-ghost btn-sm" onclick="_navegarMesRelatorio(-1)" title="Mês anterior">‹</button>
+        <input type="month" class="input" style="max-width: 160px;" value="${ano}-${String(mes+1).padStart(2,'0')}" onchange="_setMesRelatorio(this.value)">
+        <button class="btn btn-ghost btn-sm" onclick="_navegarMesRelatorio(1)" title="Próximo mês">›</button>
+        <button class="btn btn-outline btn-sm" onclick="_exportarRelatorioCsv()" title="Exportar resumo em CSV">⬇ CSV</button>
+      </div>
+    </div>
+
+    <!-- Stats principais (4 cards comparativos) -->
+    <div class="grid gap-3 mb-4" style="grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));">
+      <div class="stat-card">
+        <div class="stat-label">Processos novos</div>
+        <div class="stat-value">${procsNovos.length}</div>
+        <div class="stat-meta">vs ${procsNovosPrev.length} mês ant. · ${_renderDelta(_delta(procsNovos.length, procsNovosPrev.length))}</div>
+      </div>
+      <div class="stat-card" style="${prazosCumpridos.length === 0 && !ehMesAtual ? 'background: var(--uc-cream);' : ''}">
+        <div class="stat-label">Prazos cumpridos</div>
+        <div class="stat-value" style="color: var(--uc-green);">${prazosCumpridos.length}</div>
+        <div class="stat-meta">vs ${prazosCumpridosPrev.length} mês ant. · ${_renderDelta(_delta(prazosCumpridos.length, prazosCumpridosPrev.length))}</div>
+      </div>
+      <div class="stat-card" style="${prazosPerdidos.length > 0 ? 'background: var(--uc-red-soft); border-color: var(--uc-red);' : ''}">
+        <div class="stat-label">Prazos perdidos</div>
+        <div class="stat-value" style="${prazosPerdidos.length > 0 ? 'color: var(--uc-red);' : ''}">${prazosPerdidos.length}</div>
+        <div class="stat-meta">${prazosPerdidos.length > 0 ? '⚠ regularizar' : 'Tudo em ordem'}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Honorários recebidos</div>
+        <div class="stat-value" style="color: var(--uc-green); font-size: 18px;">${brl(honRecebido)}</div>
+        <div class="stat-meta">${parcelasPagas} parcela(s) · ${_renderDelta(_delta(honRecebido, honRecebidoPrev))}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">A receber (venc. no mês)</div>
+        <div class="stat-value" style="color: var(--uc-amber); font-size: 18px;">${brl(honAReceber)}</div>
+        <div class="stat-meta">${parcelasAReceber} parcela(s)</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Compromissos</div>
+        <div class="stat-value">${compsDoMes.length}</div>
+        <div class="stat-meta">${compsRealizados} realizados · ${compsCancelados} cancelados</div>
+      </div>
+    </div>
+
+    <!-- Financeiro -->
+    <div class="card mb-4">
+      <h3 class="font-serif text-lg font-semibold smallcaps mb-3" style="color: var(--uc-black);">Financeiro do mês</h3>
+      <div class="grid gap-3" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));">
+        <div>
+          <p class="text-xs smallcaps" style="color: var(--uc-warm-gray); margin: 0;">Receita</p>
+          <p style="font-size: 22px; font-weight: 600; color: var(--uc-green); margin: 4px 0 0;">${brl(receita)}</p>
+          <p class="text-xs" style="color: var(--uc-warm-gray); margin: 2px 0 0;">vs ${brl(receitaPrev)} · ${_renderDelta(_delta(receita, receitaPrev))}</p>
+        </div>
+        <div>
+          <p class="text-xs smallcaps" style="color: var(--uc-warm-gray); margin: 0;">Despesa</p>
+          <p style="font-size: 22px; font-weight: 600; color: var(--uc-red); margin: 4px 0 0;">${brl(despesa)}</p>
+          <p class="text-xs" style="color: var(--uc-warm-gray); margin: 2px 0 0;">vs ${brl(despesaPrev)} · ${_renderDelta(_delta(despesa, despesaPrev))}</p>
+        </div>
+        <div>
+          <p class="text-xs smallcaps" style="color: var(--uc-warm-gray); margin: 0;">Saldo do mês</p>
+          <p style="font-size: 22px; font-weight: 600; color: ${saldo >= 0 ? 'var(--uc-green)' : 'var(--uc-red)'}; margin: 4px 0 0;">${brl(saldo)}</p>
+          <p class="text-xs" style="color: var(--uc-warm-gray); margin: 2px 0 0;">${transMes.length} transação(ões) realizadas</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Processual -->
+    <div class="grid gap-4 mb-4" style="grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));">
+      <div class="card">
+        <h3 class="font-serif text-lg font-semibold smallcaps mb-3" style="color: var(--uc-black);">Top advogados · prazos cumpridos no mês</h3>
+        ${topAdvCumpridos.length === 0 ? '<p class="help-text">Nenhum prazo cumprido no mês.</p>' : topAdvCumpridos.map(([adv, n]) => `
+          <div style="display:flex; justify-content:space-between; align-items:center; padding:6px 0; border-bottom:1px solid var(--uc-line-soft); font-size:13px;">
+            <span>${escapeHtml(adv)}</span>
+            <strong style="color: var(--uc-green);">${n}</strong>
+          </div>
+        `).join('')}
+      </div>
+
+      <div class="card">
+        <h3 class="font-serif text-lg font-semibold smallcaps mb-3" style="color: var(--uc-black);">Carga atual · prazos ativos por advogado</h3>
+        ${cargaSorted.length === 0 ? '<p class="help-text">Nenhum prazo ativo.</p>' : cargaSorted.map(([adv, n]) => `
+          <div style="display:flex; justify-content:space-between; align-items:center; padding:6px 0; border-bottom:1px solid var(--uc-line-soft); font-size:13px;">
+            <span>${escapeHtml(adv)}</span>
+            <strong style="color: ${n >= 15 ? 'var(--uc-red)' : n >= 8 ? 'var(--uc-amber)' : 'var(--uc-graphite)'};">${n}</strong>
+          </div>
+        `).join('')}
+      </div>
+
+      ${areaSorted.length > 0 ? `
+        <div class="card">
+          <h3 class="font-serif text-lg font-semibold smallcaps mb-3" style="color: var(--uc-black);">Distribuição dos novos processos por área</h3>
+          ${areaSorted.map(([area, n]) => {
+            const pct = (n / procsNovos.length * 100).toFixed(0);
+            return `
+              <div style="margin-bottom: 6px;">
+                <div style="display:flex; justify-content:space-between; font-size:12px; color: var(--uc-warm-gray);">
+                  <span>${escapeHtml(area)}</span>
+                  <span><strong style="color: var(--uc-graphite);">${n}</strong> · ${pct}%</span>
+                </div>
+                <div style="height: 4px; background: var(--uc-cream); border-radius: 2px; overflow: hidden;">
+                  <div style="height: 100%; background: var(--uc-gold); width: ${pct}%;"></div>
+                </div>
+              </div>
+            `;
+          }).join('')}
+        </div>
+      ` : ''}
+
+      <div class="card">
+        <h3 class="font-serif text-lg font-semibold smallcaps mb-3" style="color: var(--uc-black);">Compromissos por responsável</h3>
+        ${compsSorted.length === 0 ? '<p class="help-text">Nenhum compromisso no mês.</p>' : compsSorted.map(([adv, n]) => `
+          <div style="display:flex; justify-content:space-between; align-items:center; padding:6px 0; border-bottom:1px solid var(--uc-line-soft); font-size:13px;">
+            <span>${escapeHtml(adv)}</span>
+            <strong>${n}</strong>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+
+    <!-- Cliente -->
+    <div class="card mb-4">
+      <h3 class="font-serif text-lg font-semibold smallcaps mb-3" style="color: var(--uc-black);">Clientes</h3>
+      <div class="grid gap-3" style="grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));">
+        <div>
+          <p class="text-xs smallcaps" style="color: var(--uc-warm-gray); margin: 0;">Novos clientes</p>
+          <p style="font-size: 22px; font-weight: 600; margin: 4px 0 0;">${cliNovos.length}</p>
+        </div>
+        <div>
+          <p class="text-xs smallcaps" style="color: var(--uc-warm-gray); margin: 0;">Comunicações no mês</p>
+          <p style="font-size: 22px; font-weight: 600; margin: 4px 0 0;">${comsDoMes.length}</p>
+        </div>
+        <div>
+          <p class="text-xs smallcaps" style="color: var(--uc-warm-gray); margin: 0;">Follow-ups pendentes</p>
+          <p style="font-size: 22px; font-weight: 600; color: ${followUpsPendentes > 0 ? 'var(--uc-amber)' : 'var(--uc-graphite)'}; margin: 4px 0 0;">${followUpsPendentes}</p>
+        </div>
+        <div>
+          <p class="text-xs smallcaps" style="color: var(--uc-warm-gray); margin: 0;">Total na carteira</p>
+          <p style="font-size: 22px; font-weight: 600; margin: 4px 0 0;">${clientes.filter(c => c.ativo !== false).length}</p>
+        </div>
+      </div>
+      ${topClientesProc.length > 0 ? `
+        <h4 class="font-serif font-semibold smallcaps mt-4 mb-2" style="color: var(--uc-warm-gray); font-size: 12px;">Top clientes por novos processos no mês</h4>
+        ${topClientesProc.map(({cli, n}) => `
+          <div style="display:flex; justify-content:space-between; align-items:center; padding:4px 0; font-size:13px;">
+            <a onclick="navigate('clienteDetalhe', { currentClienteId: '${cli.id}' })" style="cursor:pointer; color: var(--uc-gold);">${escapeHtml(cli.nome)}</a>
+            <strong>${n}</strong>
+          </div>
+        `).join('')}
+      ` : ''}
+    </div>
+
+    <p class="help-text" style="text-align: center; margin-top: 24px;">
+      Relatório gerado em ${formatDateTime(Date.now())} · escopo: mês de ${_mesLabel(ano, mes)}
+    </p>
+  `;
+}
+
+function _setMesRelatorio(yyyymm) {
+  const [a, m] = (yyyymm || '').split('-').map(Number);
+  if (!a || !m) return;
+  state._relatorioRef = { ano: a, mes: m - 1 };
+  renderRelatorio();
+}
+function _navegarMesRelatorio(delta) {
+  const ref = state._relatorioRef || { ano: new Date().getFullYear(), mes: new Date().getMonth() };
+  let novoAno = ref.ano, novoMes = ref.mes + delta;
+  if (novoMes < 0) { novoMes = 11; novoAno--; }
+  if (novoMes > 11) { novoMes = 0; novoAno++; }
+  state._relatorioRef = { ano: novoAno, mes: novoMes };
+  renderRelatorio();
+}
+async function _exportarRelatorioCsv() {
+  const { ano, mes } = state._relatorioRef || { ano: new Date().getFullYear(), mes: new Date().getMonth() };
+  const range = _mesRange(ano, mes);
+  const [processos, prazos, honorarios, compromissos, transacoes, clientes] = await Promise.all([
+    DB.getAllProcesses(), DB.getAllDeadlines(), DB.getAllHonorarios(),
+    DB.getAllCompromissos(), DB.getAllTransacoes(), DB.getAllClientes()
+  ]);
+  const procsNovos = processos.filter(p => _isInRange(p.createdAt, range));
+  const cumpridos = prazos.filter(d => d.status === 'cumprido' && _isDateInRange(d.cumprimento?.dataCumprimento, range));
+  const perdidos = prazos.filter(d => d.status === 'perdido' && _isDateInRange(d.deadlineDate, range));
+  let honRec = 0; honorarios.forEach(h => (h.parcelas || []).forEach(p => {
+    if (p.status === 'pago' && (_isDateInRange(p.dataPagamento || p.dataPg || p.pagoEm, range) || _isInRange(p.dataPagamento || p.pagoEm, range))) honRec += Number(p.valor) || 0;
+  }));
+  const compsMes = compromissos.filter(c => _isDateInRange(c.dataHoraInicio, range));
+  const transMes = transacoes.filter(t => _isDateInRange(t.data, range) && t.status === 'realizado');
+  const receita = transMes.filter(t => t.tipo === 'receita').reduce((s, t) => s + Number(t.valor || 0), 0);
+  const despesa = transMes.filter(t => t.tipo === 'despesa').reduce((s, t) => s + Number(t.valor || 0), 0);
+  const cliNovos = clientes.filter(c => _isInRange(c.createdAt, range));
+
+  let csv = 'Indicador;Valor\n';
+  csv += `Mês de referência;${_mesLabel(ano, mes)}\n`;
+  csv += `Processos novos;${procsNovos.length}\n`;
+  csv += `Prazos cumpridos;${cumpridos.length}\n`;
+  csv += `Prazos perdidos;${perdidos.length}\n`;
+  csv += `Honorários recebidos (R$);${honRec.toFixed(2)}\n`;
+  csv += `Receita realizada (R$);${receita.toFixed(2)}\n`;
+  csv += `Despesa realizada (R$);${despesa.toFixed(2)}\n`;
+  csv += `Saldo do mês (R$);${(receita - despesa).toFixed(2)}\n`;
+  csv += `Compromissos no mês;${compsMes.length}\n`;
+  csv += `Compromissos realizados;${compsMes.filter(c => c.status === 'realizado').length}\n`;
+  csv += `Novos clientes;${cliNovos.length}\n`;
+
+  downloadBlob(new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' }), `relatorio_${ano}_${String(mes+1).padStart(2,'0')}.csv`);
+  toast('Exportado', '', 'success');
 }
 
 async function renderTools() {

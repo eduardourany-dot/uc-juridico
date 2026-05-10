@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.25.1 (Agenda consolidada: prazos ativos aparecem como overlay read-only na rota /agenda)
-const CACHE_NAME = 'uc-juridico-v6-25-1';
+// Service Worker — UC Jurídico v6.26.0 (Relatório executivo: rota /relatorio com resumo mensal financeiro + processual + clientes + equipe)
+const CACHE_NAME = 'uc-juridico-v6-26-0';
 const APP_SHELL = [
   './',
   './index.html',
