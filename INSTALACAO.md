@@ -1,6 +1,6 @@
 # UC Jurídico — Instalação e operação
 
-Versão atual: **v6.36.0**
+Versão atual: **v6.37.0**
 URL pública: https://eduardourany-dot.github.io/uc-juridico/
 Repositório: https://github.com/eduardourany-dot/uc-juridico
 
@@ -333,7 +333,8 @@ Verificar:
 | v6.33.0 | ✅ entregue | Modo escuro completo — 3 opções (☀/🌙/🖥 Auto via matchMedia) + toggle rápido na sidebar. |
 | v6.34.0 | ✅ entregue | Petições Pet.2 — export .docx (Garamond + cabeçalho/rodapé) + 5 templates seed instaláveis com 1 clique. |
 | v6.35.0 | ✅ entregue | Petições Pet.3 — proxy Apps Script → Claude API + botão "🤖 Gerar com IA" no processo + audit log de tokens/custo. |
-| **v6.36.0** | ✅ em produção | **Dashboard "Minhas tarefas hoje"** — card no topo do `/` personalizado pelo advogado logado (via `defaultAdvogado(email)`). Agrupa em sub-blocos coloridos: ⚠ prazos vencidos não-cumpridos, 🚨 prazos HOJE, ⏰ prazos amanhã, 📅 compromissos HOJE/amanhã, 🔔 follow-ups vencidos (próximaAcao com data ≤ hoje), 💰 parcelas de honorário vencendo nos próximos 3 dias (filtradas pelos processos onde sou titular). Empty state quando nada urgente. Botão ✓ inline pra cumprir prazo vencido sem sair da home. Badge vermelho com contador total no header do card. |
+| v6.36.0 | ✅ entregue | Dashboard "Minhas tarefas hoje" — card personalizado no topo do `/` com prazos urgentes, compromissos, follow-ups e parcelas do advogado logado. |
+| **v6.37.0** | ✅ em produção | **Notificações in-app — sino flutuante** — botão 🔔 fixo no canto superior direito (no mobile vai pro canto inferior, acima da bottom nav) com badge vermelho do número de não-lidas. Click abre painel com timeline agregada: prazos T-7/T-3/T-2/T-1/T-0/T+1 (titular), compromissos T-1/T-0 (responsável OU participante), follow-ups vencidos, parcelas vencendo. Item lido fica desbotado, não-lido com fundo dourado. Click em item navega pro contexto e marca como lida. Botão "✓ Marcar todas como lidas". Refresh automático a cada 5min. Persistência local no `localStorage` (device-specific). |
 | v6.22+ | planejado | Retomada Financeiro A.4 (Recorrências + Balancete) → A.5 → Agenda unificada |
 | v7.x | planejado | Módulo Petições com Claude API (briefing em [docs/BRIEFING_Peticoes.md](docs/BRIEFING_Peticoes.md)) |
 

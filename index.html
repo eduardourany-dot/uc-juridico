@@ -117,6 +117,31 @@ body{background:var(--uc-paper);color:var(--uc-graphite);font-size:15px;-webkit-
 .badge-flagship{background:var(--uc-black);color:var(--uc-gold-soft)}
 [data-theme="dark"] .badge-flagship{background:var(--uc-gold);color:#0a0a0a}
 
+/* Sino de notificações in-app (v6.37) */
+.uc-bell{position:fixed;top:14px;right:14px;z-index:90;background:var(--uc-paper);border:1px solid var(--uc-line);width:42px;height:42px;border-radius:50%;display:flex;align-items:center;justify-content:center;cursor:pointer;box-shadow:var(--shadow-sm);transition:all 0.15s}
+.uc-bell:hover{border-color:var(--uc-gold);transform:scale(1.05)}
+.uc-bell-icon{font-size:18px}
+.uc-bell-badge{position:absolute;top:-4px;right:-4px;background:var(--uc-red);color:white;font-size:10px;font-weight:600;padding:2px 6px;border-radius:10px;min-width:18px;text-align:center;border:2px solid var(--uc-paper)}
+.uc-bell-badge.hidden{display:none}
+.uc-bell-panel{position:fixed;top:62px;right:14px;z-index:90;background:var(--uc-paper);border:1px solid var(--uc-line);border-radius:8px;box-shadow:var(--shadow-lg);width:380px;max-width:calc(100vw - 28px);max-height:70vh;overflow:hidden;display:flex;flex-direction:column;animation:fadeIn 0.15s}
+.uc-bell-panel.hidden{display:none}
+.uc-bell-header{display:flex;justify-content:space-between;align-items:center;padding:12px 14px;border-bottom:1px solid var(--uc-line)}
+.uc-bell-title{font-family:'EB Garamond',serif;font-size:16px;font-weight:600;color:var(--uc-black);margin:0}
+.uc-bell-list{overflow-y:auto;flex:1;padding:4px 0}
+.uc-bell-item{display:flex;gap:10px;padding:10px 14px;border-bottom:1px solid var(--uc-line-soft);cursor:pointer;align-items:flex-start;transition:background 0.1s}
+.uc-bell-item:hover{background:var(--uc-cream)}
+.uc-bell-item.unread{background:var(--uc-gold-pale)}
+[data-theme="dark"] .uc-bell-item.unread{background:rgba(201,182,135,0.08)}
+.uc-bell-item-icon{font-size:18px;flex-shrink:0;width:24px;text-align:center;line-height:1.2}
+.uc-bell-item-body{flex:1;min-width:0}
+.uc-bell-item-title{font-size:13px;font-weight:600;color:var(--uc-black);line-height:1.3;margin:0 0 2px}
+.uc-bell-item-msg{font-size:11px;color:var(--uc-warm-gray);line-height:1.4;margin:0 0 2px;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.uc-bell-item-ts{font-size:10px;color:var(--uc-soft-gray)}
+.uc-bell-footer{padding:8px 14px;border-top:1px solid var(--uc-line);text-align:center;background:var(--uc-cream)}
+[data-theme="dark"] .uc-bell-footer{background:var(--uc-cream)}
+.uc-bell-empty{padding:32px 16px;text-align:center;color:var(--uc-warm-gray);font-size:13px}
+@media(max-width:768px){.uc-bell{top:auto;bottom:85px;right:10px}.uc-bell-panel{top:auto;bottom:135px;right:10px;left:10px;width:auto;max-width:none}}
+
 .stat-card{background:var(--uc-cream);border:1px solid var(--uc-line);border-radius:8px;padding:16px}
 .stat-label{font-size:11px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;color:var(--uc-warm-gray);margin-bottom:4px}
 .stat-value{font-family:'EB Garamond',serif;font-size:28px;font-weight:600;color:var(--uc-black);line-height:1}
@@ -288,7 +313,7 @@ body{background:var(--uc-paper);color:var(--uc-graphite);font-size:15px;-webkit-
         <span id="themeQuickToggleLabel">☀ Claro</span>
       </button>
       <p class="smallcaps font-serif" style="margin:0 0 4px;">Urany de Castro · 30 anos</p>
-      <p style="margin:0;">100% local · v6.36.0</p>
+      <p style="margin:0;">100% local · v6.37.0</p>
     </div>
   </aside>
 
@@ -327,6 +352,22 @@ body{background:var(--uc-paper);color:var(--uc-graphite);font-size:15px;-webkit-
 
 <div id="modalContainer"></div>
 <div id="toastContainer" class="toast-container"></div>
+
+<!-- Sino de notificações in-app (v6.37) -->
+<button id="ucBell" class="uc-bell hidden" onclick="_toggleNotificacoesPanel()" title="Notificações">
+  <span class="uc-bell-icon">🔔</span>
+  <span id="ucBellBadge" class="uc-bell-badge hidden">0</span>
+</button>
+<div id="ucBellPanel" class="uc-bell-panel hidden">
+  <div class="uc-bell-header">
+    <h3 class="uc-bell-title">Notificações</h3>
+    <button class="btn btn-ghost btn-sm" onclick="_toggleNotificacoesPanel(false)" style="padding: 4px 8px;">×</button>
+  </div>
+  <div id="ucBellList" class="uc-bell-list"></div>
+  <div class="uc-bell-footer">
+    <button class="btn btn-ghost btn-sm" onclick="_marcarTodasNotifLidas()" style="font-size: 11px;">✓ Marcar todas como lidas</button>
+  </div>
+</div>
 
 <script>
 pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
@@ -13747,6 +13788,248 @@ function djenShowError(err) {
 // === APP INITIALIZATION =============================================
 // ====================================================================
 
+// ====================================================================
+// === NOTIFICAÇÕES IN-APP (Sino flutuante) — v6.37 ==================
+// ====================================================================
+
+const _UC_NOTIF_KEY = 'uc_notif_lidas';
+function _lerLidas() {
+  try { return JSON.parse(localStorage.getItem(_UC_NOTIF_KEY) || '{}'); }
+  catch (_) { return {}; }
+}
+function _salvarLidas(map) {
+  try { localStorage.setItem(_UC_NOTIF_KEY, JSON.stringify(map)); } catch (_) {}
+}
+function _marcarNotifLida(id) {
+  const lidas = _lerLidas();
+  lidas[id] = Date.now();
+  _salvarLidas(lidas);
+}
+function _marcarTodasNotifLidas() {
+  const items = state._notifItems || [];
+  const lidas = _lerLidas();
+  items.forEach(it => { lidas[it.id] = Date.now(); });
+  _salvarLidas(lidas);
+  _renderSino();
+  toast('Todas marcadas como lidas', '', 'success');
+}
+
+function _toggleNotificacoesPanel(force) {
+  const panel = document.getElementById('ucBellPanel');
+  if (!panel) return;
+  const willOpen = force !== undefined ? force : panel.classList.contains('hidden');
+  if (willOpen) {
+    panel.classList.remove('hidden');
+    _renderSinoPanel();  // garante painel atualizado ao abrir
+    // Click outside fecha
+    setTimeout(() => {
+      const closeOnOutside = (e) => {
+        if (!panel.contains(e.target) && !document.getElementById('ucBell').contains(e.target)) {
+          panel.classList.add('hidden');
+          document.removeEventListener('click', closeOnOutside);
+        }
+      };
+      document.addEventListener('click', closeOnOutside);
+    }, 50);
+  } else {
+    panel.classList.add('hidden');
+  }
+}
+
+// Computa itens "que mereceriam push hoje" pro advogado logado
+async function _computarNotificacoesInApp() {
+  const me = (window.UC_Auth?.getUser?.() || {}).email || '';
+  const meuNome = defaultAdvogado(me);
+  if (!meuNome) return [];
+
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const ms = today.getTime();
+  const items = [];
+
+  try {
+    const [processes, deadlines, compromissosAll, honorariosAll, comunicacoesAll] = await Promise.all([
+      DB.getAllProcesses(),
+      DB.getAllDeadlines(),
+      DB.getAllCompromissos ? DB.getAllCompromissos().catch(() => []) : Promise.resolve([]),
+      DB.getAllHonorarios ? DB.getAllHonorarios().catch(() => []) : Promise.resolve([]),
+      DB.getAllComunicacoes ? DB.getAllComunicacoes().catch(() => []) : Promise.resolve([])
+    ]);
+
+    const procsById = {}; processes.forEach(p => procsById[p.id] = p);
+
+    // Prazos: marcos T-7..T+1 dos prazos onde sou titular
+    deadlines.filter(prazoEstaAtivo).forEach(d => {
+      const proc = procsById[d.processId];
+      if (proc?.advogadoResponsavel !== meuNome) return;
+      const dl = new Date(d.deadlineDate); dl.setHours(0,0,0,0);
+      const days = Math.ceil((dl - today) / 86400000);
+      let marco = null, icon = '⏰', color = 'var(--uc-amber)', tituloPrefix = '';
+      if (days < 0)        { marco = 'T+' + Math.abs(days); icon = '🚨'; color = 'var(--uc-red)'; tituloPrefix = 'Vencido há ' + Math.abs(days) + 'd'; }
+      else if (days === 0) { marco = 'T-0'; icon = '🚨'; color = 'var(--uc-red)'; tituloPrefix = 'Vence HOJE'; }
+      else if (days === 1) { marco = 'T-1'; icon = '⚠'; color = 'var(--uc-red)'; tituloPrefix = 'Vence AMANHÃ'; }
+      else if (days === 2) { marco = 'T-2'; icon = '⏰'; color = 'var(--uc-amber)'; tituloPrefix = 'Vence em 2 dias'; }
+      else if (days === 3) { marco = 'T-3'; icon = '⏰'; color = 'var(--uc-amber)'; tituloPrefix = 'Vence em 3 dias'; }
+      else if (days >= 4 && days <= 7) { marco = 'T-7'; icon = '⏰'; color = 'var(--uc-green)'; tituloPrefix = 'Vence em ' + days + ' dias'; }
+      if (!marco) return;
+      items.push({
+        id: 'prazo:' + d.id + ':' + marco,
+        ts: dl.getTime(),
+        icon, color,
+        titulo: tituloPrefix + ' · ' + (d.description || d.type || 'Prazo'),
+        msg: (proc?.name || '—') + (proc?.cnj ? ' · ' + proc.cnj : ''),
+        link: () => proc && navigate('process', { currentProcessId: proc.id }),
+        tipo: 'prazo'
+      });
+    });
+
+    // Compromissos: marcos T-1 e T-0 dos meus compromissos
+    (compromissosAll || []).forEach(c => {
+      if (c.status === 'cancelado' || c.status === 'realizado') return;
+      if (c.responsavel !== meuNome && !(c.participantes || []).includes(meuNome)) return;
+      if (!c.dataHoraInicio) return;
+      const inicio = new Date(c.dataHoraInicio);
+      const inicioDia = new Date(inicio); inicioDia.setHours(0,0,0,0);
+      const days = Math.ceil((inicioDia - today) / 86400000);
+      let marco = null, icon = '📅', color = 'var(--uc-graphite)', tituloPrefix = '';
+      if (days === 0) { marco = 'T-0'; icon = '📅'; color = 'var(--uc-red)'; tituloPrefix = 'HOJE'; }
+      else if (days === 1) { marco = 'T-1'; icon = '📅'; color = 'var(--uc-amber)'; tituloPrefix = 'AMANHÃ'; }
+      else if (days === -1) { marco = 'T+1'; icon = '📅'; color = 'var(--uc-warm-gray)'; tituloPrefix = 'ONTEM (sem marcação)'; }
+      if (!marco) return;
+      const meta = _agTipoMeta(c.tipo);
+      const hora = inicio.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+      items.push({
+        id: 'compromisso:' + c.id + ':' + marco,
+        ts: inicio.getTime(),
+        icon: meta.icon || icon, color,
+        titulo: tituloPrefix + ' · ' + (c.titulo || meta.label),
+        msg: hora + (c.local ? ' · ' + c.local : ''),
+        link: () => navigate('agenda'),
+        tipo: 'compromisso'
+      });
+    });
+
+    // Follow-ups: próximaAção vencida (data ≤ hoje, não-feita)
+    const hojeISO = today.toISOString().slice(0, 10);
+    (comunicacoesAll || []).forEach(c => {
+      if (!c.proximaAcao || c.proximaAcaoFeita) return;
+      if (!c.proximaAcaoData || c.proximaAcaoData > hojeISO) return;
+      const dataPx = new Date(c.proximaAcaoData + 'T12:00:00');
+      const days = Math.ceil((dataPx.getTime() - ms) / 86400000);
+      items.push({
+        id: 'followup:' + c.id,
+        ts: dataPx.getTime(),
+        icon: '🔔', color: 'var(--uc-amber)',
+        titulo: 'Follow-up: ' + (c.proximaAcao || '').slice(0, 60),
+        msg: 'agendado pra ' + c.proximaAcaoData + (days < 0 ? ' · há ' + Math.abs(days) + 'd' : ' · HOJE'),
+        link: () => c.clienteId && navigate('clienteDetalhe', { currentClienteId: c.clienteId }),
+        tipo: 'followup'
+      });
+    });
+
+    // Parcelas de honorário vencendo (próximos 3 dias OU vencidas até 7d)
+    (honorariosAll || []).forEach(h => {
+      (h.parcelas || []).forEach(p => {
+        if (p.status === 'pago' || !p.vencimento) return;
+        const venc = new Date(p.vencimento + 'T12:00:00');
+        const days = Math.ceil((venc - today) / 86400000);
+        if (days < -7 || days > 3) return;
+        const procsCob = (h.processosCobertos || []).concat(h.processoId ? [h.processoId] : []);
+        const ehMeu = procsCob.some(pid => procsById[pid]?.advogadoResponsavel === meuNome);
+        if (!ehMeu) return;
+        const tituloPrefix = days < 0 ? 'Parcela vencida há ' + Math.abs(days) + 'd'
+                            : days === 0 ? 'Parcela vence HOJE'
+                            : 'Parcela vence em ' + days + 'd';
+        items.push({
+          id: 'parcela:' + h.id + ':' + p.numero,
+          ts: venc.getTime(),
+          icon: '💰', color: days < 0 || days === 0 ? 'var(--uc-red)' : 'var(--uc-amber)',
+          titulo: tituloPrefix,
+          msg: (h.clienteNome || '—') + ' · parc ' + p.numero + ' · ' + brl(p.valor),
+          link: () => h.clienteId && navigate('clienteDetalhe', { currentClienteId: h.clienteId }),
+          tipo: 'parcela'
+        });
+      });
+    });
+
+  } catch (e) {
+    console.warn('[notificacoes] erro ao computar:', e);
+  }
+
+  // Sort por ts asc (mais antigo primeiro = mais urgente no caso de vencidos)
+  // Mas pra timeline melhor: vencidos primeiro (asc por ts), depois futuro
+  items.sort((a, b) => a.ts - b.ts);
+  return items;
+}
+
+async function _renderSino() {
+  const items = await _computarNotificacoesInApp();
+  state._notifItems = items;
+  const lidas = _lerLidas();
+  const naoLidas = items.filter(it => !lidas[it.id]).length;
+  const bell = document.getElementById('ucBell');
+  const badge = document.getElementById('ucBellBadge');
+  if (!bell || !badge) return;
+  // Mostra sino só se há advogado logado válido
+  const meuNome = defaultAdvogado((window.UC_Auth?.getUser?.() || {}).email || '');
+  if (meuNome) bell.classList.remove('hidden'); else bell.classList.add('hidden');
+  if (naoLidas > 0) {
+    badge.textContent = naoLidas > 99 ? '99+' : String(naoLidas);
+    badge.classList.remove('hidden');
+  } else {
+    badge.classList.add('hidden');
+  }
+  // Re-render do panel se aberto
+  const panel = document.getElementById('ucBellPanel');
+  if (panel && !panel.classList.contains('hidden')) _renderSinoPanel();
+}
+
+function _renderSinoPanel() {
+  const list = document.getElementById('ucBellList');
+  if (!list) return;
+  const items = state._notifItems || [];
+  const lidas = _lerLidas();
+
+  if (items.length === 0) {
+    list.innerHTML = '<div class="uc-bell-empty"><p style="font-size: 32px; margin: 0 0 6px;">✓</p>Tudo em dia! Sem notificações.</div>';
+    return;
+  }
+
+  list.innerHTML = items.map(it => {
+    const lida = !!lidas[it.id];
+    const dataLabel = new Date(it.ts).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' });
+    return `
+      <div class="uc-bell-item ${lida ? '' : 'unread'}" data-id="${it.id}" onclick="_clickNotif('${it.id}')">
+        <div class="uc-bell-item-icon" style="color: ${it.color};">${it.icon}</div>
+        <div class="uc-bell-item-body">
+          <p class="uc-bell-item-title">${escapeHtml(it.titulo)}</p>
+          <p class="uc-bell-item-msg">${escapeHtml(it.msg || '')}</p>
+          <span class="uc-bell-item-ts">${escapeHtml(dataLabel)}</span>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+function _clickNotif(id) {
+  const items = state._notifItems || [];
+  const it = items.find(x => x.id === id);
+  if (!it) return;
+  _marcarNotifLida(id);
+  _toggleNotificacoesPanel(false);
+  try { it.link?.(); } catch (e) { console.warn(e); }
+  _renderSino();
+}
+
+// Refresh do sino a cada 5min (cache do DB.getAll* tem TTL 5min, então é eficiente)
+let _ucSinoInterval = null;
+function _iniciarRefreshSino() {
+  if (_ucSinoInterval) return;
+  _renderSino().catch(err => console.warn('[sino] inicial:', err));
+  _ucSinoInterval = setInterval(() => {
+    _renderSino().catch(err => console.warn('[sino] refresh:', err));
+  }, 5 * 60 * 1000);
+}
+
 async function bootApp() {
   // Auth gate: bloqueia o app até o usuário entrar com Google e estar na allowlist.
   try {
@@ -14066,6 +14349,7 @@ async function bootApp() {
   state.settings.notificacoesAtivas = await DB.getSetting('notificacoesAtivas', true);
   applyTheme(state.settings.theme);
   _updateThemeQuickToggleLabel();
+  _iniciarRefreshSino();
 
   // Lembretes via Web Notifications (Sprint 3 Fase B.1).
   // Roda 1x agora (após state estar carregado abaixo) + a cada 15 min.
