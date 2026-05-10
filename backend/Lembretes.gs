@@ -639,6 +639,297 @@ function cron_lembretesDePrazo() {
 }
 
 // =====================================================================
+// Cron — varre parcelas de honorários e envia lembretes (Sprint A.5)
+// =====================================================================
+
+const PARCELA_MARCO_LABELS = {
+  'T-7': '💰 Parcela em ≤7 dias',
+  'T-3': '💰 Parcela em 3 dias',
+  'T-2': '⚠ Parcela em 2 dias',
+  'T-1': '🔔 Parcela vence AMANHÃ',
+  'T-0': '🔔🔔 Parcela vence HOJE',
+  'T+1': '⚠ Parcela vencida ontem'
+};
+
+const PARCELA_EMAIL_MARCOS = ['T-1', 'T-0', 'T+1'];
+
+// Calcula marco de uma parcela. Faixas exclusivas (mesmas regras dos prazos).
+function _marcoDeParcela(parcela, todayMs) {
+  if (!parcela || parcela.status === 'pago') return null;
+  if (!parcela.vencimento) return null;
+  const dl = typeof parcela.vencimento === 'number'
+    ? parcela.vencimento
+    : new Date(parcela.vencimento + 'T12:00:00').getTime();
+  const days = Math.ceil((dl - todayMs) / 86400000);
+  if (days >= 4 && days <= 7) return 'T-7';
+  if (days === 3) return 'T-3';
+  if (days === 2) return 'T-2';
+  if (days === 1) return 'T-1';
+  if (days === 0) return 'T-0';
+  if (days === -1) return 'T+1';
+  return null;
+}
+
+// Resolve destinatários para parcela:
+// - Advogado titular do primeiro processo coberto (se houver)
+// - Suplente desse processo (se houver)
+// - Sócio padrão (sempre, em marcos T-1/T-0/T+1)
+// Se honorário não tem processosCobertos: cai apenas no sócio padrão.
+function _rotearDestinatariosParcela(honorario, processos, ausencias, socio, marco, todayMs) {
+  let titular = null, suplente = null;
+  const procsCobertos = (honorario.processosCobertos || []).map(pid => processos[pid]).filter(Boolean);
+  // Se há processo legado processoId (compat) e não está em processosCobertos
+  if (!procsCobertos.length && honorario.processoId && processos[honorario.processoId]) {
+    procsCobertos.push(processos[honorario.processoId]);
+  }
+  if (procsCobertos.length) {
+    titular = procsCobertos[0].advogadoResponsavel || null;
+    suplente = procsCobertos[0].advogadoSuplente || null;
+  }
+
+  const titAus = titular ? ausencias[titular] : null;
+  const titularAusente = !!titAus &&
+    (!titAus.ate || new Date(titAus.ate + 'T23:59:59').getTime() >= todayMs);
+
+  // Reaproveita _rotearDestinatarios mas adapta lista por marco específico
+  // de parcela (mesmos marcos T-7..T+1 dos prazos).
+  return _rotearDestinatarios(titular, suplente, socio, marco, titularAusente);
+}
+
+/**
+ * Monta corpo HTML do email de parcela (similar ao de prazo).
+ */
+function _montarEmailParcela(marco, honorario, parcela, processosCobertos) {
+  const labels = {
+    'T-7': 'Parcela em até 7 dias',
+    'T-3': 'Parcela em 3 dias',
+    'T-2': 'Parcela em 2 dias',
+    'T-1': '🔔 PARCELA VENCE AMANHÃ',
+    'T-0': '🔔🔔 PARCELA VENCE HOJE',
+    'T+1': '⚠ PARCELA VENCIDA ONTEM'
+  };
+  const cores = {
+    'T-7': '#4a7c4a', 'T-3': '#b87f1c', 'T-2': '#b87f1c',
+    'T-1': '#a8472d', 'T-0': '#a8472d', 'T+1': '#a8472d'
+  };
+  const titulo = labels[marco] || marco;
+  const cor = cores[marco] || '#6b6b68';
+  const cliente = honorario.clienteNome || '—';
+  const valor = Number(parcela.valor || 0).toFixed(2).replace('.', ',');
+  const procsLabel = processosCobertos.map(p => p.cnj || p.name || '—').join(', ') || 'sem processo específico';
+  const assunto = '[' + titulo.replace(/[🔔⚠]/g, '').trim() + '] ' + cliente + ' · parcela ' +
+    parcela.numero + '/' + (honorario.parcelas?.length || 1);
+
+  const html = `
+    <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 0 auto; background: #fafaf7; padding: 24px; border-radius: 8px; border: 1px solid #e8e3d4;">
+      <div style="border-left: 4px solid ${cor}; padding-left: 16px; margin-bottom: 20px;">
+        <h1 style="margin: 0 0 6px; font-size: 22px; color: ${cor}; font-weight: 600;">${_escapeEmail(titulo)}</h1>
+        <p style="margin: 0; color: #1f1f1f; font-size: 15px; font-weight: 500;">${_escapeEmail(cliente)} — parcela ${parcela.numero}/${honorario.parcelas?.length || 1}</p>
+      </div>
+      <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px; font-size: 14px;">
+        <tr><td style="padding: 6px 0; color: #6b6b68; width: 130px;">Vencimento:</td><td style="padding: 6px 0; font-weight: 600; color: #1f1f1f;">${_escapeEmail(parcela.vencimento || '')}</td></tr>
+        <tr><td style="padding: 6px 0; color: #6b6b68;">Valor:</td><td style="padding: 6px 0; font-weight: 600; color: ${cor};">R$ ${valor}</td></tr>
+        <tr><td style="padding: 6px 0; color: #6b6b68;">Cliente:</td><td style="padding: 6px 0;">${_escapeEmail(cliente)}</td></tr>
+        <tr><td style="padding: 6px 0; color: #6b6b68;">Tipo:</td><td style="padding: 6px 0;">${_escapeEmail(honorario.tipoHonorario || 'fixo')}</td></tr>
+        <tr><td style="padding: 6px 0; color: #6b6b68;">Processo(s):</td><td style="padding: 6px 0; font-size: 12px;">${_escapeEmail(procsLabel)}</td></tr>
+        ${honorario.observacoes ? `<tr><td style="padding: 6px 0; color: #6b6b68; vertical-align: top;">Obs:</td><td style="padding: 6px 0; color: #6b6b68; font-size: 12px;">${_escapeEmail(honorario.observacoes)}</td></tr>` : ''}
+      </table>
+      <a href="https://eduardourany-dot.github.io/uc-juridico/#cliente/${_escapeEmail(honorario.clienteId || '')}" style="display: inline-block; background: #8a6f3d; color: white; padding: 12px 24px; text-decoration: none; border-radius: 4px; font-weight: 600; font-size: 14px;">Abrir cliente no UC Jurídico →</a>
+      <p style="color: #6b6b68; font-size: 12px; margin-top: 28px; padding-top: 16px; border-top: 1px solid #e8e3d4;">
+        Lembrete automático sobre parcela de honorário. Confirme o pagamento ou marque a parcela como paga no app pra parar de receber este lembrete.
+      </p>
+      <p style="color: #9b9b96; font-size: 11px; margin-top: 12px; text-align: center;">
+        UC Jurídico · Urany de Castro Advocacia · 30 anos
+      </p>
+    </div>
+  `;
+  return { assunto, html };
+}
+
+/**
+ * Trigger principal de parcelas. Chame paralelo ao cron_lembretesDePrazo
+ * (ou crie segundo trigger time-driven). Idempotente via parcela.notificado.
+ */
+function cron_lembretesDeParcelas() {
+  const startTime = Date.now();
+  const today = new Date(); today.setHours(0,0,0,0);
+  const todayMs = today.getTime();
+
+  // Lista todos os honorários (escritório tem dezenas, não centenas — list é OK)
+  const honorarios = _firestoreList('honorarios');
+  if (honorarios.length === 0) {
+    Logger.log('cron_lembretesDeParcelas: nenhum honorário cadastrado');
+    return { honorarios: 0, processados: 0, enviados: 0, erros: 0, elapsed: Date.now() - startTime };
+  }
+
+  // Coleta processoIds únicos (legado + processosCobertos)
+  const procIds = {};
+  honorarios.forEach(h => {
+    if (h.processoId) procIds[h.processoId] = true;
+    (h.processosCobertos || []).forEach(pid => { if (pid) procIds[pid] = true; });
+  });
+  const processos = {};
+  for (const pid of Object.keys(procIds)) {
+    try {
+      const proc = _firestoreGet('processos/' + pid);
+      if (proc) processos[pid] = proc;
+    } catch (e) {
+      Logger.log('Falha ao buscar processo ' + pid + ': ' + e.message);
+    }
+  }
+
+  const fcmTokensDoc = _firestoreGet('settings/fcmTokens') || {};
+  const fcmTokens = (fcmTokensDoc && fcmTokensDoc.value) || {};
+  const ausenciasDoc = _firestoreGet('settings/advogadosAusencias') || {};
+  const ausencias = (ausenciasDoc && ausenciasDoc.value) || {};
+  const socioDoc = _firestoreGet('settings/socioPadraoNome') || {};
+  const socio = (socioDoc && socioDoc.value) || null;
+
+  let processados = 0, enviados = 0, erros = 0, ignorados = 0, semCobertura = 0;
+  let tokensRemovidos = false;
+
+  for (const h of honorarios) {
+    let alterouHonorario = false;
+    const parcelas = h.parcelas || [];
+    if (!parcelas.length) { ignorados++; continue; }
+
+    const procsCobertos = (h.processosCobertos || []).map(pid => processos[pid]).filter(Boolean);
+    if (!procsCobertos.length && h.processoId && processos[h.processoId]) {
+      procsCobertos.push(processos[h.processoId]);
+    }
+
+    for (const parc of parcelas) {
+      const marco = _marcoDeParcela(parc, todayMs);
+      if (!marco) continue;
+
+      const destinatariosNomes = _rotearDestinatariosParcela(h, processos, ausencias, socio, marco, todayMs);
+      if (!destinatariosNomes.length) { semCobertura++; continue; }
+
+      const notificado = parc.notificado || {};
+      notificado[marco] = notificado[marco] || {};
+
+      let alterouParcela = false;
+      const enviarEmailNesteMarco = PARCELA_EMAIL_MARCOS.indexOf(marco) >= 0;
+
+      for (const nome of destinatariosNomes) {
+        const email = NOME_EMAIL_MAP[nome];
+        if (!email) continue;
+        if (notificado[marco][email]) continue;  // anti-spam
+
+        let pushOk = false, emailOk = false;
+        const tokenInfo = fcmTokens[email];
+        const procPrincipal = procsCobertos[0];
+
+        // Push FCM
+        if (tokenInfo && tokenInfo.token) {
+          processados++;
+          try {
+            const title = PARCELA_MARCO_LABELS[marco] || ('Parcela ' + marco);
+            const body = (h.clienteNome || '—') + ' · parcela ' + parc.numero + '/' + parcelas.length +
+              ' · R$ ' + Number(parc.valor || 0).toFixed(2).replace('.', ',');
+            const url = 'https://eduardourany-dot.github.io/uc-juridico/#cliente/' + (h.clienteId || '');
+            const requireInteraction = ['T-1','T-0','T+1'].indexOf(marco) >= 0 ? 'true' : 'false';
+            const r = enviarFcmPush(tokenInfo.token, title, body, {
+              tag: 'parcela-' + h.id + '-' + parc.numero + '-' + marco,
+              url: url,
+              requireInteraction: requireInteraction,
+              clienteId: h.clienteId || '',
+              honorarioId: h.id,
+              parcelaNumero: String(parc.numero),
+              marco: marco
+            });
+            if (r.ok) {
+              pushOk = true;
+            } else {
+              erros++;
+              Logger.log('FCM parcela falha pra ' + email + ' marco ' + marco + ': ' + r.code + ' ' + r.response);
+              if (r.code === 404 || (r.code === 400 && /UNREGISTERED|INVALID_ARGUMENT|registration/i.test(r.response))) {
+                delete fcmTokens[email];
+                tokensRemovidos = true;
+              }
+            }
+          } catch (e) {
+            erros++;
+            Logger.log('FCM parcela exceção ' + email + ' ' + marco + ': ' + e.message);
+          }
+        }
+
+        // Email (marcos críticos OU fallback se push não rolou)
+        if (enviarEmailNesteMarco || (!pushOk && !tokenInfo)) {
+          try {
+            const conteudo = _montarEmailParcela(marco, h, parc, procsCobertos);
+            const r = enviarEmail(email, conteudo.assunto, conteudo.html);
+            if (r.ok) {
+              emailOk = true;
+            } else {
+              erros++;
+              Logger.log('Email parcela falha pra ' + email + ' ' + marco + ': ' + r.error);
+            }
+          } catch (e) {
+            erros++;
+            Logger.log('Email parcela exceção ' + email + ' ' + marco + ': ' + e.message);
+          }
+        }
+
+        if (pushOk || emailOk) {
+          notificado[marco][email] = { at: Date.now(), push: pushOk, email: emailOk };
+          alterouParcela = true;
+          enviados++;
+        }
+      }
+
+      if (alterouParcela) {
+        parc.notificado = notificado;
+        alterouHonorario = true;
+      }
+    }
+
+    if (alterouHonorario) {
+      try {
+        _firestoreUpdate('honorarios/' + h._docId, { parcelas: parcelas, updatedAt: Date.now() });
+      } catch (e) {
+        Logger.log('update honorário ' + h._docId + ' falhou: ' + e.message);
+      }
+    }
+  }
+
+  if (tokensRemovidos) {
+    try {
+      _firestoreUpdate('settings/fcmTokens', { value: fcmTokens, updatedAt: Date.now() });
+    } catch (e) {
+      Logger.log('cleanup fcmTokens (parcelas) falhou: ' + e.message);
+    }
+  }
+
+  const elapsed = Date.now() - startTime;
+  const summary = 'cron_lembretesDeParcelas: honorarios=' + honorarios.length +
+    ' processados=' + processados +
+    ' enviados=' + enviados +
+    ' erros=' + erros +
+    ' ignorados=' + ignorados +
+    ' semCobertura=' + semCobertura +
+    ' elapsed=' + elapsed + 'ms';
+  Logger.log(summary);
+  return { honorarios: honorarios.length, processados, enviados, erros, ignorados, semCobertura, elapsed };
+}
+
+/**
+ * Cron unificado — chama prazos + parcelas em sequência.
+ * Use ESTE como trigger time-driven (substituindo o cron_lembretesDePrazo
+ * antigo, que continua existindo pra debug isolado).
+ */
+function cron_lembretesUnificado() {
+  Logger.log('=== cron_lembretesUnificado iniciando ===');
+  let resPrazos = null, resParcelas = null;
+  try { resPrazos = cron_lembretesDePrazo(); }
+  catch (e) { Logger.log('cron_lembretesDePrazo erro: ' + e.message); }
+  try { resParcelas = cron_lembretesDeParcelas(); }
+  catch (e) { Logger.log('cron_lembretesDeParcelas erro: ' + e.message); }
+  Logger.log('=== cron_lembretesUnificado concluído ===');
+  return { prazos: resPrazos, parcelas: resParcelas };
+}
+
+// =====================================================================
 // Funções de teste manual
 // =====================================================================
 
@@ -690,6 +981,59 @@ function _testarFcmEnvio() {
     url: 'https://eduardourany-dot.github.io/uc-juridico/'
   });
   Logger.log(JSON.stringify(r, null, 2));
+}
+
+// Preview de parcelas que entrariam no próximo cron (sem enviar nada).
+function _previewLembretesDeParcelas() {
+  const today = new Date(); today.setHours(0,0,0,0);
+  const todayMs = today.getTime();
+  const honorarios = _firestoreList('honorarios');
+  const procIds = {};
+  honorarios.forEach(h => {
+    if (h.processoId) procIds[h.processoId] = true;
+    (h.processosCobertos || []).forEach(pid => { if (pid) procIds[pid] = true; });
+  });
+  const processos = {};
+  for (const pid of Object.keys(procIds)) {
+    try { const proc = _firestoreGet('processos/' + pid); if (proc) processos[pid] = proc; } catch(_) {}
+  }
+  const ausenciasDoc = _firestoreGet('settings/advogadosAusencias') || {};
+  const ausencias = (ausenciasDoc && ausenciasDoc.value) || {};
+  const socioDoc = _firestoreGet('settings/socioPadraoNome') || {};
+  const socio = (socioDoc && socioDoc.value) || null;
+  const tokensDoc = _firestoreGet('settings/fcmTokens') || {};
+  const fcmTokens = (tokensDoc && tokensDoc.value) || {};
+
+  const linhas = [];
+  let totalPush = 0, totalEmail = 0;
+  for (const h of honorarios) {
+    for (const parc of (h.parcelas || [])) {
+      const marco = _marcoDeParcela(parc, todayMs);
+      if (!marco) continue;
+      const dest = _rotearDestinatariosParcela(h, processos, ausencias, socio, marco, todayMs);
+      const destEmails = dest.map(n => NOME_EMAIL_MAP[n]).filter(Boolean);
+      const notificado = parc.notificado || {};
+      const pendentes = destEmails.filter(e => !(notificado[marco] && notificado[marco][e]));
+      if (pendentes.length === 0) continue;
+      const enviarEmailNesteMarco = PARCELA_EMAIL_MARCOS.indexOf(marco) >= 0;
+      const enviarPush = pendentes.filter(e => fcmTokens[e] && fcmTokens[e].token);
+      const enviarEmailLista = pendentes.filter(e => enviarEmailNesteMarco || !(fcmTokens[e] && fcmTokens[e].token));
+      totalPush += enviarPush.length;
+      totalEmail += enviarEmailLista.length;
+      linhas.push({
+        cliente: (h.clienteNome || '').slice(0, 30),
+        parcela: parc.numero + '/' + (h.parcelas?.length || 1),
+        marco: marco,
+        vence: parc.vencimento,
+        valor: parc.valor,
+        push: enviarPush.join(', ') || '—',
+        email: enviarEmailLista.join(', ') || '—'
+      });
+    }
+  }
+  Logger.log('Preview parcelas (sem enviar):');
+  Logger.log(JSON.stringify(linhas, null, 2));
+  Logger.log('Total push: ' + totalPush + ' · Total email: ' + totalEmail);
 }
 
 function _previewLembretesDePrazo() {
