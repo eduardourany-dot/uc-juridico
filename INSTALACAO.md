@@ -1,6 +1,6 @@
 # UC Jurídico — Instalação e operação
 
-Versão atual: **v6.18.0**
+Versão atual: **v6.19.0**
 URL pública: https://eduardourany-dot.github.io/uc-juridico/
 Repositório: https://github.com/eduardourany-dot/uc-juridico
 
@@ -203,9 +203,11 @@ Verificar:
 | v6.15 | ✅ entregue | Sprint 3 C — email Gmail Workspace nos marcos críticos (T-1/T-0/T+1) |
 | v6.16 | ✅ entregue | Módulo Financeiro A.1 — Bancos + Transações + Visão Geral |
 | v6.17 | ✅ entregue | Módulo Financeiro A.2 — Cartões + Categorias com orçamento + filtros avançados |
-| v6.18 | ✅ em produção | **Módulo Financeiro A.3** — Honorários parcelados + integração com Processos (aba dedicada) |
-| **v6.19** | **próxima** | Módulo Financeiro A.4 — Recorrências + Balancete + exportações CSV |
-| v6.20+ | planejado | A.5 (Push parcela vencendo) → CRM clientes → Agenda unificada |
+| v6.18 | ✅ entregue | Módulo Financeiro A.3 — Honorários parcelados + integração com Processos |
+| v6.19 | ✅ em produção | **Sprint Cli.1** — Cliente vira entidade dedicada (rota /clientes + CRUD + migração lazy de processos) — briefing em [docs/BRIEFING_Clientes.md](docs/BRIEFING_Clientes.md) |
+| **v6.20** | **próxima** | Sprint Cli.2 — refator honorários (clienteId + processosCobertos[]) + migração lazy |
+| v6.21 | planejado | Cli.3 — aba "Cliente" no processo + dashboard /clientes/{id} |
+| v6.22+ | planejado | Retomada Financeiro A.4 (Recorrências + Balancete) → A.5 → Agenda unificada |
 | v7.x | planejado | Módulo Petições com Claude API (briefing em [docs/BRIEFING_Peticoes.md](docs/BRIEFING_Peticoes.md)) |
 
 Pendências menores:

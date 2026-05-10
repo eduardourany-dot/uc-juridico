@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.18.0 (Módulo Financeiro Sprint A.3: honorários parcelados + integração com Processos)
-const CACHE_NAME = 'uc-juridico-v6-18-0';
+// Service Worker — UC Jurídico v6.19.0 (Sprint Cli.1: Cliente vira entidade dedicada + migração lazy)
+const CACHE_NAME = 'uc-juridico-v6-19-0';
 const APP_SHELL = [
   './',
   './index.html',

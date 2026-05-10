@@ -235,6 +235,11 @@ body{background:var(--uc-paper);color:var(--uc-graphite);font-size:15px;-webkit-
       <span>Processos</span>
       <span id="navProcessCount" class="nav-badge gray hidden">0</span>
     </a>
+    <a class="nav-item" data-route="clientes">
+      <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"/></svg>
+      <span>Clientes</span>
+      <span id="navClienteCount" class="nav-badge gray hidden">0</span>
+    </a>
     <a class="nav-item" data-route="deadlines">
       <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
       <span>Prazos</span>
@@ -263,7 +268,7 @@ body{background:var(--uc-paper);color:var(--uc-graphite);font-size:15px;-webkit-
 
     <div style="margin-top:auto;padding:16px 20px;border-top:1px solid var(--uc-line-soft);font-size:11px;color:var(--uc-warm-gray);text-align:center;">
       <p class="smallcaps font-serif" style="margin:0 0 4px;">Urany de Castro · 30 anos</p>
-      <p style="margin:0;">100% local · v6.18.0</p>
+      <p style="margin:0;">100% local · v6.19.0</p>
     </div>
   </aside>
 
@@ -456,6 +461,11 @@ const DB = {
     await dbPromise('history', 'readwrite', s => s.add({ timestamp: Date.now(), action, data }));
   },
 
+  // ====== Clientes (stub IndexedDB — sobrescrito por UC_RemoteDB no boot) ======
+  async getAllClientes() { return []; },
+  async saveCliente(c) { return c; },
+  async deleteCliente(_id) {},
+
   // ====== Módulo Financeiro (stubs IndexedDB — sobrescritos por UC_RemoteDB no boot) ======
   async getAllBancos() { return []; },
   async saveBanco(b) { return b; },
@@ -526,6 +536,7 @@ const routes = {
   dashboard: renderDashboard,
   processes: renderProcessList,
   process: renderProcessDetail,
+  clientes: renderClientesList,
   deadlines: renderDeadlines,
   financeiro: renderFinanceiro,
   tools: renderTools,
@@ -859,6 +870,297 @@ function updateNavBadges() {
   // Banner sticky no topo — única atualização de UI fora do conteúdo principal.
   // Roda em try/catch porque o banner é UX, não funcionalidade.
   try { renderBannerPrazos(); } catch (err) { console.warn('renderBannerPrazos:', err); }
+}
+
+// ====================================================================
+// === MÓDULO CLIENTES (v6.19+, Sprint Cli.1) =========================
+// ====================================================================
+
+// Normaliza nome pra dedup (trim + lowercase + collapse de espaços)
+function _normalizeNomeCliente(s) {
+  return String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+// Busca cliente em cache por nome (case-insensitive). Retorna null se não achar.
+function _findClienteByNome(clientes, nome) {
+  if (!nome) return null;
+  const norm = _normalizeNomeCliente(nome);
+  return clientes.find(c => _normalizeNomeCliente(c.nome) === norm) || null;
+}
+
+// Migração lazy: se processo tem `client` string mas não tem `clienteId`,
+// cria/vincula cliente correspondente. Idempotente. Roda em background.
+async function _migrarProcessosParaClientes() {
+  try {
+    const processos = await DB.getAllProcesses();
+    const semCliente = processos.filter(p => p.client && !p.clienteId);
+    if (semCliente.length === 0) return 0;
+
+    const clientes = await DB.getAllClientes();
+    let criados = 0, vinculados = 0;
+    const cacheNovo = clientes.slice();
+
+    for (const p of semCliente) {
+      let cli = _findClienteByNome(cacheNovo, p.client);
+      if (!cli) {
+        cli = {
+          id: uid(),
+          nome: p.client.trim(),
+          tipoPessoa: 'PJ',
+          cpfCnpj: p.clientDoc || null,
+          email: null,
+          telefone: p.clientContact || null,
+          endereco: null,
+          observacoes: null,
+          ativo: true,
+          createdAt: Date.now()
+        };
+        await DB.saveCliente(cli);
+        cacheNovo.push(cli);
+        criados++;
+      }
+      p.clienteId = cli.id;
+      await DB.saveProcess(p);
+      vinculados++;
+    }
+
+    if (criados > 0 || vinculados > 0) {
+      console.log(`[clientes] migração: ${criados} novo(s) cliente(s), ${vinculados} processo(s) vinculado(s)`);
+      if (typeof toast === 'function' && (criados > 0)) {
+        toast(`${criados} cliente(s) criados pela migração`, `${vinculados} processo(s) vinculado(s)`, 'success');
+      }
+    }
+    return criados;
+  } catch (e) {
+    console.warn('Migração de clientes falhou', e);
+    return 0;
+  }
+}
+
+async function renderClientesList() {
+  // Migra lazy antes de renderizar (1ª vez popula clientes a partir dos processos)
+  await _migrarProcessosParaClientes();
+
+  const [clientes, processos, honorarios] = await Promise.all([
+    DB.getAllClientes(), DB.getAllProcesses(), DB.getAllHonorarios()
+  ]);
+
+  // Atualiza badge nav
+  const navBadge = $('navClienteCount');
+  if (navBadge) {
+    if (clientes.length > 0) { navBadge.textContent = clientes.length; navBadge.classList.remove('hidden'); }
+    else navBadge.classList.add('hidden');
+  }
+
+  state._cliFiltro = state._cliFiltro || { busca: '', tipoPessoa: 'todos', ativo: 'todos' };
+  const f = state._cliFiltro;
+
+  let filtrados = clientes.slice();
+  if (f.tipoPessoa !== 'todos') filtrados = filtrados.filter(c => (c.tipoPessoa || 'PJ') === f.tipoPessoa);
+  if (f.ativo === 'ativos')   filtrados = filtrados.filter(c => c.ativo !== false);
+  if (f.ativo === 'inativos') filtrados = filtrados.filter(c => c.ativo === false);
+  if (f.busca && f.busca.trim()) {
+    const q = _normalizeNomeCliente(f.busca);
+    filtrados = filtrados.filter(c =>
+      _normalizeNomeCliente(c.nome).includes(q) ||
+      String(c.cpfCnpj || '').toLowerCase().includes(q) ||
+      String(c.email || '').toLowerCase().includes(q)
+    );
+  }
+  filtrados.sort((a, b) => (a.nome || '').localeCompare(b.nome || '', 'pt-BR'));
+
+  // Stats por cliente
+  const procsByCliente = {};
+  processos.forEach(p => { if (p.clienteId) (procsByCliente[p.clienteId] = procsByCliente[p.clienteId] || []).push(p); });
+  const honsByCliente = {};
+  honorarios.forEach(h => {
+    const cliId = h.clienteId || (h.processoId && processos.find(p => p.id === h.processoId)?.clienteId);
+    if (cliId) (honsByCliente[cliId] = honsByCliente[cliId] || []).push(h);
+  });
+
+  $('appContent').innerHTML = `
+    <div class="page-header">
+      <div>
+        <h1 class="page-title"><span class="smallcaps-prefix">Clientes</span></h1>
+        <p class="page-subtitle">${clientes.length} cliente(s) cadastrado(s)${filtrados.length !== clientes.length ? ' · ' + filtrados.length + ' após filtro' : ''}</p>
+      </div>
+      <div class="flex gap-2">
+        <button class="btn btn-primary" onclick="novoClienteFlow()">+ Novo cliente</button>
+      </div>
+    </div>
+
+    <div class="card mb-3" style="padding: 10px;">
+      <div style="display: grid; grid-template-columns: 1fr 180px 180px; gap: 8px; align-items: end;">
+        <div>
+          <label class="label" style="font-size: 11px; margin-bottom: 4px;">Buscar (nome, CPF/CNPJ, email)</label>
+          <input type="text" class="input" value="${escapeHtml(f.busca || '')}" placeholder="Ex: Pérola · 12.345.678/0001 · contato@..." oninput="_setCliFiltroDebounced('busca', this.value)">
+        </div>
+        <div>
+          <label class="label" style="font-size: 11px; margin-bottom: 4px;">Tipo</label>
+          <select class="select" onchange="_setCliFiltro('tipoPessoa', this.value)">
+            <option value="todos" ${f.tipoPessoa === 'todos' ? 'selected' : ''}>Todos</option>
+            <option value="PJ" ${f.tipoPessoa === 'PJ' ? 'selected' : ''}>PJ</option>
+            <option value="PF" ${f.tipoPessoa === 'PF' ? 'selected' : ''}>PF</option>
+          </select>
+        </div>
+        <div>
+          <label class="label" style="font-size: 11px; margin-bottom: 4px;">Status</label>
+          <select class="select" onchange="_setCliFiltro('ativo', this.value)">
+            <option value="todos" ${f.ativo === 'todos' ? 'selected' : ''}>Todos</option>
+            <option value="ativos" ${f.ativo === 'ativos' ? 'selected' : ''}>Ativos</option>
+            <option value="inativos" ${f.ativo === 'inativos' ? 'selected' : ''}>Inativos</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    ${filtrados.length === 0 ? `
+      <div class="empty-state">
+        <p class="empty-state-msg">${clientes.length === 0 ? 'Nenhum cliente cadastrado. Adicione o primeiro ou cadastre um processo (que criará o cliente automaticamente pela migração).' : 'Nenhum cliente com esses filtros.'}</p>
+      </div>
+    ` : `
+      <div style="overflow-x: auto;">
+        <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
+          <thead>
+            <tr style="border-bottom: 1px solid var(--uc-line); text-align: left;">
+              <th style="padding: 8px 6px; color: var(--uc-warm-gray); font-weight: 500;">Nome</th>
+              <th style="padding: 8px 6px; color: var(--uc-warm-gray); font-weight: 500;">Tipo</th>
+              <th style="padding: 8px 6px; color: var(--uc-warm-gray); font-weight: 500;">CPF/CNPJ</th>
+              <th style="padding: 8px 6px; color: var(--uc-warm-gray); font-weight: 500;">Contato</th>
+              <th style="padding: 8px 6px; color: var(--uc-warm-gray); font-weight: 500; text-align: center;">Processos</th>
+              <th style="padding: 8px 6px; color: var(--uc-warm-gray); font-weight: 500; text-align: center;">Honorários</th>
+              <th style="padding: 8px 6px;"></th>
+            </tr>
+          </thead>
+          <tbody>
+            ${filtrados.map(c => {
+              const procs = procsByCliente[c.id] || [];
+              const hons = honsByCliente[c.id] || [];
+              const inativo = c.ativo === false;
+              return `
+                <tr style="border-bottom: 1px solid var(--uc-line-soft); ${inativo ? 'opacity: 0.5;' : ''}">
+                  <td style="padding: 8px 6px;"><strong>${escapeHtml(c.nome)}</strong>${inativo ? ' <span class="badge badge-gray" style="font-size: 9px;">inativo</span>' : ''}</td>
+                  <td style="padding: 8px 6px;"><span class="badge ${(c.tipoPessoa || 'PJ') === 'PJ' ? 'badge-amber' : 'badge-green'}" style="font-size: 10px;">${c.tipoPessoa || 'PJ'}</span></td>
+                  <td style="padding: 8px 6px;">${escapeHtml(c.cpfCnpj || '—')}</td>
+                  <td style="padding: 8px 6px; font-size: 12px;">
+                    ${c.email ? `<div>${escapeHtml(c.email)}</div>` : ''}
+                    ${c.telefone ? `<div style="color: var(--uc-warm-gray);">${escapeHtml(c.telefone)}</div>` : ''}
+                    ${!c.email && !c.telefone ? '—' : ''}
+                  </td>
+                  <td style="padding: 8px 6px; text-align: center;">${procs.length || '—'}</td>
+                  <td style="padding: 8px 6px; text-align: center;">${hons.length || '—'}</td>
+                  <td style="padding: 8px 6px; text-align: right; white-space: nowrap;">
+                    <button class="btn btn-ghost btn-sm" onclick="editarCliente('${c.id}')" title="Editar">✎</button>
+                    <button class="btn btn-ghost btn-sm" onclick="removerCliente('${c.id}')" title="Remover">🗑</button>
+                  </td>
+                </tr>
+              `;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>
+    `}
+  `;
+}
+
+function _setCliFiltro(campo, valor) {
+  state._cliFiltro = state._cliFiltro || {};
+  state._cliFiltro[campo] = valor;
+  renderClientesList();
+}
+let _cliFiltroDebounce = null;
+function _setCliFiltroDebounced(campo, valor) {
+  state._cliFiltro = state._cliFiltro || {};
+  state._cliFiltro[campo] = valor;
+  clearTimeout(_cliFiltroDebounce);
+  _cliFiltroDebounce = setTimeout(() => renderClientesList(), 300);
+}
+
+// Validação simples de CPF/CNPJ (formato, não dígitos verificadores)
+function _validarCpfCnpj(s) {
+  if (!s) return true;
+  const limpo = String(s).replace(/\D/g, '');
+  return limpo.length === 11 || limpo.length === 14;
+}
+function _validarEmail(s) {
+  if (!s) return true;
+  return /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(s);
+}
+
+async function novoClienteFlow() {
+  return _formClienteFlow(null);
+}
+async function editarCliente(id) {
+  const clientes = await DB.getAllClientes();
+  const c = clientes.find(x => x.id === id);
+  if (!c) return;
+  return _formClienteFlow(c);
+}
+
+async function _formClienteFlow(clienteAtual) {
+  const isEdit = !!clienteAtual;
+  const r = await showModal(isEdit ? 'Editar cliente' : 'Novo cliente', [
+    { label: 'Nome (razão social ou nome completo)', default: clienteAtual?.nome || '' },
+    { label: 'Tipo de pessoa', type: 'select', default: clienteAtual?.tipoPessoa || 'PJ', options: [
+      { value: 'PJ', label: 'Pessoa Jurídica' },
+      { value: 'PF', label: 'Pessoa Física' }
+    ]},
+    { label: 'CPF/CNPJ', default: clienteAtual?.cpfCnpj || '', placeholder: 'opcional, só dígitos ou formatado' },
+    { label: 'Email', default: clienteAtual?.email || '', placeholder: 'opcional' },
+    { label: 'Telefone', default: clienteAtual?.telefone || '', placeholder: 'opcional' },
+    { label: 'Endereço', default: clienteAtual?.endereco || '', placeholder: 'opcional' },
+    { label: 'Observações', default: clienteAtual?.observacoes || '' },
+    { label: 'Ativo', type: 'checkbox', default: clienteAtual ? clienteAtual.ativo !== false : true }
+  ], { confirmLabel: isEdit ? 'Salvar' : 'Cadastrar' });
+  if (!r) return;
+  const [nome, tipoPessoa, cpfCnpj, email, telefone, endereco, observacoes, ativo] = r;
+
+  if (!nome?.trim()) { toast('Nome obrigatório', '', 'error'); return; }
+  if (!_validarCpfCnpj(cpfCnpj)) { toast('CPF/CNPJ inválido', 'Use 11 dígitos pra CPF ou 14 pra CNPJ.', 'error'); return; }
+  if (!_validarEmail(email)) { toast('Email inválido', '', 'error'); return; }
+
+  // Dedup por nome (case-insensitive). Se editando, ignora o próprio.
+  const clientes = await DB.getAllClientes();
+  const dup = _findClienteByNome(clientes, nome.trim());
+  if (dup && (!isEdit || dup.id !== clienteAtual.id)) {
+    const ok = await confirmDialog('Cliente com nome similar já existe',
+      `Já existe um cliente "${escapeHtml(dup.nome)}". Cadastrar mesmo assim como duplicata?`, true);
+    if (!ok) return;
+  }
+
+  const cliente = {
+    id: clienteAtual?.id || uid(),
+    nome: nome.trim(),
+    tipoPessoa: tipoPessoa || 'PJ',
+    cpfCnpj: (cpfCnpj || '').trim() || null,
+    email: (email || '').trim() || null,
+    telefone: (telefone || '').trim() || null,
+    endereco: (endereco || '').trim() || null,
+    observacoes: (observacoes || '').trim() || null,
+    ativo: !!ativo,
+    createdAt: clienteAtual?.createdAt || Date.now()
+  };
+  await DB.saveCliente(cliente);
+  toast(isEdit ? 'Cliente atualizado' : 'Cliente cadastrado', cliente.nome, 'success');
+  renderClientesList();
+}
+
+async function removerCliente(id) {
+  const [clientes, processos, honorarios] = await Promise.all([
+    DB.getAllClientes(), DB.getAllProcesses(), DB.getAllHonorarios()
+  ]);
+  const c = clientes.find(x => x.id === id);
+  if (!c) return;
+  const temProc = processos.some(p => p.clienteId === id);
+  const temHon = honorarios.some(h => h.clienteId === id);
+  if (temProc || temHon) {
+    toast('Cliente vinculado', `${temProc ? 'tem processos' : ''}${temProc && temHon ? ' e ' : ''}${temHon ? 'tem honorários' : ''}. Marque como inativo em vez de remover.`, 'error');
+    return;
+  }
+  const ok = await confirmDialog('Remover cliente?', `${escapeHtml(c.nome)} será apagado. Ação irreversível.`, true);
+  if (!ok) return;
+  await DB.deleteCliente(id);
+  renderClientesList();
 }
 
 // ====================================================================
@@ -8594,6 +8896,28 @@ async function bootApp() {
     return r;
   };
 
+  // ====== Cache Clientes (v6.19+) ======
+  const _remoteGetAllClientes = DB.getAllClientes.bind(DB);
+  const _remoteSaveCliente = DB.saveCliente.bind(DB);
+  const _remoteDeleteCliente = DB.deleteCliente.bind(DB);
+  let _cliCache = null, _cliCacheAt = 0;
+  DB.getAllClientes = async () => {
+    if (_cliCache && (Date.now() - _cliCacheAt < CACHE_MS)) return _cliCache;
+    _cliCache = await _remoteGetAllClientes();
+    _cliCacheAt = Date.now();
+    return _cliCache;
+  };
+  DB.saveCliente = async (c) => {
+    const r = await _remoteSaveCliente(c);
+    _cliCache = null; _cliCacheAt = 0;
+    return r;
+  };
+  DB.deleteCliente = async (id) => {
+    const r = await _remoteDeleteCliente(id);
+    _cliCache = null; _cliCacheAt = 0;
+    return r;
+  };
+
   // ====== Cache Financeiro (v6.16+) ======
   const _finCaches = {
     bancos: { data: null, at: 0 },
@@ -8656,6 +8980,7 @@ async function bootApp() {
   window._ucInvalidateCaches = () => {
     _procCache = null; _procCacheAt = 0;
     _deadCache = null; _deadCacheAt = 0;
+    _cliCache = null; _cliCacheAt = 0;
     _settingsCache.clear();
     _settingsCacheAt.clear();
     Object.keys(_finCaches).forEach(k => _finCacheBust(k));

@@ -60,6 +60,9 @@ service cloud.firestore {
     }
 
     // ====== Coleções de domínio ======
+    match /clientes/{id} {
+      allow read, create, update, delete: if isAllowed();
+    }
     match /processos/{id} {
       allow read, create, update, delete: if isAllowed();
     }

@@ -375,6 +375,11 @@ const RemoteDB = {
   async saveNote(n)  { return await upsert_('notas', n); },
   async deleteNote(id) { return await softDelete_('notas', id); },
 
+  // ====== Clientes (v6.19+) ======
+  async getAllClientes() { return await getAll_('clientes'); },
+  async saveCliente(c) { return await upsert_('clientes', c); },
+  async deleteCliente(id) { return await softDelete_('clientes', id); },
+
   // Jurisprudência
   async getJurisprudenceByProcess(pid) {
     return (await getAll_('jurisprudencia')).filter(j => j.processId === pid);
