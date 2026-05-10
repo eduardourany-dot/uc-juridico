@@ -268,7 +268,7 @@ body{background:var(--uc-paper);color:var(--uc-graphite);font-size:15px;-webkit-
 
     <div style="margin-top:auto;padding:16px 20px;border-top:1px solid var(--uc-line-soft);font-size:11px;color:var(--uc-warm-gray);text-align:center;">
       <p class="smallcaps font-serif" style="margin:0 0 4px;">Urany de Castro · 30 anos</p>
-      <p style="margin:0;">100% local · v6.20.0</p>
+      <p style="margin:0;">100% local · v6.21.0</p>
     </div>
   </aside>
 
@@ -538,6 +538,7 @@ const routes = {
   processes: renderProcessList,
   process: renderProcessDetail,
   clientes: renderClientesList,
+  clienteDetalhe: renderClienteDetalhe,
   deadlines: renderDeadlines,
   financeiro: renderFinanceiro,
   tools: renderTools,
@@ -553,7 +554,10 @@ function navigate(route, params = {}) {
     el.classList.toggle('active', el.dataset.route === (route === 'process' ? 'processes' : route));
   });
   // Update URL hash
-  const hash = route === 'process' ? `#process/${params.currentProcessId}` : `#${route}`;
+  let hash;
+  if (route === 'process') hash = `#process/${params.currentProcessId}`;
+  else if (route === 'clienteDetalhe') hash = `#cliente/${params.currentClienteId}`;
+  else hash = `#${route}`;
   if (location.hash !== hash) history.pushState(null, '', hash);
   // Render
   if (routes[route]) routes[route]();
@@ -565,6 +569,9 @@ function parseHash() {
   const h = location.hash.slice(1);
   if (h.startsWith('process/')) {
     return { route: 'process', currentProcessId: h.slice(8) };
+  }
+  if (h.startsWith('cliente/')) {
+    return { route: 'clienteDetalhe', currentClienteId: h.slice(8) };
   }
   return { route: h || 'dashboard' };
 }
@@ -1108,7 +1115,7 @@ async function renderClientesList() {
               const inativo = c.ativo === false;
               return `
                 <tr style="border-bottom: 1px solid var(--uc-line-soft); ${inativo ? 'opacity: 0.5;' : ''}">
-                  <td style="padding: 8px 6px;"><strong>${escapeHtml(c.nome)}</strong>${inativo ? ' <span class="badge badge-gray" style="font-size: 9px;">inativo</span>' : ''}</td>
+                  <td style="padding: 8px 6px;"><a onclick="navigate('clienteDetalhe', { currentClienteId: '${c.id}' })" style="cursor: pointer; color: var(--uc-black); font-weight: 600; text-decoration: none;" onmouseover="this.style.color='var(--uc-gold)'" onmouseout="this.style.color='var(--uc-black)'">${escapeHtml(c.nome)}</a>${inativo ? ' <span class="badge badge-gray" style="font-size: 9px;">inativo</span>' : ''}</td>
                   <td style="padding: 8px 6px;"><span class="badge ${(c.tipoPessoa || 'PJ') === 'PJ' ? 'badge-amber' : 'badge-green'}" style="font-size: 10px;">${c.tipoPessoa || 'PJ'}</span></td>
                   <td style="padding: 8px 6px;">${escapeHtml(c.cpfCnpj || '—')}</td>
                   <td style="padding: 8px 6px; font-size: 12px;">
@@ -1357,6 +1364,175 @@ async function removerCliente(id) {
   renderClientesList();
 }
 
+// ====================================================================
+// === PAGE: CLIENTE — DASHBOARD CONSOLIDADO (Cli.3) ==================
+// ====================================================================
+
+async function renderClienteDetalhe() {
+  const cid = state.currentClienteId;
+  if (!cid) { navigate('clientes'); return; }
+  const [clientes, processos, honorarios, transacoes] = await Promise.all([
+    DB.getAllClientes(), DB.getAllProcesses(), DB.getAllHonorarios(), DB.getAllTransacoes()
+  ]);
+  const cli = clientes.find(c => c.id === cid);
+  if (!cli) {
+    toast('Cliente não encontrado', '', 'error');
+    navigate('clientes');
+    return;
+  }
+
+  const meusProcs = processos.filter(p => p.clienteId === cli.id)
+    .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+  const meusHons = honorarios.filter(h => h.clienteId === cli.id)
+    .sort((a, b) => (b.createdAt || b.criadoEm || 0) - (a.createdAt || a.criadoEm || 0));
+  const minhasTrans = transacoes.filter(t => t.clienteId === cli.id || (t.honorarioId && meusHons.some(h => h.id === t.honorarioId)))
+    .sort((a, b) => (b.data || '').localeCompare(a.data || ''));
+
+  const hoje = new Date().toISOString().slice(0, 10);
+  let totalRec = 0, totalAberto = 0, totalVenc = 0, totalPrev = 0;
+  meusHons.forEach(h => {
+    const a = _agregarHonorario(h, hoje);
+    totalRec += a.recebido; totalAberto += a.emAberto; totalVenc += a.vencido; totalPrev += a.total;
+  });
+
+  const enderecoComposto = _composeEndereco(cli);
+
+  $('appContent').innerHTML = `
+    <div class="page-header">
+      <div>
+        <p class="text-xs" style="color: var(--uc-warm-gray); margin: 0 0 4px;"><a onclick="navigate('clientes')" style="cursor: pointer; color: var(--uc-warm-gray);">← Clientes</a></p>
+        <h1 class="page-title">${escapeHtml(cli.nome)}</h1>
+        <p class="page-subtitle">
+          <span class="badge ${(cli.tipoPessoa || 'PJ') === 'PJ' ? 'badge-amber' : 'badge-green'}" style="font-size: 10px;">${cli.tipoPessoa || 'PJ'}</span>
+          ${cli.cpfCnpj ? '· ' + escapeHtml(cli.cpfCnpj) : ''}
+          ${cli.ativo === false ? ' · <span style="color: var(--uc-red);">⏸ inativo</span>' : ''}
+        </p>
+      </div>
+      <div class="flex gap-2">
+        <button class="btn btn-outline" onclick="editarCliente('${cli.id}')">✎ Editar</button>
+      </div>
+    </div>
+
+    <div class="card mb-3">
+      <h3 class="font-serif text-lg font-semibold smallcaps mb-3" style="color: var(--uc-black);">Dados de contato</h3>
+      <div class="grid gap-2" style="grid-template-columns: 140px 1fr; font-size: 13px;">
+        ${cli.email ? `<div style="color: var(--uc-warm-gray);">Email:</div><div>${escapeHtml(cli.email)}</div>` : ''}
+        ${cli.telefone ? `<div style="color: var(--uc-warm-gray);">Telefone:</div><div>${escapeHtml(cli.telefone)}</div>` : ''}
+        ${enderecoComposto ? `<div style="color: var(--uc-warm-gray);">Endereço:</div><div>${escapeHtml(enderecoComposto)}</div>` : ''}
+        ${cli.observacoes ? `<div style="color: var(--uc-warm-gray);">Observações:</div><div style="white-space: pre-wrap;">${escapeHtml(cli.observacoes)}</div>` : ''}
+        <div style="color: var(--uc-warm-gray);">Cadastrado:</div><div>${formatDate(cli.createdAt)}</div>
+      </div>
+    </div>
+
+    <div class="grid gap-3 mb-3" style="grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));">
+      <div class="card"><p class="text-xs smallcaps" style="color: var(--uc-warm-gray); margin: 0 0 4px;">Processos</p><p style="font-size: 22px; font-weight: 600; margin: 0;">${meusProcs.length}</p></div>
+      <div class="card"><p class="text-xs smallcaps" style="color: var(--uc-warm-gray); margin: 0 0 4px;">Honorários</p><p style="font-size: 22px; font-weight: 600; margin: 0;">${meusHons.length}</p><p class="text-xs" style="color: var(--uc-warm-gray); margin: 2px 0 0;">total ${brl(totalPrev)}</p></div>
+      <div class="card"><p class="text-xs smallcaps" style="color: var(--uc-warm-gray); margin: 0 0 4px;">Recebido</p><p style="font-size: 22px; font-weight: 600; color: var(--uc-green); margin: 0;">${brl(totalRec)}</p></div>
+      <div class="card"><p class="text-xs smallcaps" style="color: var(--uc-warm-gray); margin: 0 0 4px;">Em aberto</p><p style="font-size: 22px; font-weight: 600; color: var(--uc-amber); margin: 0;">${brl(totalAberto)}</p></div>
+      ${totalVenc > 0 ? `<div class="card"><p class="text-xs smallcaps" style="color: var(--uc-warm-gray); margin: 0 0 4px;">Vencido</p><p style="font-size: 22px; font-weight: 600; color: var(--uc-red); margin: 0;">${brl(totalVenc)}</p></div>` : ''}
+    </div>
+
+    <div class="card mb-3">
+      <div class="flex justify-between items-center mb-3">
+        <h3 class="font-serif text-lg font-semibold smallcaps" style="color: var(--uc-black);">Processos</h3>
+        <button class="btn btn-primary btn-sm" onclick="newProcessFlow()">+ Novo processo</button>
+      </div>
+      ${meusProcs.length === 0 ? `<p class="help-text">Nenhum processo vinculado a este cliente.</p>` : `
+        <div style="overflow-x: auto;">
+          <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
+            <thead>
+              <tr style="border-bottom: 1px solid var(--uc-line); text-align: left;">
+                <th style="padding: 6px 4px; color: var(--uc-warm-gray); font-weight: 500;">Processo</th>
+                <th style="padding: 6px 4px; color: var(--uc-warm-gray); font-weight: 500;">CNJ</th>
+                <th style="padding: 6px 4px; color: var(--uc-warm-gray); font-weight: 500;">Área</th>
+                <th style="padding: 6px 4px; color: var(--uc-warm-gray); font-weight: 500;">Tribunal</th>
+                <th style="padding: 6px 4px; color: var(--uc-warm-gray); font-weight: 500;">Status</th>
+                <th style="padding: 6px 4px; color: var(--uc-warm-gray); font-weight: 500;">Atualizado</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${meusProcs.map(p => `
+                <tr style="border-bottom: 1px solid var(--uc-line-soft); cursor: pointer;" onclick="navigate('process', { currentProcessId: '${p.id}' })">
+                  <td style="padding: 8px 4px;"><strong>${escapeHtml(p.name || '—')}</strong></td>
+                  <td style="padding: 8px 4px;">${escapeHtml(p.cnj || '—')}</td>
+                  <td style="padding: 8px 4px;">${escapeHtml(p.area || '—')}</td>
+                  <td style="padding: 8px 4px;">${escapeHtml(p.court || '—')}</td>
+                  <td style="padding: 8px 4px;">${p.status === 'archived' ? '<span class="badge badge-gray" style="font-size: 9px;">arquivado</span>' : '<span class="badge badge-green" style="font-size: 9px;">ativo</span>'}</td>
+                  <td style="padding: 8px 4px; color: var(--uc-warm-gray); font-size: 11px;">${formatDate(p.updatedAt, { relative: true })}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      `}
+    </div>
+
+    <div class="card mb-3">
+      <div class="flex justify-between items-center mb-3">
+        <h3 class="font-serif text-lg font-semibold smallcaps" style="color: var(--uc-black);">Honorários</h3>
+        <button class="btn btn-primary btn-sm" onclick="novoHonorarioFlow({ clienteIdFixo: '${cli.id}' })">+ Novo honorário</button>
+      </div>
+      ${meusHons.length === 0 ? `<p class="help-text">Nenhum honorário cadastrado para este cliente.</p>` : meusHons.map(h => {
+        const procsCobertos = _processosDoHonorario(h).map(pid => processos.find(p => p.id === pid)).filter(Boolean);
+        const agg = _agregarHonorario(h, hoje);
+        return `
+          <div class="card" style="margin-bottom: 8px; padding: 12px; background: var(--uc-cream);">
+            <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 6px;">
+              <div>
+                <strong>${escapeHtml(TIPO_HONORARIO_LABEL[h.tipoHonorario] || h.tipoHonorario || 'Fixo')}</strong> · ${brl(h.valorTotal)}
+                <span style="color: var(--uc-warm-gray); font-size: 11px; margin-left: 8px;">${(h.parcelas || []).length} parcela(s)</span>
+              </div>
+              <div class="flex gap-2">
+                <button class="btn btn-ghost btn-sm" onclick="editarHonorario('${h.id}')" style="padding: 2px 8px;">✎</button>
+              </div>
+            </div>
+            <div style="font-size: 12px; color: var(--uc-warm-gray);">
+              <span>recebido <strong style="color: var(--uc-green);">${brl(agg.recebido)}</strong></span>
+              · em aberto <strong style="color: var(--uc-amber);">${brl(agg.emAberto)}</strong>
+              ${agg.vencido > 0 ? ` · <strong style="color: var(--uc-red);">vencido ${brl(agg.vencido)}</strong>` : ''}
+            </div>
+            ${procsCobertos.length > 0 ? `
+              <div style="font-size: 11px; margin-top: 4px;">
+                <span style="color: var(--uc-warm-gray);">Cobre:</span>
+                ${procsCobertos.map(p => `<a onclick="event.stopPropagation(); navigate('process', { currentProcessId: '${p.id}' })" style="cursor: pointer; color: var(--uc-gold); margin-left: 4px;">${escapeHtml(p.cnj || p.name || '—')}</a>`).join(',')}
+              </div>
+            ` : ''}
+          </div>
+        `;
+      }).join('')}
+    </div>
+
+    ${minhasTrans.length > 0 ? `
+      <div class="card mb-3">
+        <h3 class="font-serif text-lg font-semibold smallcaps mb-3" style="color: var(--uc-black);">Últimas transações</h3>
+        <div style="overflow-x: auto;">
+          <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
+            <thead>
+              <tr style="border-bottom: 1px solid var(--uc-line); text-align: left;">
+                <th style="padding: 6px 4px; color: var(--uc-warm-gray); font-weight: 500;">Data</th>
+                <th style="padding: 6px 4px; color: var(--uc-warm-gray); font-weight: 500;">Descrição</th>
+                <th style="padding: 6px 4px; color: var(--uc-warm-gray); font-weight: 500; text-align: right;">Valor</th>
+                <th style="padding: 6px 4px; color: var(--uc-warm-gray); font-weight: 500;">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${minhasTrans.slice(0, 12).map(t => `
+                <tr style="border-bottom: 1px solid var(--uc-line-soft);">
+                  <td style="padding: 6px 4px;">${formatDate(t.data)}</td>
+                  <td style="padding: 6px 4px;">${escapeHtml(t.descricao || '—')}</td>
+                  <td style="padding: 6px 4px; text-align: right; font-weight: 600; color: ${t.tipo === 'receita' ? 'var(--uc-green)' : 'var(--uc-red)'};">${t.tipo === 'receita' ? '+' : '−'}${brl(t.valor)}</td>
+                  <td style="padding: 6px 4px;">${t.status === 'realizado' ? '<span class="badge badge-green" style="font-size: 9px;">✓</span>' : '<span class="badge badge-gray" style="font-size: 9px;">previsto</span>'}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+        ${minhasTrans.length > 12 ? `<p class="help-text" style="margin-top: 6px;">+${minhasTrans.length - 12} transações · ver todas em <a onclick="navigate('financeiro')" style="color: var(--uc-gold); cursor: pointer;">Financeiro</a></p>` : ''}
+      </div>
+    ` : ''}
+  `;
+}
+
 // Limpeza em massa — apaga TODOS os clientes + desvincula clienteId de
 // todos os processos. Util quando a migração lazy criou registros que
 // não condizem com a realidade (ex.: 'A definir', strings vazias).
@@ -1516,9 +1692,18 @@ function renderProcessCard(p) {
 }
 
 async function newProcessFlow() {
+  // Pré-carrega clientes ativos pra popular o dropdown
+  const clientes = await DB.getAllClientes();
+  const clientesAtivos = clientes.filter(c => c.ativo !== false)
+    .sort((a, b) => (a.nome || '').localeCompare(b.nome || '', 'pt-BR'));
+
   return new Promise(resolve => {
     const modal = document.createElement('div');
     modal.className = 'modal-backdrop';
+    const cliOptionsHtml = [
+      '<option value="">— escolher cliente —</option>',
+      ...clientesAtivos.map(c => `<option value="${escapeHtml(c.id)}">${escapeHtml(c.nome)}</option>`)
+    ].join('');
     modal.innerHTML = `
       <div class="modal scroll-thin">
         <h3 class="modal-title">Cadastrar novo processo</h3>
@@ -1538,7 +1723,11 @@ async function newProcessFlow() {
           </div>
           <div>
             <label class="label">Cliente</label>
-            <input type="text" class="input" id="newProcessClient" placeholder="Nome do cliente principal">
+            <p class="help-text" style="margin-bottom: 6px;">Selecione um cliente já cadastrado ou crie um novo. ${clientesAtivos.length === 0 ? '<strong style="color: var(--uc-amber);">Nenhum cliente ativo — cadastre o primeiro.</strong>' : ''}</p>
+            <div style="display: flex; gap: 8px; align-items: stretch;">
+              <select class="select" id="newProcessClienteId" style="flex: 1;">${cliOptionsHtml}</select>
+              <button class="btn btn-secondary btn-sm" type="button" onclick="_npNovoClienteInline()" title="Cadastrar novo cliente sem sair daqui" style="white-space: nowrap;">+ Novo cliente</button>
+            </div>
           </div>
           <div>
             <label class="label">Tribunal/Vara</label>
@@ -1615,7 +1804,11 @@ async function newProcessFlow() {
     document.getElementById('_npConfirm').onclick = async () => {
       const name = document.getElementById('newProcessName').value.trim();
       const cnj = document.getElementById('newProcessCnj').value.trim();
-      const client = document.getElementById('newProcessClient').value.trim();
+      const clienteId = document.getElementById('newProcessClienteId').value;
+      // Resolve nome do cliente via lookup (snapshot pra compat com código que ainda lê p.client)
+      const cliEscolhido = clientesAtivos.find(c => c.id === clienteId)
+        || (await DB.getAllClientes()).find(c => c.id === clienteId);
+      const client = cliEscolhido?.nome || '';
       const court = document.getElementById('newProcessCourt').value.trim();
       const area = document.getElementById('newProcessArea').value;
       const type = document.getElementById('newProcessType').value.trim();
@@ -1670,7 +1863,8 @@ async function newProcessFlow() {
         id: uid(),
         name,
         cnj: cnj || null,
-        client: client || null,
+        clienteId: clienteId || null,
+        client: client || null,                    // snapshot do nome (compat)
         court: court || null,
         area,
         type: type || null,
@@ -1732,6 +1926,31 @@ async function newProcessFlow() {
   });
 }
 
+// Helper inline pra cadastrar cliente sem fechar o modal de novo processo.
+// Após salvar, repopula o select de clientes e seleciona o recém-criado.
+async function _npNovoClienteInline() {
+  // Lembra valores atuais do form (não perder ao reabrir o select)
+  const sel = document.getElementById('newProcessClienteId');
+  const valorAnterior = sel?.value || '';
+
+  // Abre modal de cadastro normal de cliente. Depois de salvar, atualiza select.
+  // _formClienteFlow re-renderiza /clientes ao terminar; aqui ignoramos isso.
+  await _formClienteFlow(null);
+
+  // Recarrega clientes e atualiza o select do form de processo
+  if (sel) {
+    const clientes = await DB.getAllClientes();
+    const ativos = clientes.filter(c => c.ativo !== false)
+      .sort((a, b) => (a.nome || '').localeCompare(b.nome || '', 'pt-BR'));
+    // Cliente novo é o mais recente (createdAt maior)
+    const novo = clientes.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))[0];
+    sel.innerHTML = [
+      '<option value="">— escolher cliente —</option>',
+      ...ativos.map(c => `<option value="${escapeHtml(c.id)}" ${c.id === (novo?.id || valorAnterior) ? 'selected' : ''}>${escapeHtml(c.nome)}</option>`)
+    ].join('');
+  }
+}
+
 
 // ====================================================================
 // === PAGE: PROCESS DETAIL ===========================================
@@ -1774,6 +1993,7 @@ async function renderProcessDetail() {
 
     <div class="detail-tabs scroll-thin">
       <button class="detail-tab ${state._processView.activeTab === 'overview' ? 'active' : ''}" onclick="setProcessTab('overview')">Visão geral</button>
+      <button class="detail-tab ${state._processView.activeTab === 'cliente' ? 'active' : ''}" onclick="setProcessTab('cliente')">Cliente</button>
       <button class="detail-tab ${state._processView.activeTab === 'events' ? 'active' : ''}" onclick="setProcessTab('events')">Eventos · ${events.length}</button>
       <button class="detail-tab ${state._processView.activeTab === 'deadlines' ? 'active' : ''}" onclick="setProcessTab('deadlines')">Prazos · ${deadlines.filter(d => prazoEstaAtivo(d)).length}</button>
       <button class="detail-tab ${state._processView.activeTab === 'jurisprudence' ? 'active' : ''}" onclick="setProcessTab('jurisprudence')">Jurisprudência · ${jurisprudence.length}</button>
@@ -1796,16 +2016,106 @@ function setProcessTab(tab) {
   renderProcessTabContent();
 }
 
-function renderProcessTabContent() {
+async function renderProcessTabContent() {
   const { p, events, deadlines, notes, jurisprudence, honorarios, activeTab } = state._processView;
   const c = $('processTabContent');
   if (activeTab === 'overview') c.innerHTML = renderProcessOverview(p, events, deadlines, notes, jurisprudence);
+  else if (activeTab === 'cliente') c.innerHTML = await renderProcessCliente(p);
   else if (activeTab === 'events') c.innerHTML = renderProcessEvents(p, events, notes);
   else if (activeTab === 'deadlines') c.innerHTML = renderProcessDeadlines(p, deadlines);
   else if (activeTab === 'jurisprudence') c.innerHTML = renderProcessJurisprudence(p, jurisprudence);
   else if (activeTab === 'notes') c.innerHTML = renderProcessNotes(p, notes);
   else if (activeTab === 'honorarios') c.innerHTML = renderProcessHonorarios(p, honorarios || []);
   else if (activeTab === 'analysis') c.innerHTML = renderProcessAnalysis(p, events, deadlines, jurisprudence);
+}
+
+async function renderProcessCliente(p) {
+  if (!p.clienteId) {
+    return `
+      <div class="empty-state">
+        <h3 class="empty-state-title">Sem cliente vinculado</h3>
+        <p class="empty-state-msg">Este processo não tem cliente cadastrado como entidade. Edite o processo para vincular um cliente existente ou cadastrar um novo.${p.client ? '<br><br><strong>Snapshot legado:</strong> ' + escapeHtml(p.client) : ''}</p>
+        <button class="btn btn-primary" onclick="editProcessFlow()">Editar processo</button>
+      </div>
+    `;
+  }
+
+  const [clientes, processos, honorarios] = await Promise.all([
+    DB.getAllClientes(), DB.getAllProcesses(), DB.getAllHonorarios()
+  ]);
+  const cli = clientes.find(c => c.id === p.clienteId);
+  if (!cli) {
+    return `
+      <div class="empty-state">
+        <h3 class="empty-state-title">⚠ Cliente referenciado não encontrado</h3>
+        <p class="empty-state-msg">O processo aponta para um clienteId (${escapeHtml(p.clienteId)}) que não existe na coleção. Pode ter sido apagado. Edite o processo pra vincular outro.</p>
+        <button class="btn btn-primary" onclick="editProcessFlow()">Editar processo</button>
+      </div>
+    `;
+  }
+
+  // Outros processos do mesmo cliente
+  const outrosProcs = processos.filter(x => x.clienteId === cli.id && x.id !== p.id);
+  // Honorários do cliente
+  const honsDoCli = honorarios.filter(h => h.clienteId === cli.id);
+  const hoje = new Date().toISOString().slice(0, 10);
+  let totalRec = 0, totalAberto = 0, totalVenc = 0;
+  honsDoCli.forEach(h => {
+    const a = _agregarHonorario(h, hoje);
+    totalRec += a.recebido; totalAberto += a.emAberto; totalVenc += a.vencido;
+  });
+
+  const enderecoComposto = _composeEndereco(cli);
+
+  return `
+    <div class="card mb-3">
+      <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; margin-bottom: 12px;">
+        <div>
+          <h3 class="font-serif text-xl font-semibold" style="color: var(--uc-black); margin: 0;">${escapeHtml(cli.nome)}</h3>
+          <p class="text-xs" style="color: var(--uc-warm-gray); margin: 4px 0 0;">
+            <span class="badge ${(cli.tipoPessoa || 'PJ') === 'PJ' ? 'badge-amber' : 'badge-green'}" style="font-size: 10px;">${cli.tipoPessoa || 'PJ'}</span>
+            ${cli.cpfCnpj ? '· ' + escapeHtml(cli.cpfCnpj) : ''}
+            ${cli.ativo === false ? ' · <span style="color: var(--uc-red);">⏸ inativo</span>' : ''}
+          </p>
+        </div>
+        <div class="flex gap-2">
+          <button class="btn btn-outline btn-sm" onclick="navigate('clienteDetalhe', { currentClienteId: '${cli.id}' })" title="Abrir dashboard completo do cliente">↗ Dashboard</button>
+          <button class="btn btn-outline btn-sm" onclick="editarCliente('${cli.id}')">✎ Editar cadastro</button>
+          <button class="btn btn-ghost btn-sm" onclick="editProcessFlow()" title="Trocar cliente deste processo">↻ Trocar</button>
+        </div>
+      </div>
+
+      <div class="grid gap-3" style="grid-template-columns: 140px 1fr; font-size: 13px;">
+        ${cli.email ? `<div style="color: var(--uc-warm-gray);">Email:</div><div>${escapeHtml(cli.email)}</div>` : ''}
+        ${cli.telefone ? `<div style="color: var(--uc-warm-gray);">Telefone:</div><div>${escapeHtml(cli.telefone)}</div>` : ''}
+        ${enderecoComposto ? `<div style="color: var(--uc-warm-gray);">Endereço:</div><div>${escapeHtml(enderecoComposto)}</div>` : ''}
+        ${cli.observacoes ? `<div style="color: var(--uc-warm-gray);">Obs:</div><div style="white-space: pre-wrap;">${escapeHtml(cli.observacoes)}</div>` : ''}
+      </div>
+    </div>
+
+    <div class="grid gap-3 mb-3" style="grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));">
+      <div class="card"><p class="text-xs smallcaps" style="color: var(--uc-warm-gray); margin: 0 0 4px;">Outros processos</p><p style="font-size: 18px; font-weight: 600; margin: 0;">${outrosProcs.length}</p></div>
+      <div class="card"><p class="text-xs smallcaps" style="color: var(--uc-warm-gray); margin: 0 0 4px;">Honorários</p><p style="font-size: 18px; font-weight: 600; margin: 0;">${honsDoCli.length}</p></div>
+      <div class="card"><p class="text-xs smallcaps" style="color: var(--uc-warm-gray); margin: 0 0 4px;">Recebido total</p><p style="font-size: 18px; font-weight: 600; color: var(--uc-green); margin: 0;">${brl(totalRec)}</p></div>
+      <div class="card"><p class="text-xs smallcaps" style="color: var(--uc-warm-gray); margin: 0 0 4px;">Em aberto</p><p style="font-size: 18px; font-weight: 600; color: ${totalVenc > 0 ? 'var(--uc-red)' : 'var(--uc-amber)'}; margin: 0;">${brl(totalAberto + totalVenc)}</p></div>
+    </div>
+
+    ${outrosProcs.length > 0 ? `
+      <div class="card mb-3">
+        <h4 class="font-serif font-semibold smallcaps mb-2" style="color: var(--uc-black);">Outros processos do mesmo cliente</h4>
+        ${outrosProcs.slice(0, 8).map(op => `
+          <div style="display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid var(--uc-line-soft); font-size: 13px;">
+            <div>
+              <a onclick="navigate('process', { currentProcessId: '${op.id}' })" style="cursor: pointer; color: var(--uc-gold); font-weight: 500;">${escapeHtml(op.cnj || op.name || '—')}</a>
+              ${op.area ? '<span style="color: var(--uc-warm-gray); margin-left: 6px; font-size: 11px;">' + escapeHtml(op.area) + '</span>' : ''}
+            </div>
+            <span style="color: var(--uc-warm-gray); font-size: 11px;">${op.status === 'archived' ? '<span class="badge badge-gray" style="font-size: 9px;">arquivado</span>' : formatDate(op.updatedAt, { relative: true })}</span>
+          </div>
+        `).join('')}
+        ${outrosProcs.length > 8 ? `<p class="help-text" style="margin-top: 6px;">+${outrosProcs.length - 8} processos · ver todos no <a onclick="navigate('clienteDetalhe', { currentClienteId: '${cli.id}' })" style="color: var(--uc-gold); cursor: pointer;">dashboard do cliente</a></p>` : ''}
+      </div>
+    ` : ''}
+  `;
 }
 
 function renderProcessOverview(p, events, deadlines, notes, jurisprudence) {
@@ -2457,13 +2767,21 @@ async function obterDestinatariosPrazo(processo, marco, hoje) {
 async function editProcessFlow() {
   const p = state._processView.p;
   const me = (window.UC_Auth?.getUser?.() || {}).email || '';
-  const baseFields = [
-    { label: 'Nome', default: p.name },
-    { label: 'CNJ', default: p.cnj || '' },
 
-    { label: 'Cliente — Nome', default: p.client || '' },
-    { label: 'Cliente — CPF/CNPJ', default: p.clientDoc || '', placeholder: 'opcional' },
-    { label: 'Cliente — Contato', default: p.clientContact || '', placeholder: 'email/telefone, opcional' },
+  // Carrega clientes pra dropdown (substitui os 3 campos legados de cliente)
+  const clientes = await DB.getAllClientes();
+  const cliOpts = [
+    { value: '', label: '— sem cliente vinculado —' },
+    ...clientes.filter(c => c.ativo !== false)
+      .sort((a, b) => (a.nome || '').localeCompare(b.nome || '', 'pt-BR'))
+      .map(c => ({ value: c.id, label: c.nome }))
+  ];
+
+  const baseFields = [
+    { label: 'Nome', name: 'name', default: p.name },
+    { label: 'CNJ', name: 'cnj', default: p.cnj || '' },
+
+    { label: 'Cliente', name: 'clienteId', type: 'select', default: p.clienteId || '', options: cliOpts },
 
     { label: 'Polo', type: 'select', default: p.polo || 'Defesa', options: [
       { value: 'Defesa', label: 'Defesa (executado/réu)' },
@@ -2550,7 +2868,7 @@ async function editProcessFlow() {
   if (!r) return;
   const [
     name, cnj,
-    client, clientDoc, clientContact,
+    clienteId,
     polo,
     advNome, advDoc, advLawyer, advLawyerOab,
     court, comarca, sistema,
@@ -2563,12 +2881,13 @@ async function editProcessFlow() {
     // Fase B (só presentes se isTributario(p.area) era true ao abrir)
     tipoExec, tributoPrincipal, periodoBase, statusFiscal, garantia, garantiaDetalhe, cdasRaw
   ] = r;
+  // Resolve nome do cliente novo (snapshot pra compat com p.client)
+  const cliEscolhido = clientes.find(c => c.id === clienteId) || null;
   Object.assign(p, {
     name,
     cnj: cnj || null,
-    client: client || null,
-    clientDoc: clientDoc || null,
-    clientContact: clientContact || null,
+    clienteId: clienteId || null,
+    client: cliEscolhido?.nome || null,    // snapshot atualizado
     polo,
     advNome: advNome || null,
     advDoc: advDoc || null,
@@ -5511,7 +5830,7 @@ async function renderFinHonorarios() {
       });
       const headerCli = cliId === '__orfao__'
         ? `<span style="color: var(--uc-red);">⚠ Honorários sem cliente vinculado</span>`
-        : `<a onclick="navigate('clientes')" style="cursor:pointer; color:var(--uc-gold);">${escapeHtml(cli?.nome || '—')}</a>`;
+        : `<a onclick="navigate('clienteDetalhe', { currentClienteId: '${cliId}' })" style="cursor:pointer; color:var(--uc-gold);">${escapeHtml(cli?.nome || '—')}</a>`;
 
       return `
         <div style="margin-bottom: 16px;">
