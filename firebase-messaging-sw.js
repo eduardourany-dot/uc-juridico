@@ -3,6 +3,12 @@
 // arquitetura do Firebase Messaging. Quando a página está em background ou
 // fechada, é ESTE SW que recebe os pushes e mostra Notification.
 
+// Força ativação imediata sem esperar todas as abas fecharem.
+// Sem isso, o SW fica em estado "Installed" (waiting) e o onBackgroundMessage
+// não dispara — pushes em background não chegam.
+self.addEventListener('install', () => self.skipWaiting());
+self.addEventListener('activate', (event) => event.waitUntil(self.clients.claim()));
+
 importScripts('https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js');
 importScripts('https://www.gstatic.com/firebasejs/10.14.1/firebase-messaging-compat.js');
 
