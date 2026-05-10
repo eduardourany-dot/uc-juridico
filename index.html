@@ -263,7 +263,7 @@ body{background:var(--uc-paper);color:var(--uc-graphite);font-size:15px;-webkit-
 
     <div style="margin-top:auto;padding:16px 20px;border-top:1px solid var(--uc-line-soft);font-size:11px;color:var(--uc-warm-gray);text-align:center;">
       <p class="smallcaps font-serif" style="margin:0 0 4px;">Urany de Castro · 30 anos</p>
-      <p style="margin:0;">100% local · v6.17.2</p>
+      <p style="margin:0;">100% local · v6.18.0</p>
     </div>
   </aside>
 
@@ -1171,13 +1171,14 @@ async function renderProcessDetail() {
   const deadlines = await DB.getDeadlinesByProcess(p.id);
   const notes = await DB.getNotesByProcess(p.id);
   const jurisprudence = await DB.getJurisprudenceByProcess(p.id);
+  const honorarios = await DB.getHonorariosByProcess(p.id);
 
   // Update counts
   p.eventCount = events.length;
   p.noteCount = notes.length;
   await DB.saveProcess(p);
 
-  state._processView = { p, events, deadlines, notes, jurisprudence, activeTab: state._processView?.activeTab || 'overview' };
+  state._processView = { p, events, deadlines, notes, jurisprudence, honorarios, activeTab: state._processView?.activeTab || 'overview' };
 
   $('appContent').innerHTML = `
     <div class="page-header">
@@ -1203,6 +1204,7 @@ async function renderProcessDetail() {
       <button class="detail-tab ${state._processView.activeTab === 'deadlines' ? 'active' : ''}" onclick="setProcessTab('deadlines')">Prazos · ${deadlines.filter(d => prazoEstaAtivo(d)).length}</button>
       <button class="detail-tab ${state._processView.activeTab === 'jurisprudence' ? 'active' : ''}" onclick="setProcessTab('jurisprudence')">Jurisprudência · ${jurisprudence.length}</button>
       <button class="detail-tab ${state._processView.activeTab === 'notes' ? 'active' : ''}" onclick="setProcessTab('notes')">Notas · ${notes.length}</button>
+      <button class="detail-tab ${state._processView.activeTab === 'honorarios' ? 'active' : ''}" onclick="setProcessTab('honorarios')">Honorários · ${honorarios.length}</button>
       <button class="detail-tab ${state._processView.activeTab === 'analysis' ? 'active' : ''}" onclick="setProcessTab('analysis')">Análise IA</button>
     </div>
 
@@ -1221,13 +1223,14 @@ function setProcessTab(tab) {
 }
 
 function renderProcessTabContent() {
-  const { p, events, deadlines, notes, jurisprudence, activeTab } = state._processView;
+  const { p, events, deadlines, notes, jurisprudence, honorarios, activeTab } = state._processView;
   const c = $('processTabContent');
   if (activeTab === 'overview') c.innerHTML = renderProcessOverview(p, events, deadlines, notes, jurisprudence);
   else if (activeTab === 'events') c.innerHTML = renderProcessEvents(p, events, notes);
   else if (activeTab === 'deadlines') c.innerHTML = renderProcessDeadlines(p, deadlines);
   else if (activeTab === 'jurisprudence') c.innerHTML = renderProcessJurisprudence(p, jurisprudence);
   else if (activeTab === 'notes') c.innerHTML = renderProcessNotes(p, notes);
+  else if (activeTab === 'honorarios') c.innerHTML = renderProcessHonorarios(p, honorarios || []);
   else if (activeTab === 'analysis') c.innerHTML = renderProcessAnalysis(p, events, deadlines, jurisprudence);
 }
 
@@ -4225,6 +4228,7 @@ async function renderFinanceiro() {
       <button class="tab ${tab === 'transacoes' ? 'active' : ''}" onclick="setFinTab('transacoes')">Transações</button>
       <button class="tab ${tab === 'bancos' ? 'active' : ''}" onclick="setFinTab('bancos')">Bancos</button>
       <button class="tab ${tab === 'cartoes' ? 'active' : ''}" onclick="setFinTab('cartoes')">Cartões</button>
+      <button class="tab ${tab === 'honorarios' ? 'active' : ''}" onclick="setFinTab('honorarios')">Honorários</button>
       <button class="tab ${tab === 'categorias' ? 'active' : ''}" onclick="setFinTab('categorias')">Categorias</button>
     </div>
     <div id="finContent"><p style="color: var(--uc-warm-gray);">Carregando…</p></div>
@@ -4233,8 +4237,29 @@ async function renderFinanceiro() {
   if (tab === 'transacoes') return renderFinTransacoes();
   if (tab === 'bancos') return renderFinBancos();
   if (tab === 'cartoes') return renderFinCartoes();
+  if (tab === 'honorarios') return renderFinHonorarios();
   if (tab === 'categorias') return renderFinCategorias();
 }
+
+// Calcula totais agregados de um honorário (recebido / em aberto / vencido)
+function _agregarHonorario(h, hoje) {
+  const today = hoje || new Date().toISOString().slice(0,10);
+  let recebido = 0, emAberto = 0, vencido = 0;
+  (h.parcelas || []).forEach(p => {
+    const v = Number(p.valor) || 0;
+    if (p.status === 'pago') recebido += v;
+    else if ((p.vencimento || '') < today) vencido += v;
+    else emAberto += v;
+  });
+  return { recebido, emAberto, vencido, total: recebido + emAberto + vencido };
+}
+
+const TIPO_HONORARIO_LABEL = {
+  fixo: 'Fixo',
+  percentual: 'Percentual',
+  exito: 'Êxito (success fee)',
+  misto: 'Misto'
+};
 
 // Calcula valor da FATURA ABERTA do cartão (= limite atualmente ocupado).
 // Em cartão de crédito:
@@ -4742,6 +4767,253 @@ async function renderFinCategorias() {
   `;
 }
 
+async function renderFinHonorarios() {
+  const [honorarios, processos] = await Promise.all([
+    DB.getAllHonorarios(), DB.getAllProcesses()
+  ]);
+  const procById = {}; processos.forEach(p => procById[p.id] = p);
+  const hoje = new Date().toISOString().slice(0,10);
+
+  // Totais consolidados
+  let totalPrevisto = 0, totalRecebido = 0, totalEmAberto = 0, totalVencido = 0;
+  honorarios.forEach(h => {
+    const agg = _agregarHonorario(h, hoje);
+    totalPrevisto += agg.total;
+    totalRecebido += agg.recebido;
+    totalEmAberto += agg.emAberto;
+    totalVencido += agg.vencido;
+  });
+
+  // Filtros: por processo + status
+  state._finHonFiltro = state._finHonFiltro || { processoId: '', status: 'todos' };
+  const f = state._finHonFiltro;
+  let filtrados = honorarios.slice();
+  if (f.processoId) filtrados = filtrados.filter(h => h.processoId === f.processoId);
+  if (f.status === 'comAberto') filtrados = filtrados.filter(h => _agregarHonorario(h, hoje).emAberto > 0);
+  if (f.status === 'comVencido') filtrados = filtrados.filter(h => _agregarHonorario(h, hoje).vencido > 0);
+  if (f.status === 'quitado') filtrados = filtrados.filter(h => {
+    const a = _agregarHonorario(h, hoje); return a.emAberto === 0 && a.vencido === 0 && a.recebido > 0;
+  });
+  filtrados.sort((a,b) => (b.criadoEm || 0) - (a.criadoEm || 0));
+
+  $('finContent').innerHTML = `
+    <div class="grid gap-3" style="grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); margin-bottom: 16px;">
+      <div class="card">
+        <p class="text-xs smallcaps" style="color: var(--uc-warm-gray); margin: 0 0 6px;">Total previsto</p>
+        <p style="font-size: 22px; font-weight: 600; color: var(--uc-black); margin: 0;">${brl(totalPrevisto)}</p>
+      </div>
+      <div class="card">
+        <p class="text-xs smallcaps" style="color: var(--uc-warm-gray); margin: 0 0 6px;">Recebido</p>
+        <p style="font-size: 22px; font-weight: 600; color: var(--uc-green); margin: 0;">${brl(totalRecebido)}</p>
+      </div>
+      <div class="card">
+        <p class="text-xs smallcaps" style="color: var(--uc-warm-gray); margin: 0 0 6px;">Em aberto</p>
+        <p style="font-size: 22px; font-weight: 600; color: var(--uc-amber); margin: 0;">${brl(totalEmAberto)}</p>
+      </div>
+      <div class="card">
+        <p class="text-xs smallcaps" style="color: var(--uc-warm-gray); margin: 0 0 6px;">Vencido</p>
+        <p style="font-size: 22px; font-weight: 600; color: var(--uc-red); margin: 0;">${brl(totalVencido)}</p>
+      </div>
+    </div>
+
+    <div class="card mb-3" style="padding: 10px;">
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 8px; align-items: end;">
+        <div>
+          <label class="label" style="font-size: 11px; margin-bottom: 4px;">Processo</label>
+          <select class="select" onchange="_setFinHonFiltro('processoId', this.value)">
+            <option value="">Todos</option>
+            ${processos.map(p => `<option value="${p.id}" ${f.processoId === p.id ? 'selected' : ''}>${escapeHtml((p.cnj ? p.cnj + ' · ' : '') + (p.name || p.client || '—'))}</option>`).join('')}
+          </select>
+        </div>
+        <div>
+          <label class="label" style="font-size: 11px; margin-bottom: 4px;">Status</label>
+          <select class="select" onchange="_setFinHonFiltro('status', this.value)">
+            <option value="todos" ${f.status === 'todos' ? 'selected' : ''}>Todos</option>
+            <option value="comAberto" ${f.status === 'comAberto' ? 'selected' : ''}>Com parcelas em aberto</option>
+            <option value="comVencido" ${f.status === 'comVencido' ? 'selected' : ''}>Com vencidas</option>
+            <option value="quitado" ${f.status === 'quitado' ? 'selected' : ''}>Quitados</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <div class="flex justify-between items-center mb-3">
+      <p class="text-sm" style="color: var(--uc-warm-gray);">${filtrados.length} honorário(s) ${f.processoId || f.status !== 'todos' ? '(filtrado)' : ''}</p>
+      <button class="btn btn-primary btn-sm" onclick="novoHonorarioFlow()" ${processos.length === 0 ? 'disabled title="Cadastre um processo primeiro"' : ''}>+ Novo honorário</button>
+    </div>
+
+    ${filtrados.length === 0 ? `
+      <div class="empty-state">
+        <p class="empty-state-msg">Nenhum honorário cadastrado. Vincule honorários a processos pra controlar parcelas e recebimentos.</p>
+      </div>
+    ` : filtrados.map(h => {
+      const proc = procById[h.processoId];
+      const agg = _agregarHonorario(h, hoje);
+      return `
+        <div class="card mb-3">
+          <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; margin-bottom: 10px;">
+            <div style="min-width: 0; flex: 1;">
+              <h3 class="font-serif text-lg font-semibold" style="color: var(--uc-black); margin: 0;">${escapeHtml(h.clienteNome || '—')}</h3>
+              <p class="text-xs" style="color: var(--uc-warm-gray); margin: 4px 0 0;">
+                ${proc ? `<a onclick="navigate('process', { currentProcessId: '${proc.id}' })" style="cursor:pointer; color:var(--uc-gold);">${escapeHtml(proc.cnj || proc.name || '—')}</a>` : '— processo removido —'}
+                · ${escapeHtml(TIPO_HONORARIO_LABEL[h.tipoHonorario] || h.tipoHonorario || 'Fixo')}
+                · ${(h.parcelas || []).length} parcela(s)
+              </p>
+            </div>
+            <div style="display: flex; gap: 4px; flex-shrink: 0;">
+              <button class="btn btn-ghost btn-sm" onclick="editarHonorario('${h.id}')" title="Editar">✎</button>
+              <button class="btn btn-ghost btn-sm" onclick="removerHonorario('${h.id}')" title="Remover">🗑</button>
+            </div>
+          </div>
+
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; margin-bottom: 10px; font-size: 12px;">
+            <div><span style="color: var(--uc-warm-gray);">Total:</span> <strong>${brl(agg.total)}</strong></div>
+            <div><span style="color: var(--uc-warm-gray);">Recebido:</span> <strong style="color: var(--uc-green);">${brl(agg.recebido)}</strong></div>
+            <div><span style="color: var(--uc-warm-gray);">Em aberto:</span> <strong style="color: var(--uc-amber);">${brl(agg.emAberto)}</strong></div>
+            ${agg.vencido > 0 ? `<div><span style="color: var(--uc-warm-gray);">Vencido:</span> <strong style="color: var(--uc-red);">${brl(agg.vencido)}</strong></div>` : ''}
+          </div>
+
+          ${(h.parcelas || []).length > 0 ? `
+            <details style="font-size: 12px;">
+              <summary style="cursor: pointer; color: var(--uc-warm-gray);">Ver ${h.parcelas.length} parcela(s)</summary>
+              <table style="width: 100%; border-collapse: collapse; margin-top: 8px;">
+                <thead>
+                  <tr style="border-bottom: 1px solid var(--uc-line-soft); text-align: left;">
+                    <th style="padding: 4px 6px; font-weight: 500; color: var(--uc-warm-gray);">#</th>
+                    <th style="padding: 4px 6px; font-weight: 500; color: var(--uc-warm-gray);">Vencimento</th>
+                    <th style="padding: 4px 6px; font-weight: 500; color: var(--uc-warm-gray); text-align: right;">Valor</th>
+                    <th style="padding: 4px 6px; font-weight: 500; color: var(--uc-warm-gray);">Status</th>
+                    <th style="padding: 4px 6px;"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${h.parcelas.map(p => {
+                    const venceu = (p.vencimento || '') < hoje && p.status !== 'pago';
+                    return `
+                      <tr style="border-bottom: 1px solid var(--uc-line-soft);">
+                        <td style="padding: 4px 6px;">${p.numero}</td>
+                        <td style="padding: 4px 6px; ${venceu ? 'color: var(--uc-red); font-weight: 600;' : ''}">${formatDate(p.vencimento)}${venceu ? ' ⚠' : ''}</td>
+                        <td style="padding: 4px 6px; text-align: right; font-weight: 600;">${brl(p.valor)}</td>
+                        <td style="padding: 4px 6px;">
+                          ${p.status === 'pago'
+                            ? '<span class="badge badge-green" style="font-size:9px;">✓ pago</span>'
+                            : venceu
+                              ? '<span class="badge badge-red" style="font-size:9px;">vencido</span>'
+                              : '<span class="badge badge-gray" style="font-size:9px;">previsto</span>'}
+                        </td>
+                        <td style="padding: 4px 6px; text-align: right;">
+                          ${p.status === 'pago'
+                            ? `<button class="btn btn-ghost btn-sm" onclick="desfazerPagamentoParcela('${h.id}', ${p.numero})" title="Desfazer pagamento" style="padding: 2px 6px; font-size: 10px;">↶ desfazer</button>`
+                            : `<button class="btn btn-primary btn-sm" onclick="marcarParcelaPaga('${h.id}', ${p.numero})" title="Marcar como paga" style="padding: 2px 8px; font-size: 10px;">✓ marcar paga</button>`
+                          }
+                        </td>
+                      </tr>
+                    `;
+                  }).join('')}
+                </tbody>
+              </table>
+            </details>
+          ` : ''}
+        </div>
+      `;
+    }).join('')}
+  `;
+}
+
+function _setFinHonFiltro(campo, valor) {
+  state._finHonFiltro = state._finHonFiltro || {};
+  state._finHonFiltro[campo] = valor;
+  renderFinHonorarios();
+}
+
+// Aba "Honorários" dentro de um processo (renderProcessDetail)
+function renderProcessHonorarios(p, honorarios) {
+  const hoje = new Date().toISOString().slice(0,10);
+  let totalPrevisto = 0, totalRecebido = 0, totalEmAberto = 0, totalVencido = 0;
+  honorarios.forEach(h => {
+    const agg = _agregarHonorario(h, hoje);
+    totalPrevisto += agg.total;
+    totalRecebido += agg.recebido;
+    totalEmAberto += agg.emAberto;
+    totalVencido += agg.vencido;
+  });
+
+  return `
+    <div class="grid gap-3 mb-4" style="grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));">
+      <div class="card"><p class="text-xs smallcaps" style="color: var(--uc-warm-gray); margin: 0 0 4px;">Total</p><p style="font-size: 18px; font-weight: 600; margin: 0;">${brl(totalPrevisto)}</p></div>
+      <div class="card"><p class="text-xs smallcaps" style="color: var(--uc-warm-gray); margin: 0 0 4px;">Recebido</p><p style="font-size: 18px; font-weight: 600; color: var(--uc-green); margin: 0;">${brl(totalRecebido)}</p></div>
+      <div class="card"><p class="text-xs smallcaps" style="color: var(--uc-warm-gray); margin: 0 0 4px;">Em aberto</p><p style="font-size: 18px; font-weight: 600; color: var(--uc-amber); margin: 0;">${brl(totalEmAberto)}</p></div>
+      ${totalVencido > 0 ? `<div class="card"><p class="text-xs smallcaps" style="color: var(--uc-warm-gray); margin: 0 0 4px;">Vencido</p><p style="font-size: 18px; font-weight: 600; color: var(--uc-red); margin: 0;">${brl(totalVencido)}</p></div>` : ''}
+    </div>
+
+    <div class="flex justify-between items-center mb-3">
+      <p class="text-sm" style="color: var(--uc-warm-gray);">${honorarios.length} honorário(s) cadastrado(s)</p>
+      <button class="btn btn-primary btn-sm" onclick="novoHonorarioFlow('${p.id}')">+ Novo honorário</button>
+    </div>
+
+    ${honorarios.length === 0 ? `
+      <div class="empty-state">
+        <p class="empty-state-msg">Nenhum honorário cadastrado para este processo.</p>
+      </div>
+    ` : honorarios.map(h => {
+      const agg = _agregarHonorario(h, hoje);
+      return `
+        <div class="card mb-3">
+          <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px;">
+            <div>
+              <h4 class="font-serif font-semibold" style="margin: 0;">${escapeHtml(TIPO_HONORARIO_LABEL[h.tipoHonorario] || h.tipoHonorario)} · ${brl(h.valorTotal)}</h4>
+              <p class="text-xs" style="color: var(--uc-warm-gray); margin: 4px 0 0;">${(h.parcelas || []).length} parcela(s) · ${escapeHtml(h.clienteNome || p.client || '—')}</p>
+            </div>
+            <div style="display: flex; gap: 4px;">
+              <button class="btn btn-ghost btn-sm" onclick="editarHonorario('${h.id}')" title="Editar">✎</button>
+              <button class="btn btn-ghost btn-sm" onclick="removerHonorario('${h.id}')" title="Remover">🗑</button>
+            </div>
+          </div>
+          ${h.observacoes ? `<p style="font-size: 12px; color: var(--uc-graphite); margin-bottom: 8px;">${escapeHtml(h.observacoes)}</p>` : ''}
+          ${(h.parcelas || []).length > 0 ? `
+            <table style="width: 100%; border-collapse: collapse; font-size: 12px;">
+              <thead>
+                <tr style="border-bottom: 1px solid var(--uc-line-soft); text-align: left;">
+                  <th style="padding: 4px 6px; color: var(--uc-warm-gray);">#</th>
+                  <th style="padding: 4px 6px; color: var(--uc-warm-gray);">Vence</th>
+                  <th style="padding: 4px 6px; color: var(--uc-warm-gray); text-align: right;">Valor</th>
+                  <th style="padding: 4px 6px; color: var(--uc-warm-gray);">Status</th>
+                  <th style="padding: 4px 6px;"></th>
+                </tr>
+              </thead>
+              <tbody>
+                ${h.parcelas.map(parc => {
+                  const venceu = (parc.vencimento || '') < hoje && parc.status !== 'pago';
+                  return `
+                    <tr style="border-bottom: 1px solid var(--uc-line-soft);">
+                      <td style="padding: 4px 6px;">${parc.numero}</td>
+                      <td style="padding: 4px 6px; ${venceu ? 'color: var(--uc-red); font-weight: 600;' : ''}">${formatDate(parc.vencimento)}${venceu ? ' ⚠' : ''}</td>
+                      <td style="padding: 4px 6px; text-align: right; font-weight: 600;">${brl(parc.valor)}</td>
+                      <td style="padding: 4px 6px;">
+                        ${parc.status === 'pago'
+                          ? '<span class="badge badge-green" style="font-size:9px;">✓ pago</span>'
+                          : venceu
+                            ? '<span class="badge badge-red" style="font-size:9px;">vencido</span>'
+                            : '<span class="badge badge-gray" style="font-size:9px;">previsto</span>'}
+                      </td>
+                      <td style="padding: 4px 6px; text-align: right;">
+                        ${parc.status === 'pago'
+                          ? `<button class="btn btn-ghost btn-sm" onclick="desfazerPagamentoParcela('${h.id}', ${parc.numero})" style="padding: 2px 6px; font-size: 10px;">↶ desfazer</button>`
+                          : `<button class="btn btn-primary btn-sm" onclick="marcarParcelaPaga('${h.id}', ${parc.numero})" style="padding: 2px 8px; font-size: 10px;">✓ paga</button>`
+                        }
+                      </td>
+                    </tr>
+                  `;
+                }).join('')}
+              </tbody>
+            </table>
+          ` : '<p class="text-xs" style="color: var(--uc-warm-gray);">Sem parcelas configuradas.</p>'}
+        </div>
+      `;
+    }).join('')}
+  `;
+}
+
 // ===== Modais e ações =====
 
 async function novoBancoFlow() {
@@ -4950,6 +5222,249 @@ async function removerCategoria(id) {
   if (!ok) return;
   await DB.deleteCategoriaFin(id);
   renderFinanceiro();
+}
+
+// ===== Honorários =====
+
+// Adiciona N meses a uma data ISO (YYYY-MM-DD), preservando o dia
+function _addMonthsISO(isoDate, months) {
+  const d = new Date(isoDate + 'T12:00:00');
+  d.setMonth(d.getMonth() + months);
+  return d.toISOString().slice(0,10);
+}
+
+// Gera array de parcelas iguais com vencimentos mensais
+function _gerarParcelas(valorTotal, numParcelas, primeiroVencimento) {
+  const valorParcela = Math.round((valorTotal / numParcelas) * 100) / 100;
+  const ajusteUltima = valorTotal - (valorParcela * numParcelas); // resíduo de centavos
+  const parcelas = [];
+  for (let i = 1; i <= numParcelas; i++) {
+    parcelas.push({
+      numero: i,
+      valor: i === numParcelas ? valorParcela + ajusteUltima : valorParcela,
+      vencimento: _addMonthsISO(primeiroVencimento, i - 1),
+      status: 'previsto',
+      transacaoId: null
+    });
+  }
+  return parcelas;
+}
+
+async function novoHonorarioFlow(processoIdFixo) {
+  const processos = await DB.getAllProcesses();
+  if (processos.length === 0) {
+    toast('Cadastre um processo primeiro', '', 'error');
+    return;
+  }
+  const procOpts = processos.map(p => ({
+    value: p.id,
+    label: (p.cnj ? p.cnj + ' · ' : '') + (p.name || p.client || '—')
+  }));
+  const hojeISO = new Date().toISOString().slice(0,10);
+  const proxMes = _addMonthsISO(hojeISO, 1);
+
+  const fields = [
+    ...(processoIdFixo ? [] : [
+      { label: 'Processo', type: 'select', default: '', options: [{ value: '', label: '— escolher —' }, ...procOpts] }
+    ]),
+    { label: 'Tipo de honorário', type: 'select', default: 'fixo', options: [
+      { value: 'fixo', label: 'Fixo (valor pré-definido)' },
+      { value: 'percentual', label: 'Percentual sobre valor da causa' },
+      { value: 'exito', label: 'Êxito (success fee)' },
+      { value: 'misto', label: 'Misto (combinação)' }
+    ]},
+    { label: 'Valor total (R$)', type: 'number', default: '', placeholder: '5000,00' },
+    { label: 'Número de parcelas', type: 'number', default: '1', min: '1', max: '60' },
+    { label: 'Vencimento da 1ª parcela', type: 'date', default: proxMes },
+    { label: 'Observações (opcional)', placeholder: 'Forma de pagamento, condições, etc.' }
+  ];
+  const r = await showModal('Novo honorário', fields, {
+    confirmLabel: 'Cadastrar',
+    intro: processoIdFixo
+      ? `Para o processo: <strong>${escapeHtml((processos.find(p => p.id === processoIdFixo) || {}).name || '—')}</strong>`
+      : 'Vincule honorário a um processo do escritório.'
+  });
+  if (!r) return;
+
+  let processoId, tipo, valor, numParcelas, primeiroVenc, observacoes;
+  if (processoIdFixo) {
+    [tipo, valor, numParcelas, primeiroVenc, observacoes] = r;
+    processoId = processoIdFixo;
+  } else {
+    [processoId, tipo, valor, numParcelas, primeiroVenc, observacoes] = r;
+  }
+
+  if (!processoId) { toast('Escolha um processo', '', 'error'); return; }
+  const valorNum = parseFloat(valor);
+  if (!valorNum || valorNum <= 0) { toast('Valor inválido', '', 'error'); return; }
+  const n = Math.max(1, Math.min(60, parseInt(numParcelas) || 1));
+  if (!primeiroVenc) { toast('Data de vencimento obrigatória', '', 'error'); return; }
+
+  const proc = processos.find(p => p.id === processoId);
+  const honorario = {
+    id: uid(),
+    processoId,
+    clienteNome: proc?.client || '',
+    tipoHonorario: tipo || 'fixo',
+    valorTotal: valorNum,
+    parcelas: _gerarParcelas(valorNum, n, primeiroVenc),
+    observacoes: (observacoes || '').trim(),
+    createdAt: Date.now()
+  };
+  await DB.saveHonorario(honorario);
+  toast('Honorário cadastrado', `${n} parcela(s) de ${brl(honorario.parcelas[0].valor)}`, 'success');
+
+  // Re-renderiza onde está
+  if (state.currentRoute === 'process') {
+    state._processView.honorarios = await DB.getHonorariosByProcess(processoId);
+    renderProcessTabContent();
+  } else {
+    renderFinanceiro();
+  }
+}
+
+async function editarHonorario(id) {
+  const honorarios = await DB.getAllHonorarios();
+  const h = honorarios.find(x => x.id === id);
+  if (!h) return;
+  const r = await showModal('Editar honorário', [
+    { label: 'Tipo de honorário', type: 'select', default: h.tipoHonorario || 'fixo', options: [
+      { value: 'fixo', label: 'Fixo' },
+      { value: 'percentual', label: 'Percentual' },
+      { value: 'exito', label: 'Êxito' },
+      { value: 'misto', label: 'Misto' }
+    ]},
+    { label: 'Cliente', default: h.clienteNome || '' },
+    { label: 'Observações', default: h.observacoes || '' }
+  ], { confirmLabel: 'Salvar', intro: 'Pra alterar valores ou parcelas, remova e cadastre novo.' });
+  if (!r) return;
+  const [tipo, cliente, obs] = r;
+  Object.assign(h, {
+    tipoHonorario: tipo,
+    clienteNome: cliente.trim(),
+    observacoes: (obs || '').trim()
+  });
+  await DB.saveHonorario(h);
+  toast('Honorário atualizado', '', 'success');
+  if (state.currentRoute === 'process') {
+    state._processView.honorarios = await DB.getHonorariosByProcess(h.processoId);
+    renderProcessTabContent();
+  } else {
+    renderFinanceiro();
+  }
+}
+
+async function removerHonorario(id) {
+  const honorarios = await DB.getAllHonorarios();
+  const h = honorarios.find(x => x.id === id);
+  if (!h) return;
+  const temPaga = (h.parcelas || []).some(p => p.status === 'pago');
+  const msg = temPaga
+    ? 'Este honorário tem parcelas já pagas. As transações de receita criadas continuarão no extrato, mas o honorário será removido. Continuar?'
+    : 'Honorário e suas parcelas serão removidos. Ação irreversível.';
+  const ok = await confirmDialog('Remover honorário?', msg, true);
+  if (!ok) return;
+  await DB.deleteHonorario(id);
+  toast('Honorário removido', '', 'success');
+  if (state.currentRoute === 'process') {
+    state._processView.honorarios = await DB.getHonorariosByProcess(h.processoId);
+    renderProcessTabContent();
+  } else {
+    renderFinanceiro();
+  }
+}
+
+async function marcarParcelaPaga(honorarioId, numeroParcela) {
+  const [honorarios, bancos, categorias] = await Promise.all([
+    DB.getAllHonorarios(), DB.getAllBancos(), DB.getAllCategoriasFin()
+  ]);
+  const h = honorarios.find(x => x.id === honorarioId);
+  if (!h) return;
+  const parc = (h.parcelas || []).find(p => p.numero === numeroParcela);
+  if (!parc) return;
+  if (parc.status === 'pago') { toast('Parcela já está paga', '', 'info'); return; }
+  if (bancos.length === 0) {
+    toast('Cadastre um banco primeiro', '', 'error');
+    return;
+  }
+  const catReceita = categorias.find(c => c.tipo === 'receita' && /honorário/i.test(c.nome)) ||
+                     categorias.find(c => c.tipo === 'receita');
+  const hojeISO = new Date().toISOString().slice(0,10);
+  const r = await showModal(`Marcar parcela ${numeroParcela} como paga`, [
+    { label: 'Data do recebimento', type: 'date', default: hojeISO },
+    { label: 'Conta que recebeu', type: 'select', default: bancos[0].id, options:
+      bancos.map(b => ({ value: b.id, label: '🏦 ' + b.nome }))
+    },
+    { label: 'Valor recebido (R$)', type: 'number', default: String(parc.valor), placeholder: 'Em geral igual ao valor da parcela' },
+    { label: 'Observação (opcional)', default: '' }
+  ], {
+    confirmLabel: 'Confirmar pagamento',
+    intro: `Vencimento: <strong>${formatDate(parc.vencimento)}</strong> · Valor previsto: <strong>${brl(parc.valor)}</strong>`
+  });
+  if (!r) return;
+  const [dataRecebimento, contaId, valor, obs] = r;
+  const valorRecebido = parseFloat(valor) || parc.valor;
+
+  // Cria transação de receita automaticamente
+  const transacao = {
+    id: uid(),
+    tipo: 'receita',
+    valor: valorRecebido,
+    data: dataRecebimento || hojeISO,
+    categoriaId: catReceita?.id || null,
+    contaId,
+    tipoConta: 'banco',
+    processoId: h.processoId,
+    clienteNome: h.clienteNome || null,
+    honorarioId: h.id,
+    parcelaNumero: numeroParcela,
+    descricao: `Honorário · parcela ${numeroParcela}/${h.parcelas.length}${obs ? ' · ' + obs : ''}`,
+    status: 'realizado',
+    createdAt: Date.now()
+  };
+  await DB.saveTransacao(transacao);
+
+  // Atualiza parcela
+  parc.status = 'pago';
+  parc.transacaoId = transacao.id;
+  parc.dataRecebimento = transacao.data;
+  parc.valorRecebido = valorRecebido;
+  await DB.saveHonorario(h);
+
+  toast('Pagamento registrado', `${brl(valorRecebido)} · transação criada em receita`, 'success');
+  if (state.currentRoute === 'process') {
+    state._processView.honorarios = await DB.getHonorariosByProcess(h.processoId);
+    renderProcessTabContent();
+  } else {
+    renderFinanceiro();
+  }
+}
+
+async function desfazerPagamentoParcela(honorarioId, numeroParcela) {
+  const honorarios = await DB.getAllHonorarios();
+  const h = honorarios.find(x => x.id === honorarioId);
+  if (!h) return;
+  const parc = (h.parcelas || []).find(p => p.numero === numeroParcela);
+  if (!parc || parc.status !== 'pago') return;
+  const ok = await confirmDialog('Desfazer pagamento?',
+    'A transação de receita criada será removida e a parcela voltará para "previsto". Use isso pra corrigir lançamentos errados.',
+    true);
+  if (!ok) return;
+  if (parc.transacaoId) {
+    try { await DB.deleteTransacao(parc.transacaoId); } catch(e) { console.warn(e); }
+  }
+  parc.status = 'previsto';
+  delete parc.transacaoId;
+  delete parc.dataRecebimento;
+  delete parc.valorRecebido;
+  await DB.saveHonorario(h);
+  toast('Pagamento desfeito', '', 'info');
+  if (state.currentRoute === 'process') {
+    state._processView.honorarios = await DB.getHonorariosByProcess(h.processoId);
+    renderProcessTabContent();
+  } else {
+    renderFinanceiro();
+  }
 }
 
 async function novaTransacaoFlow() {

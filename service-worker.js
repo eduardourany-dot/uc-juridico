@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.17.2 (fix: marcar transação cartão como realizado libera limite proporcional)
-const CACHE_NAME = 'uc-juridico-v6-17-2';
+// Service Worker — UC Jurídico v6.18.0 (Módulo Financeiro Sprint A.3: honorários parcelados + integração com Processos)
+const CACHE_NAME = 'uc-juridico-v6-18-0';
 const APP_SHELL = [
   './',
   './index.html',
