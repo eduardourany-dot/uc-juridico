@@ -1,6 +1,6 @@
 # UC Jurídico — Instalação e operação
 
-Versão atual: **v6.16.0**
+Versão atual: **v6.17.0**
 URL pública: https://eduardourany-dot.github.io/uc-juridico/
 Repositório: https://github.com/eduardourany-dot/uc-juridico
 
@@ -201,9 +201,10 @@ Verificar:
 | v6.11–v6.13 | ✅ entregue | Lembretes via Web Notifications in-app (B.1) |
 | v6.14 | ✅ entregue | FCM real (B.2) — push 24/7 com app fechado + cache em memória |
 | v6.15 | ✅ entregue | Sprint 3 C — email Gmail Workspace nos marcos críticos (T-1/T-0/T+1) |
-| v6.16 | ✅ em produção | **Módulo Financeiro A.1** — Bancos + Transações + Visão Geral (briefing em [docs/BRIEFING_Financeiro.md](docs/BRIEFING_Financeiro.md)) |
-| **v6.17** | **próxima** | Módulo Financeiro A.2 — Cartões + Categorias com orçamento + filtros avançados |
-| v6.18+ | planejado | A.3 (Honorários parcelados) → A.4 (Recorrências + Balancete) → CRM clientes → Agenda unificada |
+| v6.16 | ✅ entregue | Módulo Financeiro A.1 — Bancos + Transações + Visão Geral |
+| v6.17 | ✅ em produção | **Módulo Financeiro A.2** — Cartões + Categorias com orçamento + filtros avançados |
+| **v6.18** | **próxima** | Módulo Financeiro A.3 — Honorários parcelados + integração com Processos |
+| v6.19+ | planejado | A.4 (Recorrências + Balancete) → A.5 (Push parcela vencendo) → CRM clientes |
 | v7.x | planejado | Módulo Petições com Claude API (briefing em [docs/BRIEFING_Peticoes.md](docs/BRIEFING_Peticoes.md)) |
 
 Pendências menores:
