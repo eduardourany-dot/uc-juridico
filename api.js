@@ -412,6 +412,20 @@ const RemoteDB = {
   async savePeticao(p) { return await upsert_('peticoes', p); },
   async deletePeticao(id) { return await softDelete_('peticoes', id); },
 
+  // ====== Petições — Geração via Claude API (v6.35, Sprint Pet.3) ======
+  // briefing: string (requerimento do advogado)
+  // contextoSnapshot: { processo, cliente, eventos[], prazos[], jurisprudencia[] }
+  // opts: { modeloPromptSistema?, tipo?, modeloApi? }
+  async gerarPeticaoIA(briefing, contextoSnapshot, opts = {}) {
+    return await callAppsScript('gerarPeticaoIA', null, {
+      briefing,
+      contextoSnapshot,
+      modeloPromptSistema: opts.modeloPromptSistema || '',
+      tipo: opts.tipo || 'outro',
+      modeloApi: opts.modeloApi || 'claude-opus-4-7'
+    });
+  },
+
   // Jurisprudência
   async getJurisprudenceByProcess(pid) {
     return (await getAll_('jurisprudencia')).filter(j => j.processId === pid);

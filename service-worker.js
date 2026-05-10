@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.34.0 (Petições Pet.2: export .docx + 5 templates seed instaláveis com 1 clique)
-const CACHE_NAME = 'uc-juridico-v6-34-0';
+// Service Worker — UC Jurídico v6.35.0 (Petições Pet.3: proxy Apps Script → Claude API + botão "Gerar com IA" no processo)
+const CACHE_NAME = 'uc-juridico-v6-35-0';
 const APP_SHELL = [
   './',
   './index.html',

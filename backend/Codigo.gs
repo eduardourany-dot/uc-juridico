@@ -86,6 +86,7 @@ function handle_(e, method) {
       case 'getPdfUrl':     return json_(actionGetPdfUrl_(ctx));
       case 'listUsuarios':  return json_(actionListUsuarios_(ctx));
       case 'addUsuario':    return json_(actionAddUsuario_(ctx));
+      case 'gerarPeticaoIA':return json_(actionGerarPeticaoIA_(ctx));
       default: return json_({ error: 'unknown_action', action: action }, 400);
     }
   } catch (err) {

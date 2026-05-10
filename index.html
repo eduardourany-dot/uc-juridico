@@ -288,7 +288,7 @@ body{background:var(--uc-paper);color:var(--uc-graphite);font-size:15px;-webkit-
         <span id="themeQuickToggleLabel">☀ Claro</span>
       </button>
       <p class="smallcaps font-serif" style="margin:0 0 4px;">Urany de Castro · 30 anos</p>
-      <p style="margin:0;">100% local · v6.34.0</p>
+      <p style="margin:0;">100% local · v6.35.0</p>
     </div>
   </aside>
 
@@ -509,6 +509,7 @@ const DB = {
   async getPeticoesByProcess(_pid) { return []; },
   async savePeticao(p) { return p; },
   async deletePeticao(_id) {},
+  async gerarPeticaoIA(_b, _c, _o) { throw new Error('Geração IA exige login (precisa do backend Apps Script).'); },
 
   // ====== Módulo Financeiro (stubs IndexedDB — sobrescritos por UC_RemoteDB no boot) ======
   async getAllBancos() { return []; },
@@ -2461,6 +2462,7 @@ async function renderProcessDetail() {
         <button class="btn btn-outline btn-sm" onclick="editProcessFlow()">Editar</button>
         <button class="btn btn-secondary btn-sm" onclick="generateProcessFiche()">Gerar ficha</button>
         <button class="btn btn-primary btn-sm" onclick="gerarPeticaoFlow()" title="Gerar petição a partir de modelo cadastrado">📝 Gerar petição</button>
+        <button class="btn btn-primary btn-sm" onclick="gerarPeticaoIAFlow()" title="Gerar com Claude API (cobrança no seu Anthropic)" style="background:#8a6f3d;border-color:#8a6f3d;">🤖 Gerar com IA</button>
       </div>
     </div>
 
@@ -9286,15 +9288,18 @@ async function _modeloFormFlow({ titulo, modelo, isNovo }) {
     { label: 'Tipo', name: 'tipo', type: 'select', default: modelo.tipo || 'manifestacao', options: tipoOpts },
     { label: 'Descrição (opcional)', name: 'descricao', placeholder: 'Quando usar este modelo', default: modelo.descricao || '' },
     { label: 'Ativo', name: 'ativo', type: 'checkbox', default: modelo.ativo !== false },
-    { label: 'Conteúdo (Markdown · use {{placeholders}})', name: 'conteudo', type: 'textarea', rows: 18,
+    { label: 'Conteúdo (Markdown · use {{placeholders}})', name: 'conteudo', type: 'textarea', rows: 14,
       placeholder: 'EXCELENTÍSSIMO SENHOR DOUTOR JUIZ DE DIREITO DA {{processo.court}}\n\nProcesso nº {{processo.cnj}}\n\n{{cliente.nome}}, já qualificado nos autos…\n\n{{data.cidadeData}}.',
-      default: modelo.conteudo || '' }
+      default: modelo.conteudo || '' },
+    { label: 'System prompt da IA (opcional · usado em "🤖 Gerar com IA")', name: 'promptSistema', type: 'textarea', rows: 6,
+      placeholder: 'Você é um advogado tributarista sênior. Foque em CTN, jurisprudência STJ/STF. Estrutura: cabeçalho · qualificação · fatos · direito · pedidos. Output Markdown puro.',
+      default: modelo.promptSistema || '' }
   ], {
     confirmLabel: isNovo ? 'Cadastrar' : 'Salvar',
-    intro: 'Use placeholders como <code>{{cliente.nome}}</code>, <code>{{processo.cnj}}</code>, <code>{{data.hojeExtenso}}</code>. Lista completa em "Modelos" na sidebar.'
+    intro: 'Use placeholders como <code>{{cliente.nome}}</code>, <code>{{processo.cnj}}</code>, <code>{{data.hojeExtenso}}</code>. <strong>System prompt</strong> é instrução pra Claude quando este template for escolhido em "Gerar com IA" — deixe vazio pra usar o prompt genérico.'
   });
   if (!r) return;
-  const [nome, tipo, descricao, ativo, conteudo] = r;
+  const [nome, tipo, descricao, ativo, conteudo, promptSistema] = r;
   if (!nome?.trim()) { toast('Nome obrigatório', '', 'error'); return; }
   if (!conteudo?.trim()) { toast('Conteúdo vazio', '', 'error'); return; }
 
@@ -9306,6 +9311,7 @@ async function _modeloFormFlow({ titulo, modelo, isNovo }) {
     tipo: tipo || 'outro',
     descricao: descricao?.trim() || '',
     conteudo: conteudo,
+    promptSistema: (promptSistema || '').trim(),
     ativo: !!ativo,
     createdAt: modelo.createdAt || now,
     updatedAt: now,
@@ -9560,7 +9566,8 @@ async function _salvarPeticao({ conteudo, titulo, status, modelo, processo, peti
     await DB.savePeticao(atualizado);
     toast('Petição atualizada', '', 'success');
   } else {
-    // Primeira versão
+    // Primeira versão — incorpora metadata da IA se for o caso
+    const ia = state._peticaoGerada?.iaMeta || null;
     const novo = {
       id: uid(),
       escritorio_id: 'UC',
@@ -9573,16 +9580,20 @@ async function _salvarPeticao({ conteudo, titulo, status, modelo, processo, peti
       numeroVersao: 1,
       peticaoOriginalId: null,
       status: 'rascunho',
-      geradoPor: 'manual',
-      briefing: '',
-      contextoSnapshot: null,
-      custoEstimado: 0, tokensInput: 0, tokensOutput: 0,
+      geradoPor: ia ? (ia.modeloApi || 'claude') : 'manual',
+      briefing: ia ? (ia.briefing || '') : '',
+      contextoSnapshot: ia ? (ia.contextoSnapshot || null) : null,
+      custoEstimado: ia ? (ia.custoEstimado || 0) : 0,
+      tokensInput: ia ? (ia.tokensInput || 0) : 0,
+      tokensOutput: ia ? (ia.tokensOutput || 0) : 0,
       criadoEm: now,
       criadoPor: me,
       atualizadoEm: now
     };
     await DB.savePeticao(novo);
     toast('Petição salva como rascunho', 'v1', 'success');
+    // Limpa metadata da IA — próxima save sem regenerar não duplica
+    if (state._peticaoGerada) state._peticaoGerada.iaMeta = null;
   }
 
   // Refresh do processo se está aberto
@@ -9974,6 +9985,157 @@ async function removerPeticao(id) {
   await DB.deletePeticao(id);
   toast('Versão removida', '', 'success');
   if (state.currentRoute === 'process') renderProcessDetail();
+}
+
+// === Geração via Claude API (Pet.3 — v6.35) ===
+// Fluxo paralelo ao gerarPeticaoFlow (template-only): coleta briefing
+// do advogado, monta contexto a partir do processo aberto, chama o
+// proxy Apps Script. O modelo de petição é OPCIONAL — quando escolhido,
+// seu campo promptSistema vira o system prompt da Claude.
+
+async function gerarPeticaoIAFlow() {
+  const proc = state._processView?.p;
+  if (!proc) { toast('Abra um processo primeiro', '', 'error'); return; }
+
+  // Coleta modelos cadastrados (opcionalmente, escolher um pra usar como systemPrompt)
+  let modelos = [];
+  try { modelos = await DB.getAllPeticaoModelos(); } catch (_) {}
+  const ativos = modelos.filter(m => m.ativo !== false);
+
+  // Coleta cliente
+  let cliente = null;
+  if (proc.clienteId) {
+    try {
+      const clientes = await DB.getAllClientes();
+      cliente = clientes.find(c => c.id === proc.clienteId) || null;
+    } catch (_) {}
+  }
+
+  const tiposOpts = [
+    { value: '', label: '— sem template (system prompt genérico) —' },
+    ...ativos.sort((a,b) => (a.nome || '').localeCompare(b.nome || '', 'pt-BR'))
+      .map(m => {
+        const tipoLabel = (PETICAO_TIPOS.find(t => t.value === m.tipo) || {}).label || m.tipo;
+        return { value: m.id, label: '[' + tipoLabel + '] ' + m.nome };
+      })
+  ];
+
+  const escolha = await showModal('🤖 Gerar petição com Claude', [
+    { label: 'Briefing — o que precisa ser argumentado?', name: 'briefing', type: 'textarea', rows: 8,
+      placeholder: 'Ex: Fazer contestação alegando ilegitimidade passiva. Cliente nunca contratou o serviço executado pela autora. CDA é nula porque não consta o número do processo administrativo. Pedir improcedência total.' },
+    { label: 'Template (opcional — só pra system prompt)', name: 'modeloId', type: 'select', default: '', options: tiposOpts },
+    { label: 'Tipo da peça', name: 'tipo', type: 'select', default: 'outro',
+      options: PETICAO_TIPOS.map(t => ({ value: t.value, label: t.label })) }
+  ], {
+    confirmLabel: '🤖 Gerar (envia pra Claude)',
+    intro: `Processo: <strong>${escapeHtml(proc.name || proc.cnj || '—')}</strong>${cliente ? ' · Cliente: <strong>' + escapeHtml(cliente.nome) + '</strong>' : ''}<br>O briefing + contexto do processo (CNJ, partes, eventos recentes, prazos ativos) são enviados pra Claude. Cobranças por uso da API ficam na sua conta Anthropic.`
+  });
+  if (!escolha) return;
+  const [briefing, modeloId, tipo] = escolha;
+  if (!briefing?.trim()) { toast('Briefing vazio', '', 'error'); return; }
+
+  const modeloEscolhido = ativos.find(m => m.id === modeloId);
+
+  // Monta contextoSnapshot
+  const [eventos, prazos, juris] = await Promise.all([
+    DB.getEventsByProcess(proc.id).catch(() => []),
+    DB.getDeadlinesByProcess(proc.id).catch(() => []),
+    DB.getJurisprudenceByProcess(proc.id).catch(() => [])
+  ]);
+  const eventosRecentes = eventos
+    .sort((a, b) => new Date(b.date || b.data || 0) - new Date(a.date || a.data || 0))
+    .slice(0, 10)
+    .map(e => ({ date: e.date || e.data, type: e.type, descricao: e.descricao || e.description }));
+  const prazosAtivos = prazos.filter(d => prazoEstaAtivo(d))
+    .map(d => ({ deadlineDate: d.deadlineDate, description: d.description, type: d.type }));
+  const jurisprudencia = juris.map(j => ({ type: j.type, citation: j.citation }));
+
+  const contextoSnapshot = {
+    processo: {
+      cnj: proc.cnj, name: proc.name, area: proc.area,
+      type: proc.type || proc.tipo, court: proc.court, comarca: proc.comarca,
+      parteAdversa: proc.parteAdversa,
+      advogadoResponsavel: proc.advogadoResponsavel,
+      advogadoSuplente: proc.advogadoSuplente
+    },
+    cliente: cliente ? {
+      nome: cliente.nome, cpfCnpj: cliente.cpfCnpj, tipoPessoa: cliente.tipoPessoa,
+      email: cliente.email, telefone: cliente.telefone,
+      endereco: _composeEnderecoCli(cliente)
+    } : null,
+    eventos: eventosRecentes,
+    prazos: prazosAtivos,
+    jurisprudencia
+  };
+
+  // Modal de loading enquanto Claude responde
+  const loading = document.createElement('div');
+  loading.className = 'modal-backdrop';
+  loading.innerHTML = `
+    <div class="modal" style="max-width: 360px; text-align: center; padding: 32px 24px;">
+      <div class="spinner" style="margin: 0 auto 16px; width: 32px; height: 32px;"></div>
+      <h3 class="modal-title">Gerando petição…</h3>
+      <p class="help-text" style="margin-bottom: 0;">Claude está redigindo. Pode levar 30s a 2min dependendo do tamanho.</p>
+    </div>
+  `;
+  $('modalContainer').appendChild(loading);
+
+  let resp;
+  try {
+    resp = await DB.gerarPeticaoIA(briefing, contextoSnapshot, {
+      modeloPromptSistema: modeloEscolhido?.promptSistema || '',
+      tipo: tipo || 'outro',
+      modeloApi: 'claude-opus-4-7'
+    });
+  } catch (e) {
+    loading.remove();
+    const msg = e?.message || String(e);
+    if (msg.indexOf('api_key_ausente') >= 0) {
+      toast('Claude API não configurada', 'Veja Configurações → Aparência ou Apps Script', 'error');
+    } else {
+      toast('Falha ao gerar', msg.slice(0, 100), 'error');
+    }
+    return;
+  }
+  loading.remove();
+
+  if (!resp?.conteudo) {
+    toast('Resposta vazia', 'Claude não retornou conteúdo. Tente refrasear o briefing.', 'error');
+    return;
+  }
+
+  toast(
+    'Petição gerada · ' + resp.tokensInput + '↓ ' + resp.tokensOutput + '↑',
+    'Custo estimado $' + (resp.custoEstimado || 0).toFixed(4),
+    'success'
+  );
+
+  // Estende o modelo escolhido (ou cria placeholder) pra o modal de preview saber o tipo/nome
+  const modeloPraModal = modeloEscolhido || { id: null, nome: 'Geração IA · ' + (PETICAO_TIPOS.find(t => t.value === tipo)?.label || tipo), tipo: tipo || 'outro' };
+
+  state._peticaoGerada = {
+    conteudo: resp.conteudo,
+    modelo: modeloPraModal,
+    processo: proc,
+    cliente,
+    iaMeta: {
+      modeloApi: resp.modelo,
+      tokensInput: resp.tokensInput,
+      tokensOutput: resp.tokensOutput,
+      custoEstimado: resp.custoEstimado,
+      briefing: briefing,
+      contextoSnapshot
+    }
+  };
+
+  _abrirModalPeticaoGerada({
+    conteudo: resp.conteudo,
+    modelo: modeloPraModal,
+    processo: proc,
+    cliente,
+    faltUnicos: [],
+    peticaoExistente: null
+  });
 }
 
 // === Geração de .docx (Pet.2 — v6.34) ===

@@ -1,6 +1,6 @@
 # UC Jurídico — Instalação e operação
 
-Versão atual: **v6.34.0**
+Versão atual: **v6.35.0**
 URL pública: https://eduardourany-dot.github.io/uc-juridico/
 Repositório: https://github.com/eduardourany-dot/uc-juridico
 
@@ -148,6 +148,7 @@ Tem três caminhos:
 | `backend/Bootstrap.gs` | Setup inicial da planilha de allowlist (legado) |
 | `backend/Lembretes.gs` | Cron horário de envio FCM (Sprint 3 B.2) — JWT manual + Firestore REST API + FCM HTTP v1 |
 | `backend/Backup.gs` | Cron semanal de backup Firestore → Drive (v6.28+) |
+| `backend/Peticoes.gs` | Proxy Apps Script → Anthropic Claude API (v6.35+, Sprint Pet.3) |
 
 Funções de teste manual em `Lembretes.gs`:
 - `_testarFcmAccessToken()` — confirma JWT/OAuth2
@@ -203,6 +204,66 @@ Funções de teste manual em `Backup.gs`:
 2. Abrir Firebase Console → Firestore Database → coleção a restaurar
 3. Para coleção limpa: importar via script Node.js usando Admin SDK + JSON do backup
 4. Para restauração de doc específico: copiar campo `collections.<colecao>.<docId>` e colar manualmente no console
+
+---
+
+## Setup da geração com IA — Claude API (v6.35+, Sprint Pet.3)
+
+> Permite gerar petições com Claude diretamente do app. Briefing + contexto do processo (CNJ, partes, eventos, prazos, jurisprudência) viram input pra Claude, que devolve a peça em Markdown. Custos cobrados na conta Anthropic.
+
+### 1. Conta Anthropic
+1. Criar conta em https://console.anthropic.com
+2. **Billing** → adicionar cartão de crédito · começar com US$ 20–50 de saldo
+3. **API Keys** → **Create Key** → copiar a chave (`sk-ant-...`) e guardar em local seguro (Anthropic só mostra uma vez)
+
+### 2. Apps Script
+1. https://script.google.com → projeto **UC Jurídico Backend**
+2. **+ Novo arquivo** → **Script** → nome `Peticoes`
+3. Apagar conteúdo padrão e colar tudo de [backend/Peticoes.gs](uc-juridico/backend/Peticoes.gs)
+4. Verificar que `Codigo.gs` foi atualizado (já tem `case 'gerarPeticaoIA'` no switch — se você copiou Codigo.gs antes da v6.35, atualize)
+5. 💾 Salvar
+
+### 3. Script Property
+1. ⚙ **Configurações do projeto** → **Propriedades do script** → **+ Adicionar**
+2. Nome: `CLAUDE_API_KEY`
+   Valor: a chave `sk-ant-...` copiada no passo 1
+3. **Salvar propriedades do script**
+
+### 4. Validar
+1. Editor → função `_testarClaudeKey` → ▶ Executar
+2. Logs em **Execuções**:
+   - `✓ CLAUDE_API_KEY configurada (length 108, prefix sk-ant-...)`
+3. Função `_testarChamadaClaude` → ▶ Executar (faz uma chamada pequena pra validar)
+4. Logs:
+   - `✓ Resposta: ping`
+   - `Input tokens: X · Output: Y`
+   - `Custo estimado: $0.0000XX`
+
+### 5. Re-implantar Web App (importante!)
+> Apps Script só expõe novas actions após re-implantação.
+
+1. Editor → **Implantar** → **Gerenciar implantações**
+2. Editar a implantação atual → **Versão** = "Nova versão" → **Implantar**
+3. URL fica a mesma — frontend não precisa mudar nada
+
+### 6. Usar
+- No app: abrir um processo → header → **🤖 Gerar com IA** (botão dourado ao lado de "📝 Gerar petição")
+- Modal pede briefing (o que você quer argumentar). Opcionalmente escolha um template já cadastrado pra usar seu `promptSistema` (campo novo no editor de modelo, /modelos → editar → "System prompt da IA")
+- Submit → Claude responde em ~30s a 2min → preview com texto editável + Save / .docx / Copy
+- Petição salva fica vinculada ao processo com `geradoPor: claude-opus-4-7`, `briefing`, `contextoSnapshot`, `tokensInput/Output`, `custoEstimado` (rastreável depois)
+
+### Funções de teste manual em `Peticoes.gs`
+- `_testarClaudeKey()` — valida que a chave está em Script Properties
+- `_testarChamadaClaude()` — faz uma chamada real pequena pra confirmar conexão
+- Audit log: cada geração registra `audit_(email, 'gerarPeticaoIA', 'peticoes', ...)`
+
+### Modelos suportados
+Trocar a constante `CLAUDE_MODELO_DEFAULT` em `Peticoes.gs`:
+- `claude-opus-4-7` — mais capaz, $15/$75 por 1M tokens (default)
+- `claude-sonnet-4-6` — equilíbrio, $3/$15 por 1M tokens
+- `claude-haiku-4-5` — rápido/barato, $0.80/$4 por 1M tokens
+
+Estimativa de custo por petição: ~$0.10–$0.50 com Opus, ~$0.02–$0.10 com Sonnet, ~$0.005 com Haiku (depende do tamanho do contexto + output).
 
 ---
 
@@ -270,7 +331,8 @@ Verificar:
 | v6.31.0 | ✅ entregue | Petições Pet.1 — versionamento + aba "Petições" no processo + editor com "+ Nova versão" / status / arquivar. |
 | v6.32.0 | ✅ entregue | Indicadores por advogado — rota `/equipe` com picker + 8 cards + listas (próximos prazos, vencidos não-cumpridos, próximos compromissos, processos por papel). |
 | v6.33.0 | ✅ entregue | Modo escuro completo — 3 opções (☀/🌙/🖥 Auto via matchMedia) + toggle rápido na sidebar. |
-| **v6.34.0** | ✅ em produção | **Petições Pet.2 — .docx + templates seed** — exportação Word .docx via lib `docx@8.5.0` lazy-loaded (CDN UMD ~700KB carregado só na 1ª chamada). Formatação automática: Garamond 12pt, justificado, espaçamento 1.5, parágrafos com indent 0.5", margens 3cm/2cm (padrão jurídico), cabeçalho centralizado com nome do escritório + OAB e rodapé com endereços + paginação. Headings (## ###) e linhas em CAIXA ALTA viram títulos centralizados. **5 templates seed instaláveis com 1 clique** em `/modelos` quando vazio: Contestação base · Manifestação simples · Apelação com pedido de reforma · Embargos à execução fiscal (LEF 16) · Exceção de pré-executividade (Súmula 393/STJ) — todos com placeholders prontos. |
+| v6.34.0 | ✅ entregue | Petições Pet.2 — export .docx (Garamond + cabeçalho/rodapé) + 5 templates seed instaláveis com 1 clique. |
+| **v6.35.0** | ✅ em produção | **Petições Pet.3 — proxy Claude API** — `backend/Peticoes.gs` chama Anthropic via `UrlFetchApp` com chave em `CLAUDE_API_KEY` (Script Properties). Action `gerarPeticaoIA` exposta via `Codigo.gs` (mesmo Web App OAuth). Frontend: botão dourado **🤖 Gerar com IA** no header do processo, modal pede briefing + escolha opcional de template (cujo `promptSistema` vira system prompt). Claude responde em ~30s–2min, modal preview pré-preenchido, save persiste `geradoPor: claude-opus-4-7`, `briefing`, `contextoSnapshot` (processo + cliente + eventos + prazos + jurisprudência), `tokensInput/Output`, `custoEstimado`. Modelos ganham campo `promptSistema` (textarea opcional no editor). Setup descrito acima. |
 | v6.22+ | planejado | Retomada Financeiro A.4 (Recorrências + Balancete) → A.5 → Agenda unificada |
 | v7.x | planejado | Módulo Petições com Claude API (briefing em [docs/BRIEFING_Peticoes.md](docs/BRIEFING_Peticoes.md)) |
 
