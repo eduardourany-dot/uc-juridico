@@ -268,7 +268,7 @@ body{background:var(--uc-paper);color:var(--uc-graphite);font-size:15px;-webkit-
 
     <div style="margin-top:auto;padding:16px 20px;border-top:1px solid var(--uc-line-soft);font-size:11px;color:var(--uc-warm-gray);text-align:center;">
       <p class="smallcaps font-serif" style="margin:0 0 4px;">Urany de Castro · 30 anos</p>
-      <p style="margin:0;">100% local · v6.19.2</p>
+      <p style="margin:0;">100% local · v6.19.3</p>
     </div>
   </aside>
 
@@ -688,6 +688,32 @@ function showModal(title, fields, options = {}) {
           await f.onChange(getValue(i), { getValue, setValue, getByName, setByName });
         } catch (e) {
           console.warn('Modal onChange error', e);
+        }
+      });
+    });
+
+    // Liga onInput por campo (callback síncrono que retorna o valor formatado).
+    // Útil pra máscaras dinâmicas (CPF, telefone) e transformações em tempo real
+    // (uppercase, lowercase). Preserva aproximadamente a posição do cursor.
+    fields.forEach((f, i) => {
+      if (typeof f.onInput !== 'function') return;
+      const el = getField(i);
+      if (!el || el.type === 'checkbox' || el.tagName === 'SELECT') return;
+      el.addEventListener('input', () => {
+        try {
+          const oldValue = el.value;
+          const oldCursor = el.selectionStart || 0;
+          const newValue = f.onInput(oldValue, { getValue, setValue, getByName, setByName });
+          if (newValue == null || newValue === oldValue) return;
+          el.value = newValue;
+          // Tenta preservar cursor: ajusta pelo delta de length (heurística)
+          try {
+            const delta = newValue.length - oldValue.length;
+            const newPos = Math.max(0, Math.min(newValue.length, oldCursor + delta));
+            el.setSelectionRange(newPos, newPos);
+          } catch (_) {}
+        } catch (e) {
+          console.warn('Modal onInput error', e);
         }
       });
     });
@@ -1124,6 +1150,43 @@ function _validarCpfCnpj(s) {
   const limpo = String(s).replace(/\D/g, '');
   return limpo.length === 11 || limpo.length === 14;
 }
+
+// Máscara progressiva CPF/CNPJ.
+// CPF (≤11 dígitos): 000.000.000-00
+// CNPJ (12-14 dígitos): 00.000.000/0000-00
+function _maskCpfCnpj(s) {
+  const v = String(s || '').replace(/\D/g, '').slice(0, 14);
+  if (v.length === 0) return '';
+  if (v.length <= 11) {
+    // CPF
+    return v
+      .replace(/^(\d{3})(\d)/, '$1.$2')
+      .replace(/^(\d{3})\.(\d{3})(\d)/, '$1.$2.$3')
+      .replace(/^(\d{3})\.(\d{3})\.(\d{3})(\d)/, '$1.$2.$3-$4');
+  }
+  // CNPJ
+  return v
+    .replace(/^(\d{2})(\d)/, '$1.$2')
+    .replace(/^(\d{2})\.(\d{3})(\d)/, '$1.$2.$3')
+    .replace(/^(\d{2})\.(\d{3})\.(\d{3})(\d)/, '$1.$2.$3/$4')
+    .replace(/^(\d{2})\.(\d{3})\.(\d{3})\/(\d{4})(\d)/, '$1.$2.$3/$4-$5');
+}
+
+// Máscara progressiva de telefone BR.
+// Fixo (10 dígitos):  (00) 0000-0000
+// Celular (11 díg.):  (00) 00000-0000
+function _maskTelefone(s) {
+  const v = String(s || '').replace(/\D/g, '').slice(0, 11);
+  if (v.length === 0) return '';
+  if (v.length <= 2) return '(' + v;
+  if (v.length <= 6) return '(' + v.slice(0, 2) + ') ' + v.slice(2);
+  if (v.length <= 10) {
+    // Fixo: (00) 0000-0000
+    return '(' + v.slice(0, 2) + ') ' + v.slice(2, 6) + '-' + v.slice(6);
+  }
+  // Celular: (00) 00000-0000
+  return '(' + v.slice(0, 2) + ') ' + v.slice(2, 7) + '-' + v.slice(7);
+}
 function _validarEmail(s) {
   if (!s) return true;
   return /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(s);
@@ -1182,14 +1245,22 @@ async function _formClienteFlow(clienteAtual) {
     ? clienteAtual.endereco : null;
 
   const fields = [
-    { label: 'Nome (razão social ou nome completo)', name: 'nome', default: clienteAtual?.nome || '' },
+    { label: 'Nome (razão social ou nome completo) — sempre em CAIXA ALTA', name: 'nome',
+      default: (clienteAtual?.nome || '').toUpperCase(),
+      onInput: v => String(v || '').toUpperCase() },
     { label: 'Tipo de pessoa', name: 'tipoPessoa', type: 'select', default: clienteAtual?.tipoPessoa || 'PJ', options: [
       { value: 'PJ', label: 'Pessoa Jurídica' },
       { value: 'PF', label: 'Pessoa Física' }
     ]},
-    { label: 'CPF/CNPJ', name: 'cpfCnpj', default: clienteAtual?.cpfCnpj || '', placeholder: 'opcional, só dígitos ou formatado' },
+    { label: 'CPF/CNPJ', name: 'cpfCnpj',
+      default: _maskCpfCnpj(clienteAtual?.cpfCnpj || ''),
+      placeholder: 'CPF: 000.000.000-00 · CNPJ: 00.000.000/0000-00',
+      onInput: v => _maskCpfCnpj(v) },
     { label: 'Email', name: 'email', default: clienteAtual?.email || '', placeholder: 'opcional' },
-    { label: 'Telefone', name: 'telefone', default: clienteAtual?.telefone || '', placeholder: 'opcional' },
+    { label: 'Telefone', name: 'telefone',
+      default: _maskTelefone(clienteAtual?.telefone || ''),
+      placeholder: 'Fixo: (00) 0000-0000 · Celular: (00) 00000-0000',
+      onInput: v => _maskTelefone(v) },
 
     // Bloco de endereço — CEP dispara busca ViaCEP automática
     { label: 'CEP', name: 'cep', default: clienteAtual?.cep || '', placeholder: '00000-000 — preenche automaticamente os demais',
@@ -1243,11 +1314,11 @@ async function _formClienteFlow(clienteAtual) {
 
   const cliente = {
     id: clienteAtual?.id || uid(),
-    nome: nome.trim(),
+    nome: nome.trim().toUpperCase(),
     tipoPessoa: tipoPessoa || 'PJ',
-    cpfCnpj: (cpfCnpj || '').trim() || null,
+    cpfCnpj: _maskCpfCnpj((cpfCnpj || '').trim()) || null,
     email: (email || '').trim() || null,
-    telefone: (telefone || '').trim() || null,
+    telefone: _maskTelefone((telefone || '').trim()) || null,
     cep: (cep || '').trim() || null,
     logradouro: (logradouro || '').trim() || null,
     numero: (numero || '').trim() || null,

@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.19.2 (Cadastro cliente: endereço auto via CEP/ViaCEP + showModal com onChange)
-const CACHE_NAME = 'uc-juridico-v6-19-2';
+// Service Worker — UC Jurídico v6.19.3 (Cadastro cliente: nome em CAIXA ALTA + máscaras CPF/CNPJ + telefone em tempo real)
+const CACHE_NAME = 'uc-juridico-v6-19-3';
 const APP_SHELL = [
   './',
   './index.html',
