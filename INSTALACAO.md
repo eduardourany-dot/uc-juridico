@@ -1,6 +1,6 @@
 # UC Jurídico — Instalação e operação
 
-Versão atual: **v6.27.0**
+Versão atual: **v6.28.0**
 URL pública: https://eduardourany-dot.github.io/uc-juridico/
 Repositório: https://github.com/eduardourany-dot/uc-juridico
 
@@ -147,12 +147,62 @@ Tem três caminhos:
 | `backend/Codigo.gs` | doGet/doPost legacy — só PDFs via Drive (a maioria das collections migrou pra Firestore) |
 | `backend/Bootstrap.gs` | Setup inicial da planilha de allowlist (legado) |
 | `backend/Lembretes.gs` | Cron horário de envio FCM (Sprint 3 B.2) — JWT manual + Firestore REST API + FCM HTTP v1 |
+| `backend/Backup.gs` | Cron semanal de backup Firestore → Drive (v6.28+) |
 
 Funções de teste manual em `Lembretes.gs`:
 - `_testarFcmAccessToken()` — confirma JWT/OAuth2
 - `_testarFirestoreList()` — confirma leitura Firestore via REST
 - `_testarFcmEnvio()` — envia push de teste (cole token na constante)
 - `_previewLembretesDePrazo()` — varre prazos sem enviar
+
+Funções de teste manual em `Backup.gs`:
+- `_testarBackupConfig()` — valida pasta Drive + access token + lista das coleções
+- `executarBackupAgora()` — roda backup sem esperar trigger
+- `_listarBackupsExistentes()` — mostra arquivos atuais na pasta Drive
+
+---
+
+## Setup do backup automático (v6.28+)
+
+> Backup semanal automático de **todas as coleções Firestore** para uma pasta Drive privada do escritório. Mantém os 12 arquivos mais recentes (rotação automática). Roda em paralelo ao cron de lembretes — sem custo adicional no Spark.
+
+### 1. Criar pasta Drive
+1. Acesse https://drive.google.com com a conta `eduardourany@uranydecastro.com.br` (mesma do Apps Script)
+2. Criar pasta `UC Juridico — Backups` em local privado (não compartilhar)
+3. Abrir a pasta → copiar o ID da URL (parte após `folders/`)
+   Ex.: `https://drive.google.com/drive/folders/1AbCdEfGhIj...` → ID = `1AbCdEfGhIj...`
+
+### 2. Apps Script
+1. Abrir https://script.google.com → projeto **UC Jurídico Backend**
+2. Criar novo arquivo `Backup.gs` → colar o conteúdo de `backend/Backup.gs`
+3. Em **⚙ Configurações do projeto → Propriedades do script**, adicionar:
+   - `BACKUP_DRIVE_FOLDER_ID` = ID copiado no passo 1
+4. Validar: rodar função `_testarBackupConfig` → verificar logs em "Execuções":
+   - ✓ Pasta Drive acessível
+   - ✓ Access token Firestore OK
+   - Lista das coleções com contagem de docs
+
+### 3. Trigger semanal
+1. Em **⏰ Acionadores → + Adicionar acionador**:
+   - Função: `cron_backupSemanal`
+   - Origem: `Acionado por tempo`
+   - Tipo: `Acionador semanal`
+   - Dia: `Todo domingo`
+   - Hora: `Entre 03:00 e 04:00`
+2. Salvar — primeiro run acontece no próximo domingo de manhã
+
+### 4. Rodar primeiro backup imediatamente
+- Editor Apps Script → função `executarBackupAgora` → ▶ Executar
+- Logs em "Execuções" mostram tamanho, total de docs, ID do arquivo Drive
+- A aba `Configurações → Backup` no app vai começar a mostrar o "Último backup automático"
+
+### Restauração (caso precise)
+> Não há automação — restauração é manual e raríssima.
+
+1. Baixar o `.json` mais recente da pasta Drive
+2. Abrir Firebase Console → Firestore Database → coleção a restaurar
+3. Para coleção limpa: importar via script Node.js usando Admin SDK + JSON do backup
+4. Para restauração de doc específico: copiar campo `collections.<colecao>.<docId>` e colar manualmente no console
 
 ---
 
@@ -213,7 +263,8 @@ Verificar:
 | v6.25.0 | ✅ entregue | Sprint Agenda Unificada — compromissos (audiência/reunião/diligência/prazo admin) com push+email T-1/T-0, aba no processo, seção no cliente, bloco no dashboard inicial |
 | v6.25.1 | ✅ entregue | Agenda consolidada — prazos processuais ativos aparecem como cards read-only na rota `/agenda` (toggle "Incluir prazos do processo"). Cumprimento/edição segue em /prazos. |
 | v6.26.0 | ✅ entregue | Relatório executivo mensal — rota `/relatorio` consolida pulso financeiro, processual, clientes e compromissos. Seletor de mês + export CSV. |
-| **v6.27.0** | ✅ em produção | **Modelos de petição (Pet.0)** — rota `/modelos` com CRUD de templates Markdown + placeholders clicáveis (`{{cliente.nome}}`, `{{processo.cnj}}`, `{{data.hojeExtenso}}`, etc.). Botão "📝 Gerar petição" no header do processo: escolhe modelo → autopopula → preview editável → copiar / baixar .md / baixar .txt. Substituição literal (sem Claude API ainda — base pro v7.x). |
+| v6.27.0 | ✅ entregue | Modelos de petição (Pet.0) — rota `/modelos` com CRUD de templates Markdown + placeholders. Botão "📝 Gerar petição" no header do processo. Substituição literal (sem Claude API ainda). |
+| **v6.28.0** | ✅ em produção | **Backup automático Drive** — cron semanal Apps Script (`backend/Backup.gs`) faz dump JSON de todas as 19 coleções Firestore para pasta privada Drive do escritório. Rotação automática (mantém 12 mais recentes). Card "Último backup automático" em `Configurações → Backup` mostra timestamp/tamanho/link Drive. Setup descrito acima. |
 | v6.22+ | planejado | Retomada Financeiro A.4 (Recorrências + Balancete) → A.5 → Agenda unificada |
 | v7.x | planejado | Módulo Petições com Claude API (briefing em [docs/BRIEFING_Peticoes.md](docs/BRIEFING_Peticoes.md)) |
 

@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.27.0 (Modelos de petição com placeholders: rota /modelos + botão Gerar petição no processo)
-const CACHE_NAME = 'uc-juridico-v6-27-0';
+// Service Worker — UC Jurídico v6.28.0 (Backup automático Drive: cron semanal Apps Script + card de status em Configurações)
+const CACHE_NAME = 'uc-juridico-v6-28-0';
 const APP_SHELL = [
   './',
   './index.html',

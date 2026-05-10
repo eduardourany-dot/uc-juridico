@@ -281,7 +281,7 @@ body{background:var(--uc-paper);color:var(--uc-graphite);font-size:15px;-webkit-
 
     <div style="margin-top:auto;padding:16px 20px;border-top:1px solid var(--uc-line-soft);font-size:11px;color:var(--uc-warm-gray);text-align:center;">
       <p class="smallcaps font-serif" style="margin:0 0 4px;">Urany de Castro · 30 anos</p>
-      <p style="margin:0;">100% local · v6.27.0</p>
+      <p style="margin:0;">100% local · v6.28.0</p>
     </div>
   </aside>
 
@@ -10015,7 +10015,47 @@ function renderSettingsTab(tab, prompts, defaultPromptId) {
   if (tab === 'backup') {
     const lastBackup = state.settings.lastBackupAt;
     const days = lastBackup ? Math.floor((Date.now() - lastBackup) / 86400000) : null;
+    const cloud = state.settings.lastBackupCloud || null;
+    const cloudDays = cloud?.timestamp ? Math.floor((Date.now() - cloud.timestamp) / 86400000) : null;
     return `
+      <!-- Backup automático Drive (cron Apps Script) -->
+      <div class="card mb-3" style="border-left: 3px solid var(--uc-green);">
+        <h3 class="font-serif text-lg font-semibold smallcaps mb-2" style="color: var(--uc-black);">☁ Backup automático no Drive</h3>
+        <p class="text-sm" style="color: var(--uc-graphite); margin-bottom: 12px;">
+          Cron semanal Apps Script faz dump JSON de todas as coleções Firestore e salva em pasta privada do Drive do escritório. Mantém os ${'12'} backups mais recentes (rotação automática).
+        </p>
+        ${cloud ? `
+          <div style="background: var(--uc-cream); padding: 12px; border-radius: 6px; margin-bottom: 8px;">
+            <p class="text-xs smallcaps" style="color: var(--uc-warm-gray); margin: 0 0 6px;">Último backup automático</p>
+            <p style="font-size: 14px; color: var(--uc-black); margin: 0 0 4px;">
+              <strong>${cloudDays === 0 ? 'hoje' : cloudDays + ' dia' + (cloudDays !== 1 ? 's' : '') + ' atrás'}</strong>
+              · ${formatDateTime(cloud.timestamp)}
+            </p>
+            <p style="font-size: 12px; color: var(--uc-warm-gray); margin: 0 0 4px;">
+              ${escapeHtml(cloud.fileName || '')} ·
+              ${cloud.totalDocs || '?'} doc(s) ·
+              ${cloud.sizeBytes ? (cloud.sizeBytes / 1024).toFixed(1) + ' KB' : '?'}
+              ${cloud.duration_ms ? ' · gerado em ' + (cloud.duration_ms / 1000).toFixed(1) + 's' : ''}
+            </p>
+            ${cloud.fileUrl ? `<a href="${escapeHtml(cloud.fileUrl)}" target="_blank" rel="noopener" style="color: var(--uc-gold); font-size: 12px;">↗ Abrir no Drive</a>` : ''}
+            ${cloudDays !== null && cloudDays > 10 ? `<p class="help-text" style="margin-top: 8px; color: var(--uc-amber);">⚠ Mais de 10 dias sem backup automático — verifique o cron Apps Script.</p>` : ''}
+          </div>
+        ` : `
+          <div style="background: var(--uc-cream); padding: 12px; border-radius: 6px; margin-bottom: 8px;">
+            <p style="font-size: 13px; color: var(--uc-warm-gray); margin: 0;">
+              <em>Backup automático ainda não configurado.</em> Para ativar: criar pasta no Drive,
+              copiar <code>backend/Backup.gs</code> no Apps Script, configurar Script Property
+              <code>BACKUP_DRIVE_FOLDER_ID</code> e criar trigger semanal em
+              <code>cron_backupSemanal</code>. Detalhes em
+              <a onclick="navigate('settings')" style="color: var(--uc-gold); cursor: pointer;">INSTALACAO.md</a>.
+            </p>
+          </div>
+        `}
+        <p class="help-text" style="margin-top: 4px;">
+          Independente do backup local — o Drive é a salvaguarda do escritório, o local é do dispositivo.
+        </p>
+      </div>
+
       <div class="card mb-3">
         <h3 class="font-serif text-lg font-semibold smallcaps mb-3" style="color: var(--uc-black);">Backup local</h3>
         <p style="color: var(--uc-graphite); font-size: 14px; margin-bottom: 12px;">
@@ -12333,6 +12373,7 @@ async function bootApp() {
   state.settings.theme = await DB.getSetting('theme', 'light');
   state.settings.backupReminder = await DB.getSetting('backupReminder', true);
   state.settings.lastBackupAt = await DB.getSetting('lastBackupAt', null);
+  state.settings.lastBackupCloud = await DB.getSetting('lastBackup', null);
   state.settings.notificacoesAtivas = await DB.getSetting('notificacoesAtivas', true);
   applyTheme(state.settings.theme);
 
