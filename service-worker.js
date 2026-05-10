@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.29.0 (Ações inline de prazo na agenda: cumprir/suspender/cancelar/reabrir direto no card)
-const CACHE_NAME = 'uc-juridico-v6-29-0';
+// Service Worker — UC Jurídico v6.30.0 (Calendário visual mensal na agenda: toggle Lista/Calendário + grid 7×N com chips por dia)
+const CACHE_NAME = 'uc-juridico-v6-30-0';
 const APP_SHELL = [
   './',
   './index.html',

@@ -1,6 +1,6 @@
 # UC Jurídico — Instalação e operação
 
-Versão atual: **v6.29.0**
+Versão atual: **v6.30.0**
 URL pública: https://eduardourany-dot.github.io/uc-juridico/
 Repositório: https://github.com/eduardourany-dot/uc-juridico
 
@@ -265,7 +265,8 @@ Verificar:
 | v6.26.0 | ✅ entregue | Relatório executivo mensal — rota `/relatorio` consolida pulso financeiro, processual, clientes e compromissos. Seletor de mês + export CSV. |
 | v6.27.0 | ✅ entregue | Modelos de petição (Pet.0) — rota `/modelos` com CRUD de templates Markdown + placeholders. Botão "📝 Gerar petição" no header do processo. Substituição literal (sem Claude API ainda). |
 | v6.28.0 | ✅ entregue | Backup automático Drive — cron semanal Apps Script faz dump JSON de todas as 19 coleções para pasta privada do Drive. Rotação automática (12 mais recentes). |
-| **v6.29.0** | ✅ em produção | **Ações inline de prazo na agenda** — botões ✓ cumprir · ⏸ suspender · ⊘ cancelar · ▶ reabrir direto no card de prazo dentro de `/agenda`, sem precisar navegar para `/prazos`. Funções `abrirModalCumprimento` / `abrirModalSuspender` / `abrirModalCancelar` / `reabrirPrazo` / `deleteDeadline` agora são agnósticas ao contexto (helpers `_findPrazoForAction` + `_refreshAfterPrazoAction`). |
+| v6.29.0 | ✅ entregue | Ações inline de prazo na agenda — botões ✓ cumprir · ⏸ suspender · ⊘ cancelar · ▶ reabrir direto no card. Funções de ação agnósticas ao contexto. |
+| **v6.30.0** | ✅ em produção | **Calendário visual mensal** — toggle 📋 Lista / 📅 Calendário no header de `/agenda`. Grid 7×N do mês com chips de compromissos (cor pelo tipo) + chips de prazo (âmbar/vermelho pela urgência). Hoje destacado, fins de semana e dias passados desbotados. Navegação ‹ › + botão "Hoje". Clique no dia abre modal com lista expandida + atalho "+ Novo compromisso neste dia". |
 | v6.22+ | planejado | Retomada Financeiro A.4 (Recorrências + Balancete) → A.5 → Agenda unificada |
 | v7.x | planejado | Módulo Petições com Claude API (briefing em [docs/BRIEFING_Peticoes.md](docs/BRIEFING_Peticoes.md)) |
 

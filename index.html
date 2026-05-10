@@ -281,7 +281,7 @@ body{background:var(--uc-paper);color:var(--uc-graphite);font-size:15px;-webkit-
 
     <div style="margin-top:auto;padding:16px 20px;border-top:1px solid var(--uc-line-soft);font-size:11px;color:var(--uc-warm-gray);text-align:center;">
       <p class="smallcaps font-serif" style="margin:0 0 4px;">Urany de Castro · 30 anos</p>
-      <p style="margin:0;">100% local · v6.29.0</p>
+      <p style="margin:0;">100% local · v6.30.0</p>
     </div>
   </aside>
 
@@ -7993,10 +7993,25 @@ async function renderAgenda() {
   const f = state._agFiltro;
   if (f.incluirPrazos === undefined) f.incluirPrazos = true;
 
+  // v6.30: modo de visualização (lista vs calendário) + mês de referência
+  if (!state._agViewMode) state._agViewMode = 'lista';
+  if (!state._agCalRef) {
+    const t = new Date();
+    state._agCalRef = { ano: t.getFullYear(), mes: t.getMonth() };
+  }
+  const viewMode = state._agViewMode;
+  const calRef = state._agCalRef;
+
   // Resolve range de datas
   let dataInicioISO = '', dataFimISO = '';
   const hoje = new Date(); hoje.setHours(0,0,0,0);
-  if (f.periodo === 'semana') {
+  if (viewMode === 'calendario') {
+    // Calendário sempre mostra o mês de calRef inteiro, ignora f.periodo
+    const ini = new Date(calRef.ano, calRef.mes, 1);
+    const fim = new Date(calRef.ano, calRef.mes + 1, 0);
+    dataInicioISO = ini.toISOString().slice(0, 10);
+    dataFimISO = fim.toISOString().slice(0, 10);
+  } else if (f.periodo === 'semana') {
     dataInicioISO = hoje.toISOString().slice(0, 10);
     dataFimISO = new Date(hoje.getTime() + 7 * 86400000).toISOString().slice(0, 10);
   } else if (f.periodo === 'prox30') {
@@ -8071,15 +8086,54 @@ async function renderAgenda() {
   Object.values(porDia).forEach(arr => arr.sort((a, b) => (a.ts || '').localeCompare(b.ts || '')));
   const diasOrdenados = Object.keys(porDia).sort();
 
+  const calMesLabel = new Date(calRef.ano, calRef.mes, 1)
+    .toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
+
   $('appContent').innerHTML = `
     <div class="page-header">
       <div>
         <h1 class="page-title"><span class="smallcaps-prefix">Agenda</span></h1>
         <p class="page-subtitle">${compromissos.length} compromisso(s) · ${proximos7.length} nos próximos 7 dias${prazosOverlay.length ? ' · ⏰ ' + prazosOverlay.length + ' prazo(s) na visão' : ''}${venceram > 0 ? ' · <span style="color: var(--uc-red);">⚠ ' + venceram + ' compromisso(s) venceu(ram) sem marcação</span>' : ''}</p>
       </div>
-      <button class="btn btn-primary" onclick="novoCompromissoFlow()">+ Novo compromisso</button>
+      <div class="flex gap-2 items-center">
+        <div style="display: inline-flex; border: 1px solid var(--uc-line); border-radius: 6px; overflow: hidden;">
+          <button class="btn ${viewMode === 'lista' ? 'btn-primary' : 'btn-ghost'} btn-sm" style="border-radius: 0; min-width: 80px;" onclick="_setAgViewMode('lista')">📋 Lista</button>
+          <button class="btn ${viewMode === 'calendario' ? 'btn-primary' : 'btn-ghost'} btn-sm" style="border-radius: 0; min-width: 100px;" onclick="_setAgViewMode('calendario')">📅 Calendário</button>
+        </div>
+        <button class="btn btn-primary" onclick="novoCompromissoFlow()">+ Novo compromisso</button>
+      </div>
     </div>
 
+    ${viewMode === 'calendario' ? `
+      <div class="card mb-3" style="padding: 10px; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;">
+        <div class="flex gap-2 items-center">
+          <button class="btn btn-ghost btn-sm" onclick="_navegarMesAgenda(-1)" title="Mês anterior">‹</button>
+          <strong style="font-size: 16px; text-transform: capitalize; min-width: 160px; text-align: center;">${calMesLabel}</strong>
+          <button class="btn btn-ghost btn-sm" onclick="_navegarMesAgenda(1)" title="Próximo mês">›</button>
+          <button class="btn btn-outline btn-sm" onclick="_irParaMesAtualAgenda()" title="Voltar pra hoje">Hoje</button>
+        </div>
+        <div class="flex gap-2 items-center flex-wrap" style="font-size: 12px;">
+          <select class="select" style="font-size: 12px;" onchange="_setAgFiltro('tipo', this.value)">
+            <option value="todos" ${f.tipo === 'todos' ? 'selected' : ''}>Todos os tipos</option>
+            ${COMPROMISSO_TIPOS.map(t => `<option value="${t.value}" ${f.tipo === t.value ? 'selected' : ''}>${t.icon} ${t.label}</option>`).join('')}
+          </select>
+          <select class="select" style="font-size: 12px;" onchange="_setAgFiltro('responsavel', this.value)">
+            <option value="" ${!f.responsavel ? 'selected' : ''}>Todos responsáveis</option>
+            ${ADVOGADOS.map(n => `<option value="${escapeHtml(n)}" ${f.responsavel === n ? 'selected' : ''}>${escapeHtml(n.split(' ')[0])} ${escapeHtml(n.split(' ').slice(-1)[0])}</option>`).join('')}
+          </select>
+          <select class="select" style="font-size: 12px;" onchange="_setAgFiltro('status', this.value)">
+            <option value="ativos" ${f.status === 'ativos' ? 'selected' : ''}>Ativos</option>
+            <option value="todos" ${f.status === 'todos' ? 'selected' : ''}>Todos status</option>
+            ${COMPROMISSO_STATUS.map(s => `<option value="${s.value}" ${f.status === s.value ? 'selected' : ''}>${s.label}</option>`).join('')}
+          </select>
+          <label style="display: flex; align-items: center; gap: 4px; cursor: pointer;">
+            <input type="checkbox" ${f.incluirPrazos ? 'checked' : ''} onchange="_setAgFiltro('incluirPrazos', this.checked)" style="cursor: pointer;">
+            <span>⏰ Prazos</span>
+          </label>
+        </div>
+      </div>
+      ${_renderAgendaCalendario(porDia, hoje, calRef, procById, cliById)}
+    ` : `
     <div class="card mb-3" style="padding: 10px;">
       <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; align-items: end;">
         <div>
@@ -8152,7 +8206,164 @@ async function renderAgenda() {
         </div>
       `;
     }).join('')}
+    `}
   `;
+  // Salva refs pra modais de dia consultarem sem refazer fetch
+  state._agData = { porDia, procById, cliById, today };
+}
+
+// Toggle entre lista e calendário
+function _setAgViewMode(mode) {
+  state._agViewMode = mode;
+  renderAgenda();
+}
+function _navegarMesAgenda(delta) {
+  const ref = state._agCalRef || { ano: new Date().getFullYear(), mes: new Date().getMonth() };
+  let novoAno = ref.ano, novoMes = ref.mes + delta;
+  if (novoMes < 0) { novoMes = 11; novoAno--; }
+  if (novoMes > 11) { novoMes = 0; novoAno++; }
+  state._agCalRef = { ano: novoAno, mes: novoMes };
+  renderAgenda();
+}
+function _irParaMesAtualAgenda() {
+  const t = new Date();
+  state._agCalRef = { ano: t.getFullYear(), mes: t.getMonth() };
+  renderAgenda();
+}
+
+// Grid 7×N do mês. Cada célula com até 3 chips visíveis + "+N mais".
+function _renderAgendaCalendario(porDia, hoje, calRef, procById, cliById) {
+  const ano = calRef.ano, mes = calRef.mes;
+  const primeiroDia = new Date(ano, mes, 1);
+  const ultimoDia = new Date(ano, mes + 1, 0);
+  const totalDias = ultimoDia.getDate();
+  // Domingo = 0 ... Sábado = 6
+  const offsetInicio = primeiroDia.getDay();
+  // Total de células = múltiplo de 7 que cobre o mês
+  const totalCelulas = Math.ceil((offsetInicio + totalDias) / 7) * 7;
+
+  const hojeISO = hoje.toISOString().slice(0, 10);
+  const semana = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
+
+  const celulas = [];
+  for (let i = 0; i < totalCelulas; i++) {
+    const diaNum = i - offsetInicio + 1;
+    if (diaNum < 1 || diaNum > totalDias) {
+      celulas.push({ vazio: true, dia: null });
+      continue;
+    }
+    const dt = new Date(ano, mes, diaNum);
+    const iso = dt.toISOString().slice(0, 10);
+    const eventos = porDia[iso] || [];
+    const dow = dt.getDay();
+    celulas.push({
+      vazio: false,
+      diaNum,
+      iso,
+      eventos,
+      isHoje: iso === hojeISO,
+      isPassado: iso < hojeISO,
+      isFimSemana: dow === 0 || dow === 6
+    });
+  }
+
+  return `
+    <style>
+      .ag-cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 1px; background: var(--uc-line); border: 1px solid var(--uc-line); border-radius: 6px; overflow: hidden; }
+      .ag-cal-head { background: var(--uc-cream); padding: 8px 6px; text-align: center; font-size: 11px; font-weight: 600; color: var(--uc-warm-gray); text-transform: uppercase; letter-spacing: 0.5px; }
+      .ag-cal-cell { background: white; min-height: 110px; padding: 6px; display: flex; flex-direction: column; gap: 3px; cursor: pointer; transition: background 0.1s; position: relative; }
+      .ag-cal-cell:hover { background: var(--uc-cream); }
+      .ag-cal-cell.vazio { background: var(--uc-cream); cursor: default; }
+      .ag-cal-cell.vazio:hover { background: var(--uc-cream); }
+      .ag-cal-cell.passado .ag-cal-day { color: var(--uc-warm-gray); }
+      .ag-cal-cell.fimsemana { background: #fbfaf6; }
+      .ag-cal-cell.hoje { background: var(--uc-amber-soft); }
+      .ag-cal-cell.hoje .ag-cal-day { color: var(--uc-red); font-weight: 700; }
+      .ag-cal-day { font-size: 13px; font-weight: 600; color: var(--uc-graphite); }
+      .ag-cal-chip { font-size: 10px; padding: 2px 5px; border-radius: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.4; cursor: pointer; }
+      .ag-cal-chip.compromisso { background: var(--uc-cream); border-left: 3px solid var(--uc-gold); color: var(--uc-graphite); }
+      .ag-cal-chip.prazo { background: var(--uc-amber-soft); border-left: 3px solid var(--uc-amber); color: var(--uc-graphite); }
+      .ag-cal-chip.prazo.urgente { background: var(--uc-red-soft); border-left-color: var(--uc-red); }
+      .ag-cal-mais { font-size: 10px; color: var(--uc-gold); padding: 2px 0; font-weight: 500; }
+      @media (max-width: 768px) {
+        .ag-cal-cell { min-height: 70px; padding: 4px 2px; }
+        .ag-cal-chip { font-size: 9px; padding: 1px 3px; }
+        .ag-cal-day { font-size: 11px; }
+      }
+    </style>
+    <div class="ag-cal-grid">
+      ${semana.map(d => `<div class="ag-cal-head">${d}</div>`).join('')}
+      ${celulas.map(c => {
+        if (c.vazio) return `<div class="ag-cal-cell vazio"></div>`;
+        const cls = ['ag-cal-cell'];
+        if (c.isHoje) cls.push('hoje');
+        if (c.isPassado) cls.push('passado');
+        if (c.isFimSemana) cls.push('fimsemana');
+        const visiveis = c.eventos.slice(0, 3);
+        const restantes = c.eventos.length - visiveis.length;
+        return `
+          <div class="${cls.join(' ')}" onclick="_abrirDiaAgenda('${c.iso}')">
+            <div class="ag-cal-day">${c.diaNum}</div>
+            ${visiveis.map(e => {
+              if (e.kind === 'compromisso') {
+                const meta = _agTipoMeta(e.item.tipo);
+                const hora = e.item.dataHoraInicio ? new Date(e.item.dataHoraInicio).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '';
+                return `<div class="ag-cal-chip compromisso" style="border-left-color: ${meta.cor};" onclick="event.stopPropagation(); editarCompromisso('${e.item.id}')">${meta.icon} ${hora ? hora + ' ' : ''}${escapeHtml((e.item.titulo || meta.label).slice(0, 22))}</div>`;
+              } else {
+                const d = e.item;
+                const dl = new Date(d.deadlineDate); dl.setHours(0,0,0,0);
+                const days = Math.ceil((dl - hoje) / 86400000);
+                const urgente = days <= 1;
+                return `<div class="ag-cal-chip prazo${urgente ? ' urgente' : ''}" onclick="event.stopPropagation(); _abrirDiaAgenda('${c.iso}')" title="⏰ Prazo">⏰ ${escapeHtml((d.description || d.type || 'Prazo').slice(0, 22))}</div>`;
+              }
+            }).join('')}
+            ${restantes > 0 ? `<div class="ag-cal-mais">+${restantes} mais</div>` : ''}
+          </div>
+        `;
+      }).join('')}
+    </div>
+    <p class="help-text" style="margin-top: 12px; text-align: center;">
+      Clique em um dia para ver detalhes · clique em um compromisso para editar
+    </p>
+  `;
+}
+
+// Modal com tudo daquele dia (compromissos + prazos), reusa cards completos
+function _abrirDiaAgenda(iso) {
+  const data = state._agData;
+  if (!data) return;
+  const eventos = data.porDia[iso] || [];
+  const dt = new Date(iso + 'T12:00:00');
+  const labelDia = dt.toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' });
+
+  const modal = document.createElement('div');
+  modal.className = 'modal-backdrop';
+  modal.innerHTML = `
+    <div class="modal scroll-thin" style="max-width: 700px;">
+      <h3 class="modal-title" style="text-transform: capitalize;">${escapeHtml(labelDia)}</h3>
+      <p class="help-text" style="margin-bottom: 12px;">${eventos.length} item(s)${eventos.length > 0 ? '' : ' · nada agendado'}</p>
+      <div style="margin-bottom: 16px;">
+        ${eventos.length === 0 ? `
+          <p style="color: var(--uc-warm-gray); padding: 16px; text-align: center;">Sem eventos neste dia.</p>
+        ` : eventos.map(e => e.kind === 'compromisso'
+          ? _renderCompromissoCard(e.item, data.procById, data.cliById)
+          : _renderPrazoNaAgenda(e.item, data.procById, data.today)
+        ).join('')}
+      </div>
+      <div class="flex gap-2">
+        <button class="btn btn-outline" id="_diaFechar" style="flex: 1;">Fechar</button>
+        <button class="btn btn-primary" id="_diaNovo" style="flex: 1;">+ Novo compromisso neste dia</button>
+      </div>
+    </div>
+  `;
+  $('modalContainer').appendChild(modal);
+  const cleanup = () => modal.remove();
+  document.getElementById('_diaFechar').onclick = cleanup;
+  document.getElementById('_diaNovo').onclick = () => {
+    cleanup();
+    state._agNovoCompromissoDataInicial = iso;
+    novoCompromissoFlow();
+  };
 }
 
 // Card de prazo dentro da agenda — v6.29: botões inline pra cumprir/suspender/cancelar
@@ -8296,12 +8507,21 @@ async function novoCompromissoFlow(opts) {
   const me = (window.UC_Auth?.getUser?.() || {}).email || '';
   const meuNome = defaultAdvogado(me) || '';
 
-  // Default próximo dia útil 9h
-  const amanha = new Date();
-  amanha.setDate(amanha.getDate() + 1);
-  amanha.setHours(9, 0, 0, 0);
-  amanha.setMinutes(amanha.getMinutes() - amanha.getTimezoneOffset());
-  const amanhaISO = amanha.toISOString().slice(0, 16);
+  // Default próximo dia útil 9h — ou data clicada no calendário
+  let dataInicialISO;
+  if (state._agNovoCompromissoDataInicial) {
+    const d = new Date(state._agNovoCompromissoDataInicial + 'T09:00:00');
+    d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
+    dataInicialISO = d.toISOString().slice(0, 16);
+    delete state._agNovoCompromissoDataInicial;  // consumido
+  } else {
+    const amanha = new Date();
+    amanha.setDate(amanha.getDate() + 1);
+    amanha.setHours(9, 0, 0, 0);
+    amanha.setMinutes(amanha.getMinutes() - amanha.getTimezoneOffset());
+    dataInicialISO = amanha.toISOString().slice(0, 16);
+  }
+  const amanhaISO = dataInicialISO;
 
   const r = await showModal('Novo compromisso', [
     { label: 'Tipo', name: 'tipo', type: 'select', default: 'audiencia',
