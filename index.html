@@ -1004,11 +1004,6 @@ async function renderDashboard() {
         <h1 class="page-title"><span class="smallcaps-prefix">Início</span></h1>
         <p class="page-subtitle">Visão geral da carteira · ${new Date().toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</p>
       </div>
-      <div class="flex gap-2">
-        <button class="btn btn-secondary btn-sm" onclick="djenRunSearch()">🔔 Buscar DJEN</button>
-        <button class="btn btn-outline btn-sm" onclick="navigate('tools')">Ferramentas PDF</button>
-        <button class="btn btn-primary btn-sm" onclick="newProcessFlow()">+ Novo processo</button>
-      </div>
     </div>
 
     ${showBackupReminder ? `
@@ -4204,6 +4199,7 @@ async function renderDeadlines() {
         <p class="page-subtitle">${active.length} publicação(ões) com prazo ativo na carteira</p>
       </div>
       <div class="flex gap-2">
+        <button class="btn btn-secondary btn-sm" onclick="djenRunSearch()" title="Buscar publicações novas no Diário de Justiça Eletrônico (CNJ)">🔔 Pesquisar DJ</button>
         <button class="btn btn-outline btn-sm" onclick="exportDeadlinesCsv()">Exportar CSV</button>
       </div>
     </div>
@@ -11900,7 +11896,7 @@ function renderSettingsTab(tab, prompts, defaultPromptId) {
       <div class="card">
         <h4 class="font-serif font-semibold smallcaps mb-2" style="color: var(--uc-black);">Ações</h4>
         <div class="flex gap-2 flex-wrap">
-          <button class="btn btn-secondary" onclick="djenRunSearch()">🔔 Buscar agora</button>
+          <button class="btn btn-secondary" onclick="djenRunSearch()">🔔 Pesquisar agora</button>
           <button class="btn btn-outline" onclick="djenViewHistory()">Ver histórico de publicações</button>
         </div>
       </div>
@@ -13722,7 +13718,7 @@ async function djenReExtractParties(processId) {
   // Buscar todas as publicações DJEN deste processo
   const pubs = await DB.getDjenPublicationsByProcess(processId);
   if (!pubs || pubs.length === 0) {
-    toast('Nenhuma publicação DJEN', 'Este processo não tem publicações DJEN importadas. Importe via "Buscar DJEN" no dashboard.', 'error');
+    toast('Nenhuma publicação DJEN', 'Este processo não tem publicações DJEN importadas. Importe via "Pesquisar DJ" na aba Publicações.', 'error');
     return;
   }
 
