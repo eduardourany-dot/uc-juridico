@@ -2421,17 +2421,17 @@ async function newProcessFlow() {
         <h3 class="modal-title">Cadastrar novo processo</h3>
         <div class="space-y-4 mb-5">
           <div>
-            <label class="label">Nome do caso/processo</label>
+            <label class="label">Descrição</label>
             <p class="help-text" style="margin-bottom: 6px;">Ex: Pérola RJ · Centroaidar FIDC · Quimpharma TRF1</p>
-            <input type="text" class="input" id="newProcessName" placeholder="Nome de identificação">
+            <input type="text" class="input" id="newProcessName" placeholder="Descrição do caso">
           </div>
           <div>
             <label class="label">Número CNJ (opcional)</label>
             <div style="display: flex; gap: 8px; align-items: stretch;">
               <input type="text" class="input" id="newProcessCnj" placeholder="0000000-00.0000.0.00.0000" style="flex: 1;">
-              <button class="btn btn-secondary btn-sm" id="datajudPullBtn" type="button" onclick="datajudPullForNewProcess()" title="Buscar dados do processo no DataJud do CNJ" style="white-space: nowrap;">🔍 Puxar do DataJud</button>
+              <button class="btn btn-secondary btn-sm" id="datajudPullBtn" type="button" onclick="datajudPullForNewProcess()" title="Buscar dados do processo no DataJud do CNJ" style="white-space: nowrap;">🔍 Pesquisar CNJ</button>
             </div>
-            <p class="help-text" style="margin-top: 4px;">Cole o CNJ e clique em "Puxar do DataJud" para preencher automaticamente os demais campos.</p>
+            <p class="help-text" style="margin-top: 4px;">Cole o CNJ e clique em "Pesquisar CNJ" para preencher automaticamente os demais campos.</p>
           </div>
           <div>
             <label class="label">Cliente</label>
@@ -2442,8 +2442,16 @@ async function newProcessFlow() {
             </div>
           </div>
           <div>
-            <label class="label">Tribunal/Vara</label>
-            <input type="text" class="input" id="newProcessCourt" placeholder="Ex: TJGO 1ª Vara · TRF1 7ª Turma">
+            <label class="label">Tribunal</label>
+            <input type="text" class="input" id="newProcessTribunal" placeholder="Ex: TJGO · TRF1 · STJ · TST">
+          </div>
+          <div>
+            <label class="label">Local de tramitação</label>
+            <input type="text" class="input" id="newProcessLocal" placeholder="Ex: 1ª Vara Cível · 7ª Turma · Plenário">
+          </div>
+          <div>
+            <label class="label">Comarca</label>
+            <input type="text" class="input" id="newProcessComarca" placeholder="Ex: Goiânia · Anápolis · Brasília">
           </div>
           <div>
             <label class="label">Área</label>
@@ -2521,7 +2529,12 @@ async function newProcessFlow() {
       const cliEscolhido = clientesAtivos.find(c => c.id === clienteId)
         || (await DB.getAllClientes()).find(c => c.id === clienteId);
       const client = cliEscolhido?.nome || '';
-      const court = document.getElementById('newProcessCourt').value.trim();
+      const tribunalRaw = document.getElementById('newProcessTribunal').value.trim();
+      const localRaw = document.getElementById('newProcessLocal').value.trim();
+      const comarca = document.getElementById('newProcessComarca').value.trim();
+      // Compatibilidade: campo legado `court` continua escrevendo um snapshot
+      // concatenado pra não quebrar relatórios / código que ainda lê p.court.
+      const court = [tribunalRaw, localRaw].filter(Boolean).join(' ');
       const area = document.getElementById('newProcessArea').value;
       const type = document.getElementById('newProcessType').value.trim();
       const polo = document.getElementById('newProcessPolo').value;
@@ -2577,7 +2590,10 @@ async function newProcessFlow() {
         cnj: cnj || null,
         clienteId: clienteId || null,
         client: client || null,                    // snapshot do nome (compat)
-        court: court || null,
+        tribunal: tribunalRaw || null,
+        localTramitacao: localRaw || null,
+        comarca: comarca || null,
+        court: court || null,                       // legado — concat "Tribunal Local" pra compat
         area,
         type: type || null,
         polo,
@@ -13055,8 +13071,9 @@ async function datajudPullForNewProcess() {
       if (el && value) el.value = value;
     };
     
-    // Tribunal sempre atualiza (foi a fonte autoritativa)
-    setAlways('newProcessCourt', `${data.tribunal} · ${data.orgaoJulgador}`);
+    // Tribunal / Local sempre atualizam (fonte autoritativa do CNJ)
+    setAlways('newProcessTribunal', data.tribunal || '');
+    setAlways('newProcessLocal', data.orgaoJulgador || '');
     
     // Tipo (classe) e área — atualiza se vazio
     setIfEmpty('newProcessType', data.classe);
