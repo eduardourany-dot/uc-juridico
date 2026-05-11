@@ -14073,9 +14073,11 @@ function _toggleNotificacoesPanel(force) {
   if (!panel) return;
   const willOpen = force !== undefined ? force : panel.classList.contains('hidden');
   if (willOpen) {
+    // Ao abrir, limpa flag de dismissed (usuário voltou a olhar)
+    sessionStorage.removeItem('uc_bell_dismissed');
     panel.classList.remove('hidden');
-    _renderSinoPanel();  // garante painel atualizado ao abrir
-    // Click outside fecha
+    _renderSinoPanel();
+    // Click outside fecha (sem dispensar — só esconde o painel)
     setTimeout(() => {
       const closeOnOutside = (e) => {
         if (!panel.contains(e.target) && !document.getElementById('ucBell').contains(e.target)) {
@@ -14086,7 +14088,10 @@ function _toggleNotificacoesPanel(force) {
       document.addEventListener('click', closeOnOutside);
     }, 50);
   } else {
+    // Click no × → dispensa o sino até próximo reload
     panel.classList.add('hidden');
+    sessionStorage.setItem('uc_bell_dismissed', '1');
+    document.getElementById('ucBell')?.classList.add('hidden');
   }
 }
 
@@ -14223,13 +14228,17 @@ async function _renderSino() {
   const bell = document.getElementById('ucBell');
   const badge = document.getElementById('ucBellBadge');
   if (!bell || !badge) return;
-  // Mostra sino só se há advogado logado válido
   const meuNome = defaultAdvogado((window.UC_Auth?.getUser?.() || {}).email || '');
-  if (meuNome) bell.classList.remove('hidden'); else bell.classList.add('hidden');
-  if (naoLidas > 0) {
+  const dismissed = sessionStorage.getItem('uc_bell_dismissed') === '1';
+  // Sino aparece SÓ se: advogado logado · tem item não-lido · não foi
+  // dispensado pelo × na sessão atual (reload limpa o flag).
+  const shouldShow = !!meuNome && naoLidas > 0 && !dismissed;
+  if (shouldShow) {
+    bell.classList.remove('hidden');
     badge.textContent = naoLidas > 99 ? '99+' : String(naoLidas);
     badge.classList.remove('hidden');
   } else {
+    bell.classList.add('hidden');
     badge.classList.add('hidden');
   }
   // Re-render do panel se aberto
