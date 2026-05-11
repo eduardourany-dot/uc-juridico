@@ -267,7 +267,7 @@ body{background:var(--uc-paper);color:var(--uc-graphite);font-size:15px;-webkit-
     </a>
     <a class="nav-item" data-route="deadlines">
       <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-      <span>Prazos</span>
+      <span>Publicações</span>
       <span id="navDeadlineCount" class="nav-badge hidden">0</span>
     </a>
     <a class="nav-item" data-route="agenda">
@@ -334,7 +334,7 @@ body{background:var(--uc-paper);color:var(--uc-graphite);font-size:15px;-webkit-
   </a>
   <a class="mobile-nav-item" data-route="deadlines">
     <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-    <span>Prazos</span>
+    <span>Publicações</span>
   </a>
   <a class="mobile-nav-item" data-route="financeiro">
     <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
@@ -1036,14 +1036,14 @@ async function renderDashboard() {
           <div style="padding: 20px; text-align: center;">
             <p style="font-size: 32px; margin: 0 0 8px;">✓</p>
             <p style="font-weight: 600; color: var(--uc-green); margin: 0 0 4px;">Tudo em dia!</p>
-            <p class="help-text" style="margin: 0;">Sem prazos urgentes, compromissos ou follow-ups pendentes pra você hoje.</p>
+            <p class="help-text" style="margin: 0;">Sem publicações urgentes, compromissos ou follow-ups pendentes pra você hoje.</p>
           </div>
         ` : `
           <div class="grid gap-3" style="grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));">
 
             ${prazosVencidos.length > 0 ? `
               <div style="background: var(--uc-red-soft); border-radius: 6px; padding: 10px;">
-                <p class="text-xs smallcaps" style="color: var(--uc-red); font-weight: 600; margin: 0 0 6px;">⚠ Prazos vencidos · ${prazosVencidos.length}</p>
+                <p class="text-xs smallcaps" style="color: var(--uc-red); font-weight: 600; margin: 0 0 6px;">⚠ Publicações vencidas · ${prazosVencidos.length}</p>
                 ${prazosVencidos.slice(0, 5).map(d => {
                   const proc = procsById[d.processId];
                   const dl = new Date(d.deadlineDate); dl.setHours(0,0,0,0);
@@ -1067,7 +1067,7 @@ async function renderDashboard() {
 
             ${prazosHoje.length > 0 ? `
               <div style="background: var(--uc-red-soft); border-radius: 6px; padding: 10px;">
-                <p class="text-xs smallcaps" style="color: var(--uc-red); font-weight: 600; margin: 0 0 6px;">🚨 Prazos HOJE · ${prazosHoje.length}</p>
+                <p class="text-xs smallcaps" style="color: var(--uc-red); font-weight: 600; margin: 0 0 6px;">🚨 Publicações HOJE · ${prazosHoje.length}</p>
                 ${prazosHoje.map(d => {
                   const proc = procsById[d.processId];
                   return `
@@ -1082,7 +1082,7 @@ async function renderDashboard() {
 
             ${prazosAmanha.length > 0 ? `
               <div style="background: var(--uc-amber-soft); border-radius: 6px; padding: 10px;">
-                <p class="text-xs smallcaps" style="color: var(--uc-amber); font-weight: 600; margin: 0 0 6px;">⏰ Prazos amanhã · ${prazosAmanha.length}</p>
+                <p class="text-xs smallcaps" style="color: var(--uc-amber); font-weight: 600; margin: 0 0 6px;">⏰ Publicações amanhã · ${prazosAmanha.length}</p>
                 ${prazosAmanha.map(d => {
                   const proc = procsById[d.processId];
                   return `
@@ -1168,7 +1168,7 @@ async function renderDashboard() {
         <div class="stat-meta">${processes.filter(p => p.status === 'active').length} ativos</div>
       </div>
       <div class="stat-card" style="${urgentDeadlines.length > 0 ? 'background: var(--uc-red-soft); border-color: var(--uc-red);' : ''}">
-        <div class="stat-label">Prazos urgentes</div>
+        <div class="stat-label">Publicações urgentes</div>
         <div class="stat-value" ${urgentDeadlines.length > 0 ? 'style="color: var(--uc-red);"' : ''}>${urgentDeadlines.length}</div>
         <div class="stat-meta">≤ 5 dias úteis</div>
       </div>
@@ -1178,7 +1178,7 @@ async function renderDashboard() {
         <div class="stat-meta">${expiredDeadlines.length > 0 ? 'Verifique' : 'Tudo em dia'}</div>
       </div>
       <div class="stat-card">
-        <div class="stat-label">Próximos prazos</div>
+        <div class="stat-label">Próximas publicações</div>
         <div class="stat-value">${activeDeadlines.length}</div>
         <div class="stat-meta">No total</div>
       </div>
@@ -1220,7 +1220,7 @@ async function renderDashboard() {
 
       <div class="card">
         <div class="flex justify-between items-center mb-4">
-          <h2 class="font-serif text-lg font-semibold smallcaps" style="color: var(--uc-black);">Prazos próximos</h2>
+          <h2 class="font-serif text-lg font-semibold smallcaps" style="color: var(--uc-black);">Próximas publicações</h2>
           <a class="text-sm font-medium" style="color: var(--uc-gold); cursor: pointer;" onclick="navigate('deadlines')">Ver todos →</a>
         </div>
         ${activeDeadlines.length === 0 ? `
@@ -2718,7 +2718,7 @@ async function renderProcessDetail() {
       <button class="detail-tab ${state._processView.activeTab === 'overview' ? 'active' : ''}" onclick="setProcessTab('overview')">Visão geral</button>
       <button class="detail-tab ${state._processView.activeTab === 'cliente' ? 'active' : ''}" onclick="setProcessTab('cliente')">Cliente</button>
       <button class="detail-tab ${state._processView.activeTab === 'events' ? 'active' : ''}" onclick="setProcessTab('events')">Eventos · ${events.length}</button>
-      <button class="detail-tab ${state._processView.activeTab === 'deadlines' ? 'active' : ''}" onclick="setProcessTab('deadlines')">Prazos · ${deadlines.filter(d => prazoEstaAtivo(d)).length}</button>
+      <button class="detail-tab ${state._processView.activeTab === 'deadlines' ? 'active' : ''}" onclick="setProcessTab('deadlines')">Publicações · ${deadlines.filter(d => prazoEstaAtivo(d)).length}</button>
       <button class="detail-tab ${state._processView.activeTab === 'jurisprudence' ? 'active' : ''}" onclick="setProcessTab('jurisprudence')">Jurisprudência · ${jurisprudence.length}</button>
       <button class="detail-tab ${state._processView.activeTab === 'notes' ? 'active' : ''}" onclick="setProcessTab('notes')">Notas · ${notes.length}</button>
       <button class="detail-tab ${state._processView.activeTab === 'honorarios' ? 'active' : ''}" onclick="setProcessTab('honorarios')">Honorários · ${honorarios.length}</button>
@@ -2902,7 +2902,7 @@ function renderProcessOverview(p, events, deadlines, notes, jurisprudence) {
   return `
     <div class="grid gap-4 mb-4" style="grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));">
       <div class="stat-card"><div class="stat-label">Eventos</div><div class="stat-value">${events.length}</div></div>
-      <div class="stat-card"><div class="stat-label">Prazos ativos</div><div class="stat-value">${activeDeadlines.length}</div></div>
+      <div class="stat-card"><div class="stat-label">Publicações ativas</div><div class="stat-value">${activeDeadlines.length}</div></div>
       <div class="stat-card"><div class="stat-label">Jurisprudência</div><div class="stat-value">${jurisprudence.length}</div></div>
       <div class="stat-card"><div class="stat-label">Notas</div><div class="stat-value">${notes.length}</div></div>
     </div>
@@ -3057,7 +3057,7 @@ function renderProcessOverview(p, events, deadlines, notes, jurisprudence) {
       <div class="grid gap-2" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));">
         <button class="btn btn-outline" onclick="importPdfToProcess()">📄 Importar PDF do auto</button>
         <button class="btn btn-outline" onclick="addNoteFlow()">📝 Nova nota</button>
-        <button class="btn btn-outline" onclick="addDeadlineFlow()">⏰ Adicionar prazo</button>
+        <button class="btn btn-outline" onclick="addDeadlineFlow()">⏰ Adicionar publicação</button>
         <button class="btn btn-outline" onclick="copyProcessToClaude()">📋 Copiar contexto p/ Claude</button>
         <button class="btn btn-outline" onclick="generateProcessFiche()">📜 Gerar ficha (Word)</button>
         <button class="btn btn-danger btn-sm" onclick="archiveProcessFlow()" style="grid-column: 1 / -1;">Arquivar processo</button>
@@ -3110,7 +3110,7 @@ function renderProcessDeadlines(p, deadlines) {
   return `
     <div class="flex justify-between items-center mb-3">
       <p class="text-sm" style="color: var(--uc-warm-gray);">${active.length} ativo(s)${labelHist ? ' · ' + labelHist : ''}</p>
-      <button class="btn btn-primary btn-sm" onclick="addDeadlineFlow()">+ Adicionar prazo</button>
+      <button class="btn btn-primary btn-sm" onclick="addDeadlineFlow()">+ Adicionar publicação</button>
     </div>
     ${deadlines.length === 0 ? `
       <div class="empty-state">
@@ -3869,10 +3869,10 @@ async function deleteNote(id) {
 async function addDeadlineFlow() {
   const proc = state._processView?.p;
   const tribunalInferido = inferirTribunal(proc?.court);
-  const r = await showModal('Adicionar prazo', [
+  const r = await showModal('Adicionar publicação', [
     { label: 'Descrição', placeholder: 'Ex: Embargos à execução · Resposta · Recurso' },
     { label: 'Data da intimação/publicação (opcional)', type: 'date' },
-    { label: 'Prazo', type: 'number', default: '15', min: '1', max: '365' },
+    { label: 'Prazo (dias)', type: 'number', default: '15', min: '1', max: '365' },
     { label: 'Unidade do prazo', type: 'select', default: 'UTEIS', options: [
       { value: 'UTEIS', label: 'Dias úteis' },
       { value: 'CORRIDOS', label: 'Dias corridos' }
@@ -4200,8 +4200,8 @@ async function renderDeadlines() {
   $('appContent').innerHTML = `
     <div class="page-header">
       <div>
-        <h1 class="page-title"><span class="smallcaps-prefix">Agenda</span></h1>
-        <p class="page-subtitle">${active.length} prazo(s) ativo(s) na carteira</p>
+        <h1 class="page-title"><span class="smallcaps-prefix">Publicações</span></h1>
+        <p class="page-subtitle">${active.length} publicação(ões) com prazo ativo na carteira</p>
       </div>
       <div class="flex gap-2">
         <button class="btn btn-outline btn-sm" onclick="exportDeadlinesCsv()">Exportar CSV</button>
@@ -4232,8 +4232,8 @@ async function renderDeadlines() {
 
     ${active.length === 0 ? `
       <div class="card empty-state">
-        <h3 class="empty-state-title">Nenhum prazo ativo</h3>
-        <p class="empty-state-msg">Você não tem prazos pendentes. Adicione prazos a partir de cada processo na aba "Prazos".</p>
+        <h3 class="empty-state-title">Nenhuma publicação ativa</h3>
+        <p class="empty-state-msg">Você não tem publicações com prazo pendente. Adicione publicações a partir de cada processo na aba "Publicações".</p>
       </div>
     ` : `
       ${expired.length > 0 ? `<h3 class="font-serif text-lg font-semibold smallcaps mb-3" style="color: var(--uc-red);">⚠ Vencidos · ${expired.length}</h3>${expired.sort((a,b) => a.days - b.days).map(d => renderGlobalDeadlineRow(d)).join('')}` : ''}
@@ -5129,7 +5129,7 @@ function renderBannerPrazos() {
 
   banner.innerHTML = `
     <span style="font-size:18px;">⚠</span>
-    <span style="flex:1;">${partes.join(' · ')} — clique pra abrir o painel de Prazos</span>
+    <span style="flex:1;">${partes.join(' · ')} — clique pra abrir o painel de Publicações</span>
     <button onclick="navigate('deadlines')" style="background:white;color:var(--uc-red,#a82a2a);border:0;padding:4px 12px;border-radius:4px;font-weight:600;cursor:pointer;font-size:12px;">Ver prazos</button>
     <button onclick="(function(){sessionStorage.setItem('uc-banner-prazos-fechado','1');document.getElementById('uc-banner-prazos').remove();})()" title="Esconder até próxima recarga" style="background:transparent;color:white;border:1px solid rgba(255,255,255,.4);padding:4px 8px;border-radius:4px;cursor:pointer;font-size:12px;">×</button>
   `;
@@ -8422,7 +8422,7 @@ async function renderAgenda() {
           </select>
           <label style="display: flex; align-items: center; gap: 4px; cursor: pointer;">
             <input type="checkbox" ${f.incluirPrazos ? 'checked' : ''} onchange="_setAgFiltro('incluirPrazos', this.checked)" style="cursor: pointer;">
-            <span>⏰ Prazos</span>
+            <span>⏰ Publicações</span>
           </label>
         </div>
       </div>
@@ -8473,7 +8473,7 @@ async function renderAgenda() {
           </div>
           <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 12px; color: var(--uc-graphite); padding-bottom: 6px; user-select: none;">
             <input type="checkbox" ${f.incluirPrazos ? 'checked' : ''} onchange="_setAgFiltro('incluirPrazos', this.checked)" style="cursor: pointer;">
-            <span>⏰ Incluir prazos do processo${f.tipo !== 'todos' ? ' <em style="color: var(--uc-warm-gray);">(oculto: filtro de tipo)</em>' : ''}</span>
+            <span>⏰ Incluir publicações do processo${f.tipo !== 'todos' ? ' <em style="color: var(--uc-warm-gray);">(oculto: filtro de tipo)</em>' : ''}</span>
           </label>
         </div>
       </div>
@@ -8697,7 +8697,7 @@ function _renderPrazoNaAgenda(d, procById, today) {
         <div style="flex: 1; min-width: 0;">
           <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px; flex-wrap: wrap;">
             <span style="font-size: 14px;">⏰</span>
-            <span class="badge badge-gray" style="font-size: 9px; background: var(--uc-graphite); color: var(--uc-cream);">PRAZO</span>
+            <span class="badge badge-gray" style="font-size: 9px; background: var(--uc-graphite); color: var(--uc-cream);">PUBLICAÇÃO</span>
             <strong style="color: var(--uc-black); font-size: 14px;">${escapeHtml(d.description || d.type || 'Prazo')}</strong>
             <span class="badge ${badgeClass}" style="font-size: 9px;">${label}</span>
             ${d.emDobro ? '<span class="badge badge-amber" style="font-size: 9px;">DOBRO</span>' : ''}
@@ -9126,12 +9126,12 @@ async function renderRelatorio() {
         <div class="stat-meta">vs ${procsNovosPrev.length} mês ant. · ${_renderDelta(_delta(procsNovos.length, procsNovosPrev.length))}</div>
       </div>
       <div class="stat-card" style="${prazosCumpridos.length === 0 && !ehMesAtual ? 'background: var(--uc-cream);' : ''}">
-        <div class="stat-label">Prazos cumpridos</div>
+        <div class="stat-label">Publicações cumpridas</div>
         <div class="stat-value" style="color: var(--uc-green);">${prazosCumpridos.length}</div>
         <div class="stat-meta">vs ${prazosCumpridosPrev.length} mês ant. · ${_renderDelta(_delta(prazosCumpridos.length, prazosCumpridosPrev.length))}</div>
       </div>
       <div class="stat-card" style="${prazosPerdidos.length > 0 ? 'background: var(--uc-red-soft); border-color: var(--uc-red);' : ''}">
-        <div class="stat-label">Prazos perdidos</div>
+        <div class="stat-label">Publicações perdidas</div>
         <div class="stat-value" style="${prazosPerdidos.length > 0 ? 'color: var(--uc-red);' : ''}">${prazosPerdidos.length}</div>
         <div class="stat-meta">${prazosPerdidos.length > 0 ? '⚠ regularizar' : 'Tudo em ordem'}</div>
       </div>
@@ -9177,8 +9177,8 @@ async function renderRelatorio() {
     <!-- Processual -->
     <div class="grid gap-4 mb-4" style="grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));">
       <div class="card">
-        <h3 class="font-serif text-lg font-semibold smallcaps mb-3" style="color: var(--uc-black);">Top advogados · prazos cumpridos no mês</h3>
-        ${topAdvCumpridos.length === 0 ? '<p class="help-text">Nenhum prazo cumprido no mês.</p>' : topAdvCumpridos.map(([adv, n]) => `
+        <h3 class="font-serif text-lg font-semibold smallcaps mb-3" style="color: var(--uc-black);">Top advogados · publicações cumpridas no mês</h3>
+        ${topAdvCumpridos.length === 0 ? '<p class="help-text">Nenhuma publicação cumprida no mês.</p>' : topAdvCumpridos.map(([adv, n]) => `
           <div style="display:flex; justify-content:space-between; align-items:center; padding:6px 0; border-bottom:1px solid var(--uc-line-soft); font-size:13px;">
             <span>${escapeHtml(adv)}</span>
             <strong style="color: var(--uc-green);">${n}</strong>
@@ -9187,8 +9187,8 @@ async function renderRelatorio() {
       </div>
 
       <div class="card">
-        <h3 class="font-serif text-lg font-semibold smallcaps mb-3" style="color: var(--uc-black);">Carga atual · prazos ativos por advogado</h3>
-        ${cargaSorted.length === 0 ? '<p class="help-text">Nenhum prazo ativo.</p>' : cargaSorted.map(([adv, n]) => `
+        <h3 class="font-serif text-lg font-semibold smallcaps mb-3" style="color: var(--uc-black);">Carga atual · publicações ativas por advogado</h3>
+        ${cargaSorted.length === 0 ? '<p class="help-text">Nenhuma publicação ativa.</p>' : cargaSorted.map(([adv, n]) => `
           <div style="display:flex; justify-content:space-between; align-items:center; padding:6px 0; border-bottom:1px solid var(--uc-line-soft); font-size:13px;">
             <span>${escapeHtml(adv)}</span>
             <strong style="color: ${n >= 15 ? 'var(--uc-red)' : n >= 8 ? 'var(--uc-amber)' : 'var(--uc-graphite)'};">${n}</strong>
@@ -9301,8 +9301,8 @@ async function _exportarRelatorioCsv() {
   let csv = 'Indicador;Valor\n';
   csv += `Mês de referência;${_mesLabel(ano, mes)}\n`;
   csv += `Processos novos;${procsNovos.length}\n`;
-  csv += `Prazos cumpridos;${cumpridos.length}\n`;
-  csv += `Prazos perdidos;${perdidos.length}\n`;
+  csv += `Publicações cumpridas;${cumpridos.length}\n`;
+  csv += `Publicações perdidas;${perdidos.length}\n`;
   csv += `Honorários recebidos (R$);${honRec.toFixed(2)}\n`;
   csv += `Receita realizada (R$);${receita.toFixed(2)}\n`;
   csv += `Despesa realizada (R$);${despesa.toFixed(2)}\n`;
@@ -10649,7 +10649,7 @@ async function renderEquipe() {
       <div class="stat-card" style="${ativosSnapshot.length >= 15 ? 'background: var(--uc-red-soft); border-color: var(--uc-red);' : ativosSnapshot.length >= 8 ? 'background: var(--uc-amber-soft);' : ''}">
         <div class="stat-label">Carga atual</div>
         <div class="stat-value" style="color: ${cargaCor};">${ativosSnapshot.length}</div>
-        <div class="stat-meta">prazos ativos · titular</div>
+        <div class="stat-meta">publicações ativas · titular</div>
       </div>
       <div class="stat-card" style="${vencidos.length > 0 ? 'background: var(--uc-red-soft); border-color: var(--uc-red);' : ''}">
         <div class="stat-label">Vencidos</div>
@@ -10690,7 +10690,7 @@ async function renderEquipe() {
 
     ${vencidos.length > 0 ? `
       <div class="card mb-4" style="border-left: 3px solid var(--uc-red); background: var(--uc-red-soft);">
-        <h3 class="font-serif text-lg font-semibold smallcaps mb-3" style="color: var(--uc-red);">⚠ Prazos vencidos não-cumpridos · ${vencidos.length}</h3>
+        <h3 class="font-serif text-lg font-semibold smallcaps mb-3" style="color: var(--uc-red);">⚠ Publicações vencidas não-cumpridas · ${vencidos.length}</h3>
         ${vencidos.sort((a, b) => new Date(a.deadlineDate) - new Date(b.deadlineDate)).slice(0, 10).map(d => {
           const proc = processos.find(p => p.id === d.processId);
           const dl = new Date(d.deadlineDate); dl.setHours(0,0,0,0);
@@ -10714,8 +10714,8 @@ async function renderEquipe() {
 
     <div class="grid gap-4 mb-4" style="grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));">
       <div class="card">
-        <h3 class="font-serif text-lg font-semibold smallcaps mb-3" style="color: var(--uc-black);">Próximos prazos · ${proxPrazos.length}</h3>
-        ${proxPrazos.length === 0 ? '<p class="help-text">Nenhum prazo ativo sob responsabilidade.</p>' : proxPrazos.map(d => {
+        <h3 class="font-serif text-lg font-semibold smallcaps mb-3" style="color: var(--uc-black);">Próximas publicações · ${proxPrazos.length}</h3>
+        ${proxPrazos.length === 0 ? '<p class="help-text">Nenhuma publicação ativa sob responsabilidade.</p>' : proxPrazos.map(d => {
           const proc = processos.find(p => p.id === d.processId);
           const dl = new Date(d.deadlineDate); dl.setHours(0,0,0,0);
           const days = Math.ceil((dl - today) / 86400000);
@@ -10922,7 +10922,7 @@ async function _renderEquipeComparativo(ano, mes) {
       <div class="stat-card">
         <div class="stat-label">Carga total</div>
         <div class="stat-value">${totais.cargaAtual}</div>
-        <div class="stat-meta">prazos ativos</div>
+        <div class="stat-meta">publicações ativas</div>
       </div>
       <div class="stat-card" style="${totais.vencidos > 0 ? 'background: var(--uc-red-soft); border-color: var(--uc-red);' : ''}">
         <div class="stat-label">Vencidos</div>
@@ -10952,10 +10952,10 @@ async function _renderEquipeComparativo(ano, mes) {
         <thead>
           <tr style="border-bottom: 1px solid var(--uc-line); text-align: left;">
             <th onclick="_sortEquipeCol('advogado')" style="cursor: pointer; padding: 10px 12px; color: var(--uc-warm-gray); font-weight: 500; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; user-select: none; ${sortCol === 'advogado' ? 'color: var(--uc-gold);' : ''}">Advogado${sortCol === 'advogado' ? (sortDir === 'desc' ? ' ↓' : ' ↑') : ''}</th>
-            ${headerCell('cargaAtual', 'Carga', 'Prazos ativos atualmente (sou titular)')}
-            ${headerCell('vencidos', 'Venc.', 'Prazos vencidos não-cumpridos')}
-            ${headerCell('cumpridos', 'Cumprid.', 'Prazos cumpridos no mês')}
-            ${headerCell('perdidos', 'Perd.', 'Prazos perdidos no mês')}
+            ${headerCell('cargaAtual', 'Carga', 'Publicações ativas atualmente (sou titular)')}
+            ${headerCell('vencidos', 'Venc.', 'Publicações vencidas não-cumpridas')}
+            ${headerCell('cumpridos', 'Cumprid.', 'Publicações cumpridas no mês')}
+            ${headerCell('perdidos', 'Perd.', 'Publicações perdidas no mês')}
             ${headerCell('taxaCumprimento', 'Taxa', 'Taxa cumprimento: cumpridos / (cumpridos + perdidos)')}
             ${headerCell('compsDoMes', 'Comprom.', 'Compromissos no mês (responsável ou participante)')}
             ${headerCell('comsDoMes', 'Comun.', 'Comunicações registradas no mês')}
