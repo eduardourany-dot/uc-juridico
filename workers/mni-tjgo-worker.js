@@ -22,7 +22,10 @@
 //   Body: { "cnj": "0001234-56.2024.8.09.0001", "cpf": "00000000000",
 //           "senha": "***", "operacao": "consultarProcesso" }
 
-const TJGO_ENDPOINT = 'https://projudi.tjgo.jus.br/projudi/webservices/intercomunicacao';
+// Endpoint atual (validado em 12/05/2026 — diferente do que estava no
+// protótipo Python v4.3.1 que apontava pra /projudi/webservices/...).
+// GET ?WSDL retorna o WSDL · POST sem ?WSDL executa operação SOAP.
+const TJGO_ENDPOINT = 'https://projudi.tjgo.jus.br/IntercomunicacaoService';
 const MNI_NS_INT    = 'http://www.cnj.jus.br/intercomunicacao-2.2.2';
 const MNI_NS_TIP    = 'http://www.cnj.jus.br/tipos-servicos-intercomunicacao-2.2.2';
 
