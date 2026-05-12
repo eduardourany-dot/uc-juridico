@@ -103,8 +103,11 @@ async function consultarProcesso({ cnj, cpf, senha }) {
     method: 'POST',
     headers: {
       'Content-Type': 'text/xml; charset=utf-8',
-      'SOAPAction': '"consultarProcesso"',
-      'User-Agent': 'UC-Juridico-MNI-POC/0.1'
+      // SOAPAction vazio — TJGO/Projudi dispatcheia pela operação no body.
+      // Se algum tribunal exigir, trocar pro URI completo:
+      // 'SOAPAction': '"http://www.cnj.jus.br/servico-intercomunicacao-2.2.2/consultarProcesso"'
+      'SOAPAction': '""',
+      'User-Agent': 'UC-Juridico-MNI-POC/0.2'
     },
     body: envelope
   });
