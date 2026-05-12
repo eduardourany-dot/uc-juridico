@@ -21,18 +21,23 @@
 | `tools/mni-poc.html` | Página standalone de teste com dropdown de tribunal + health check + consulta. |
 | `docs/MNI_POC.md` | Este arquivo. |
 
-## Tribunais no registry
+## Tribunais no registry (atualizado 11/05/2026 após health checks)
 
 | Código | Sistema | Status | Endpoint |
 |---|---|---|---|
-| `TJGO` | Projudi | ✓ **validado 11/05/2026** | `https://projudi.tjgo.jus.br/IntercomunicacaoService` |
-| `TRF1` | PJe | ⚠ não validado | `https://pje1g.trf1.jus.br/pje/intercomunicacao` |
-| `STJ` | PJe | ⚠ não validado | `https://ww2.stj.jus.br/processo/pje/intercomunicacao` |
-| `TJDFT` | PJe | ⚠ não validado | `https://pje.tjdft.jus.br/pje/intercomunicacao` |
-| `TJSP` | eSAJ | ⛔ **não suportado** (eSAJ não expõe MNI) | — |
-| `TRT18` | PJe | ⚠ não validado | `https://pje.trt18.jus.br/pje/intercomunicacao` |
+| `TJGO` | Projudi | ✓ **validado** | `https://projudi.tjgo.jus.br/IntercomunicacaoService` |
+| `TRF1` | PJe 1g | ✓ **validado** (health check OK ~3s) | `https://pje1g.trf1.jus.br/pje/intercomunicacao` |
+| `STJ` | — | ⛔ **não suportado** | só REST DataJud · MNI não público |
+| `TJDFT` | — | ⛔ **não suportado** | só REST (jurisdf, RH) · sem WSDL MNI |
+| `TJSP` | eSAJ | ⛔ **não suportado** | eSAJ não expõe MNI |
+| `TRT18` | PJe-JT | ⛔ **endpoint não localizado** | testados 5 paths, todos 404 |
 
-Tribunais marcados ⚠ têm endpoints inferidos pelo padrão PJe. **Antes de usar com credenciais**, rode o **health check** na página POC — ele faz `GET ?WSDL` e confirma se o endpoint responde XML válido.
+### Status detalhado dos não-suportados
+
+- **STJ**: portal de dados abertos do STJ oferece apenas REST (DataJud, decisões em XML). Hostname `ws.stj.jus.br` (analogia com STF) retornou ECONNREFUSED. Cooperações técnicas com MPF/MPT são privadas. **Caminho alternativo**: DataJud REST (já temos worker `datajud-worker.js`, módulo desabilitado por ora).
+- **TJDFT**: página oficial de webservices (`tjdft.jus.br/transparencia/.../webservice-ou-api`) lista APENAS REST: `jurisdf.tjdft.jus.br/api/v1/pesquisa` (jurisprudência) e `rest-rh.tjdft.jus.br` (recursos humanos). MNI não publicado. Health check em `pje.tjdft.jus.br/pje/intercomunicacao` retornou HTTP 403 — WAF, não path inexistente.
+- **TJSP**: eSAJ é sistema proprietário, sem MNI. Caminho viável: DJEN nacional (já temos).
+- **TRT18**: MNI implementado em 2020 em cooperação com MPT Digital. Endpoint público não localizado após testar `/pje`, `/primeirograu`, `/pje-consulta-api`, `/pje-1g-services`, `/pje-trt18-services` (todos 404). Se Eduardo tiver acesso ao path correto via credencial OAB ou contato no TRT, atualizar o registry.
 
 ## Setup (1 vez)
 

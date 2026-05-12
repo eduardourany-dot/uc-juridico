@@ -49,29 +49,32 @@ const TRIBUNAIS_REGISTRY = {
     wsdl: 'https://pje1g.trf1.jus.br/pje/intercomunicacao?wsdl',
     namespace: 'http://www.cnj.jus.br/servico-intercomunicacao-2.2.2/',
     soapAction: '',
-    validado: false
+    validado: true,
+    validadoEm: '2026-05-11'
   },
   STJ: {
     codigo: 'STJ',
     nome: 'Superior Tribunal de Justiça',
-    sistema: 'pje',
+    sistema: 'rest',
     esfera: 'superior',
-    endpoint: 'https://ww2.stj.jus.br/processo/pje/intercomunicacao',
-    wsdl: 'https://ww2.stj.jus.br/processo/pje/intercomunicacao?wsdl',
-    namespace: 'http://www.cnj.jus.br/servico-intercomunicacao-2.2.2/',
-    soapAction: '',
-    validado: false
+    endpoint: null,
+    namespace: null,
+    soapAction: null,
+    validado: false,
+    naoSuportado: true,
+    motivo: 'STJ não publica endpoint MNI/SOAP público. Integração programática via DataJud REST.'
   },
   TJDFT: {
     codigo: 'TJDFT',
     nome: 'Tribunal de Justiça do Distrito Federal e Territórios',
-    sistema: 'pje',
+    sistema: 'rest',
     esfera: 'estadual',
-    endpoint: 'https://pje.tjdft.jus.br/pje/intercomunicacao',
-    wsdl: 'https://pje.tjdft.jus.br/pje/intercomunicacao?wsdl',
-    namespace: 'http://www.cnj.jus.br/servico-intercomunicacao-2.2.2/',
-    soapAction: '',
-    validado: false
+    endpoint: null,
+    namespace: null,
+    soapAction: null,
+    validado: false,
+    naoSuportado: true,
+    motivo: 'TJDFT publica apenas REST (jurisdf, RH). Página oficial de webservices não lista WSDL MNI.'
   },
   TJSP: {
     codigo: 'TJSP',
@@ -90,11 +93,12 @@ const TRIBUNAIS_REGISTRY = {
     nome: 'Tribunal Regional do Trabalho da 18ª Região (Goiás)',
     sistema: 'pje',
     esfera: 'trabalho',
-    endpoint: 'https://pje.trt18.jus.br/pje/intercomunicacao',
-    wsdl: 'https://pje.trt18.jus.br/pje/intercomunicacao?wsdl',
-    namespace: 'http://www.cnj.jus.br/servico-intercomunicacao-2.2.2/',
-    soapAction: '',
-    validado: false
+    endpoint: null,
+    namespace: null,
+    soapAction: null,
+    validado: false,
+    naoSuportado: true,
+    motivo: 'TRT18 implementou MNI em cooperação técnica com MPT Digital, mas endpoint público não localizado. Múltiplos paths testados retornaram 404.'
   }
 };
 

@@ -144,11 +144,11 @@ const $ = id => document.getElementById(id);
 // ============================================================
 const FALLBACK_TRIBUNAIS = {
   TJGO:  { nome:'Tribunal de Justiça de Goiás', sistema:'projudi', validado:true,  validadoEm:'2026-05-11' },
-  TRF1:  { nome:'Tribunal Regional Federal da 1ª Região', sistema:'pje', validado:false },
-  STJ:   { nome:'Superior Tribunal de Justiça', sistema:'pje', validado:false },
-  TJDFT: { nome:'Tribunal de Justiça do DF e Territórios', sistema:'pje', validado:false },
-  TJSP:  { nome:'Tribunal de Justiça de São Paulo', sistema:'esaj', validado:false, naoSuportado:true, motivo:'eSAJ não expõe MNI público' },
-  TRT18: { nome:'Tribunal Regional do Trabalho da 18ª Região (Goiás)', sistema:'pje', validado:false }
+  TRF1:  { nome:'Tribunal Regional Federal da 1ª Região', sistema:'pje', validado:true, validadoEm:'2026-05-11' },
+  STJ:   { nome:'Superior Tribunal de Justiça', sistema:'rest', validado:false, naoSuportado:true, motivo:'STJ não publica MNI público — usa DataJud REST.' },
+  TJDFT: { nome:'Tribunal de Justiça do DF e Territórios', sistema:'rest', validado:false, naoSuportado:true, motivo:'TJDFT publica apenas REST, sem WSDL MNI.' },
+  TJSP:  { nome:'Tribunal de Justiça de São Paulo', sistema:'esaj', validado:false, naoSuportado:true, motivo:'eSAJ não expõe MNI público.' },
+  TRT18: { nome:'Tribunal Regional do Trabalho da 18ª Região (Goiás)', sistema:'pje', validado:false, naoSuportado:true, motivo:'MNI cooperação técnica privada; endpoint público não localizado.' }
 };
 let TRIBUNAIS = { ...FALLBACK_TRIBUNAIS };
 let DEFAULT_TRIBUNAL = 'TJGO';
