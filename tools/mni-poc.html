@@ -204,22 +204,33 @@ function renderSummary(d) {
   html += '<table>';
   html += '<tr><th colspan="2">Identificação</th></tr>';
   if (d.cnj) html += `<tr><td class="smallcaps" style="color:var(--warm);width:140px;">CNJ</td><td>${escapeHtml(d.cnj)}</td></tr>`;
-  if (d.classe) html += `<tr><td class="smallcaps" style="color:var(--warm);">Classe</td><td>${escapeHtml(d.classe)}</td></tr>`;
-  if (d.assunto) html += `<tr><td class="smallcaps" style="color:var(--warm);">Assunto</td><td>${escapeHtml(d.assunto)}</td></tr>`;
+  if (d.classe?.codigo) html += `<tr><td class="smallcaps" style="color:var(--warm);">Classe (código TPU)</td><td>${escapeHtml(d.classe.codigo)}</td></tr>`;
+  if (d.processoTipo) html += `<tr><td class="smallcaps" style="color:var(--warm);">Tipo</td><td>${escapeHtml(d.processoTipo)}</td></tr>`;
+  if (d.area) html += `<tr><td class="smallcaps" style="color:var(--warm);">Área</td><td>${escapeHtml(d.area)}</td></tr>`;
+  if (d.assunto?.descricao) html += `<tr><td class="smallcaps" style="color:var(--warm);">Assunto</td><td>${escapeHtml(d.assunto.descricao)}</td></tr>`;
   if (d.orgaoJulgador) html += `<tr><td class="smallcaps" style="color:var(--warm);">Vara/órgão</td><td>${escapeHtml(d.orgaoJulgador)}</td></tr>`;
-  if (d.dataAjuizamento) html += `<tr><td class="smallcaps" style="color:var(--warm);">Ajuizado</td><td>${escapeHtml(d.dataAjuizamento)}</td></tr>`;
+  if (d.serventia) html += `<tr><td class="smallcaps" style="color:var(--warm);">Serventia</td><td>${escapeHtml(d.serventia)}</td></tr>`;
+  if (d.dataAjuizamento) html += `<tr><td class="smallcaps" style="color:var(--warm);">Ajuizado em</td><td>${escapeHtml(d.dataAjuizamento)}</td></tr>`;
   if (d.valorCausa) html += `<tr><td class="smallcaps" style="color:var(--warm);">Valor causa</td><td>R$ ${escapeHtml(d.valorCausa)}</td></tr>`;
+  if (d.processoFase) html += `<tr><td class="smallcaps" style="color:var(--warm);">Fase</td><td>${escapeHtml(d.processoFase)}</td></tr>`;
+  if (d.processoStatus) html += `<tr><td class="smallcaps" style="color:var(--warm);">Status</td><td>${escapeHtml(d.processoStatus)}</td></tr>`;
+  if (d.magistradoAtuante) html += `<tr><td class="smallcaps" style="color:var(--warm);">Magistrado</td><td><small>${escapeHtml(d.magistradoAtuante)}</small></td></tr>`;
   html += '</table>';
 
   // Partes
   if (d.partes?.length) {
-    html += '<table><tr><th colspan="3">Partes (' + d.partes.length + ')</th></tr>';
-    html += '<tr><th>Nome</th><th>Polo</th><th>CPF/CNPJ</th></tr>';
+    const poloLabels = { AT: 'ATIVO', PA: 'PASSIVO', TC: 'TERCEIRO' };
+    html += '<table><tr><th colspan="4">Partes (' + d.partes.length + ')</th></tr>';
+    html += '<tr><th>Nome</th><th>Polo</th><th>CPF/CNPJ</th><th>Advogados</th></tr>';
     for (const p of d.partes) {
+      const advList = (p.advogados || []).map(a =>
+        `<div><strong>${escapeHtml(a.nome || '')}</strong>${a.oab ? ' · <small>OAB ' + escapeHtml(a.oab) + '</small>' : ''}</div>`
+      ).join('') || '<small style="color:var(--warm);">—</small>';
       html += `<tr>
-        <td>${escapeHtml(p.nome || '')}</td>
-        <td><span class="tag ${p.polo === 'ATIVO' ? 'green' : p.polo === 'PASSIVO' ? 'red' : ''}">${escapeHtml(p.polo || '—')}</span></td>
+        <td><strong>${escapeHtml(p.nome || '—')}</strong>${p.tipoPessoa ? `<br><small style="color:var(--warm);">${escapeHtml(p.tipoPessoa)}</small>` : ''}</td>
+        <td><span class="tag ${p.polo === 'AT' ? 'green' : p.polo === 'PA' ? 'red' : ''}">${escapeHtml(poloLabels[p.polo] || p.polo || '—')}</span></td>
         <td><small>${escapeHtml(p.cpfCnpj || '—')}</small></td>
+        <td><small>${advList}</small></td>
       </tr>`;
     }
     html += '</table>';
@@ -228,12 +239,14 @@ function renderSummary(d) {
   // Movimentos
   if (d.movimentos?.length) {
     html += '<table><tr><th colspan="3">Movimentos (' + d.movimentos.length + (d.movimentosTotal > d.movimentos.length ? ' de ' + d.movimentosTotal : '') + ')</th></tr>';
-    html += '<tr><th style="width:120px;">Data</th><th style="width:90px;">Código</th><th>Descrição</th></tr>';
+    html += '<tr><th style="width:130px;">Data</th><th style="width:60px;">Cód.</th><th>Descrição</th></tr>';
     for (const m of d.movimentos.slice(0, 30)) {
+      const dataExibir = m.dataIso ? m.dataIso.replace('T', ' ').slice(0, 16) : (m.dataHora || '').slice(0, 19);
+      const compl = m.complemento ? `<div style="font-size:11px;color:var(--warm);margin-top:2px;">${escapeHtml(m.complemento.slice(0, 200))}${m.complemento.length > 200 ? '…' : ''}</div>` : '';
       html += `<tr>
-        <td><small>${escapeHtml((m.dataHora || '').slice(0, 19))}</small></td>
-        <td><small>${escapeHtml(m.codigo || '—')}</small></td>
-        <td>${escapeHtml(m.descricao || '—')}</td>
+        <td><small>${escapeHtml(dataExibir)}</small></td>
+        <td><small>${escapeHtml(m.codigoNacional || '—')}</small></td>
+        <td><strong>${escapeHtml(m.descricao || '—')}</strong>${compl}</td>
       </tr>`;
     }
     if (d.movimentos.length > 30) {

@@ -201,62 +201,151 @@ function allTags(xml, tag) {
   return xml.match(re) || [];
 }
 
+// Converte timestamp MNI "YYYYMMDDHHMMSS" pra ISO "YYYY-MM-DDTHH:MM:SS"
+function _parseDataHoraMni(s) {
+  if (!s) return '';
+  s = String(s).replace(/\D/g, '');
+  if (s.length < 8) return s;
+  const y = s.slice(0,4), m = s.slice(4,6), d = s.slice(6,8);
+  const hh = s.slice(8,10) || '00', mm = s.slice(10,12) || '00', ss = s.slice(12,14) || '00';
+  return `${y}-${m}-${d}T${hh}:${mm}:${ss}`;
+}
+
+// Decodifica entidades XML básicas (&amp; &lt; &gt; &quot; &apos;)
+function _decodeXmlEntities(s) {
+  if (!s) return '';
+  return String(s)
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'");
+}
+
 function parseConsultarProcesso(xml) {
-  // Extrai sucesso/mensagem do envelope MNI padrão
+  // Sucesso/mensagem
   const sucessoTag = tagText(xml, 'sucesso');
   const mensagem   = tagText(xml, 'mensagem');
-
   if (sucessoTag.toLowerCase() === 'false') {
     return { sucesso: false, mensagem: mensagem || '(sem mensagem)' };
   }
 
-  // Encontra o bloco <processo> dentro de <consultarProcessoResposta>
+  // Bloco <ns2:processo> dentro de <ns5:consultarProcessoResposta>
   const procBlock = (xml.match(/<(?:\w+:)?processo\b[\s\S]*?<\/(?:\w+:)?processo>/i) || [''])[0];
 
-  // Cabeçalho
-  const cabecalho = (procBlock.match(/<(?:\w+:)?dadosBasicos\b[\s\S]*?<\/(?:\w+:)?dadosBasicos>/i) || [''])[0]
-                || (procBlock.match(/<(?:\w+:)?cabecalhoProcesso\b[\s\S]*?<\/(?:\w+:)?cabecalhoProcesso>/i) || [''])[0];
+  // dadosBasicos: atributos cnj + classe + filhos
+  const dadosBasicosOpen = (procBlock.match(/<(?:\w+:)?dadosBasicos\b[^>]*>/i) || [''])[0];
+  const dadosBasicosBlock = (procBlock.match(/<(?:\w+:)?dadosBasicos\b[\s\S]*?<\/(?:\w+:)?dadosBasicos>/i) || [''])[0];
 
-  const numeroProcesso = tagAttr(cabecalho, 'dadosBasicos', 'numero') || tagText(cabecalho, 'numero') || '';
-  const classeNome = tagText(cabecalho, 'classeProcessual') || (cabecalho.match(/classeProcessual="(\d+)"/) || [])[1] || '';
-  const assunto = tagText(cabecalho, 'assunto');
-  const orgaoJulgador = tagAttr(cabecalho, 'orgaoJulgador', 'nomeOrgao') || tagText(cabecalho, 'orgaoJulgador');
-  const dataAjuizamento = tagAttr(cabecalho, 'dadosBasicos', 'dataAjuizamento') || '';
-  const valorCausa = tagAttr(cabecalho, 'dadosBasicos', 'valorCausa') || '';
+  const numeroProcesso = (dadosBasicosOpen.match(/\bnumero="([^"]*)"/) || [])[1] || '';
+  const classeCodigo = (dadosBasicosOpen.match(/\bclasseProcessual="([^"]*)"/) || [])[1] || '';
+  const nivelSigilo = (dadosBasicosOpen.match(/\bnivelSigilo="([^"]*)"/) || [])[1] || '';
+  const codigoLocalidade = (dadosBasicosOpen.match(/\bcodigoLocalidade="([^"]*)"/) || [])[1] || '';
 
-  // Partes
+  // Valor da causa é elemento, não atributo
+  const valorCausa = tagText(dadosBasicosBlock, 'valorCausa') || '';
+
+  // Magistrado atuante (text)
+  const magistradoAtuante = tagText(dadosBasicosBlock, 'magistradoAtuante') || '';
+
+  // Órgão julgador via atributos
+  const orgaoJulgador = tagAttr(dadosBasicosBlock, 'orgaoJulgador', 'nomeOrgao') || '';
+  const codigoOrgao = tagAttr(dadosBasicosBlock, 'orgaoJulgador', 'codigoOrgao') || '';
+  const codigoMunicipioIBGE = tagAttr(dadosBasicosBlock, 'orgaoJulgador', 'codigoMunicipioIBGE') || '';
+
+  // Assunto principal — atributo descricao de <assuntoLocal>
+  const assuntoBlock = (dadosBasicosBlock.match(/<(?:\w+:)?assunto\b[\s\S]*?<\/(?:\w+:)?assunto>/i) || [''])[0];
+  const assuntoCodigoNacional = tagText(assuntoBlock, 'codigoNacional') || '';
+  const assuntoDescricao = _decodeXmlEntities(tagAttr(assuntoBlock, 'assuntoLocal', 'descricao') || '');
+  const assuntoCodigoAssunto = tagAttr(assuntoBlock, 'assuntoLocal', 'codigoAssunto') || '';
+
+  // outroParametro — array de { nome, valor }
+  const outrosParams = {};
+  const opMatches = dadosBasicosBlock.matchAll(/<(?:\w+:)?outroParametro\b[^>]*\bnome="([^"]*)"[^>]*\bvalor="([^"]*)"[^>]*\/?>/g);
+  for (const m of opMatches) {
+    outrosParams[m[1]] = _decodeXmlEntities(m[2]);
+  }
+  // Atalhos pros mais úteis
+  const area = outrosParams.Area || '';
+  const processoFase = outrosParams.ProcessoFase || '';
+  const processoStatus = outrosParams.ProcessoStatus || '';
+  const processoTipo = outrosParams.ProcessoTipo || '';
+  const serventia = outrosParams.Serventia || '';
+  const dataDistribuicaoRaw = outrosParams.DataDistribuicao || '';
+  const dataAjuizamento = dataDistribuicaoRaw
+    ? `${dataDistribuicaoRaw.slice(0,4)}-${dataDistribuicaoRaw.slice(4,6)}-${dataDistribuicaoRaw.slice(6,8)}`
+    : '';
+
+  // Polos + Partes + Advogados
   const partes = [];
-  const polos = procBlock.match(/<(?:\w+:)?polo\b[\s\S]*?<\/(?:\w+:)?polo>/gi) || [];
+  const polos = dadosBasicosBlock.match(/<(?:\w+:)?polo\b[\s\S]*?<\/(?:\w+:)?polo>/gi) || [];
   for (const poloXml of polos) {
-    const tipoPolo = tagAttr(poloXml, 'polo', 'polo') || '';
-    const partesXml = allTags(poloXml, 'parte');
+    const tipoPolo = (poloXml.match(/<(?:\w+:)?polo\b[^>]*\bpolo="([^"]*)"/) || [])[1] || '';
+    const partesXml = poloXml.match(/<(?:\w+:)?parte\b[\s\S]*?<\/(?:\w+:)?parte>/gi) || [];
     for (const pXml of partesXml) {
-      const nome = tagText(pXml, 'nome') || '';
-      const cpfCnpj = tagText(pXml, 'numeroDocumentoPrincipal') || tagText(pXml, 'cpf') || tagText(pXml, 'cnpj') || '';
-      partes.push({ nome, polo: tipoPolo, cpfCnpj });
+      // Atributos do <pessoa>
+      const nome = (pXml.match(/<(?:\w+:)?pessoa\b[^>]*\bnome="([^"]*)"/) || [])[1] || '';
+      const cpfCnpj = (pXml.match(/<(?:\w+:)?pessoa\b[^>]*\bnumeroDocumentoPrincipal="([^"]*)"/) || [])[1] || '';
+      const tipoPessoa = (pXml.match(/<(?:\w+:)?pessoa\b[^>]*\btipoPessoa="([^"]*)"/) || [])[1] || '';
+      const sexo = (pXml.match(/<(?:\w+:)?pessoa\b[^>]*\bsexo="([^"]*)"/) || [])[1] || '';
+      // Advogados (podem ser múltiplos)
+      const advogados = [];
+      const advMatches = pXml.matchAll(/<(?:\w+:)?advogado\b[^>]*?>/g);
+      for (const a of advMatches) {
+        const advNome = (a[0].match(/\bnome="([^"]*)"/) || [])[1] || '';
+        const advInscricao = (a[0].match(/\binscricao="([^"]*)"/) || [])[1] || '';
+        const advCpf = (a[0].match(/\bnumeroDocumentoPrincipal="([^"]*)"/) || [])[1] || '';
+        advogados.push({ nome: advNome, oab: advInscricao, cpf: advCpf });
+      }
+      partes.push({ nome, polo: tipoPolo, cpfCnpj, tipoPessoa, sexo, advogados });
     }
   }
 
   // Movimentos
   const movimentos = [];
-  const movsXml = allTags(procBlock, 'movimento');
+  const movsXml = procBlock.match(/<(?:\w+:)?movimento\b(?:[^>]*\/>|[^>]*>[\s\S]*?<\/(?:\w+:)?movimento>)/gi) || [];
   for (const m of movsXml) {
-    const dataMov = tagAttr(m, 'movimento', 'dataHora') || '';
-    const codMov = tagAttr(m, 'movimentoNacional', 'codigoNacional') || '';
-    const descMov = tagText(m, 'descricao') || tagText(m, 'movimentoLocal') || '';
-    movimentos.push({ dataHora: dataMov, codigo: codMov, descricao: descMov });
+    const dataHora = (m.match(/<(?:\w+:)?movimento\b[^>]*\bdataHora="([^"]*)"/) || [])[1] || '';
+    const identificador = (m.match(/<(?:\w+:)?movimento\b[^>]*\bidentificadorMovimento="([^"]*)"/) || [])[1] || '';
+    const codigoNacional = (m.match(/<(?:\w+:)?movimentoNacional\b[^>]*\bcodigoNacional="([^"]*)"/) || [])[1] || '';
+    const codigoLocal = (m.match(/<(?:\w+:)?movimentoLocal\b[^>]*\bcodigoMovimento="([^"]*)"/) || [])[1] || '';
+    const descricao = _decodeXmlEntities((m.match(/<(?:\w+:)?movimentoLocal\b[^>]*\bdescricao="([^"]*)"/) || [])[1] || '');
+    const complemento = _decodeXmlEntities(tagText(m, 'complemento') || '');
+    movimentos.push({
+      dataHora: dataHora,                 // formato cru "20260410170039"
+      dataIso: _parseDataHoraMni(dataHora), // ISO "2026-04-10T17:00:39"
+      codigoNacional,
+      codigoLocal,
+      descricao,
+      complemento,
+      identificador
+    });
   }
-  // mais recente primeiro
   movimentos.sort((a, b) => (b.dataHora || '').localeCompare(a.dataHora || ''));
 
   return {
     sucesso: true,
     cnj: numeroProcesso,
-    classe: classeNome,
-    assunto,
+    classe: { codigo: classeCodigo },
+    assunto: {
+      codigoNacional: assuntoCodigoNacional,
+      codigoLocal: assuntoCodigoAssunto,
+      descricao: assuntoDescricao
+    },
     orgaoJulgador,
-    dataAjuizamento,
+    codigoOrgao,
+    codigoMunicipioIBGE,
+    codigoLocalidade,
+    nivelSigilo,
     valorCausa,
+    dataAjuizamento,
+    magistradoAtuante,
+    area,
+    processoFase,
+    processoStatus,
+    processoTipo,
+    serventia,
+    outrosParametros: outrosParams,
     partes,
     movimentos: movimentos.slice(0, 100),
     movimentosTotal: movimentos.length
