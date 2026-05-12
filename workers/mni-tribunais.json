@@ -370,9 +370,10 @@
       "endpoint2g": "https://pje.tjpi.jus.br/2g/intercomunicacao",
       "namespace": "http://www.cnj.jus.br/servico-intercomunicacao-2.2.2/",
       "soapAction": "",
-      "validado": false,
-      "statusHealth": "nao_testado",
-      "observacoes": "CORRIGIDO 11/05: path é /1g/intercomunicacao (não /pje/). MNI 2.2.3. Retestar."
+      "validado": true,
+      "statusHealth": "ok",
+      "validadoEm": "2026-05-12",
+      "observacoes": "Validado via Cloudflare. MNI 2.2.3 (único do registry). Path corrigido 11/05: /1g/intercomunicacao (não /pje/)."
     },
     "TJMA": {
       "codigo": "TJMA",
