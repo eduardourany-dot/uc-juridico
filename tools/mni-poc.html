@@ -142,13 +142,50 @@ const $ = id => document.getElementById(id);
 // Manter em sync com workers/mni-tribunais.json (essa cópia é só
 // pra UI mostrar o dropdown antes de o Worker responder).
 // ============================================================
+// Fallback compacto — pra dropdown funcionar antes do listarTribunais. Carregue
+// do Worker pra ver os endpoints completos.
 const FALLBACK_TRIBUNAIS = {
-  TJGO:  { nome:'Tribunal de Justiça de Goiás', sistema:'projudi', validado:true,  validadoEm:'2026-05-11' },
-  TRF1:  { nome:'Tribunal Regional Federal da 1ª Região', sistema:'pje', validado:true, validadoEm:'2026-05-11' },
-  STJ:   { nome:'Superior Tribunal de Justiça', sistema:'rest', validado:false, naoSuportado:true, motivo:'STJ não publica MNI público — usa DataJud REST.' },
-  TJDFT: { nome:'Tribunal de Justiça do DF e Territórios', sistema:'rest', validado:false, naoSuportado:true, motivo:'TJDFT publica apenas REST, sem WSDL MNI.' },
-  TJSP:  { nome:'Tribunal de Justiça de São Paulo', sistema:'esaj', validado:false, naoSuportado:true, motivo:'eSAJ não expõe MNI público.' },
-  TRT18: { nome:'Tribunal Regional do Trabalho da 18ª Região (Goiás)', sistema:'pje', validado:false, naoSuportado:true, motivo:'MNI cooperação técnica privada; endpoint público não localizado.' }
+  STF:        { nome:'Supremo Tribunal Federal', sistema:'eSTF', validado:false },
+  STJ:        { nome:'Superior Tribunal de Justiça', sistema:'eSTJ', validado:false },
+  TST:        { nome:'Tribunal Superior do Trabalho', sistema:'pje', validado:false },
+  TRF1:       { nome:'TRF da 1ª Região (PJe)', sistema:'pje', validado:true, validadoEm:'2026-05-11' },
+  TRF1_eProc: { nome:'TRF1 — eProc (paralelo)', sistema:'eproc', validado:false },
+  TRF2:       { nome:'TRF da 2ª Região', sistema:'eproc', validado:false },
+  TRF3:       { nome:'TRF da 3ª Região', sistema:'pje', validado:false },
+  TRF4:       { nome:'TRF da 4ª Região', sistema:'eproc', validado:false },
+  TRF5:       { nome:'TRF da 5ª Região', sistema:'pje', validado:false },
+  TRF6:       { nome:'TRF da 6ª Região', sistema:'pje', validado:false },
+  TJGO:       { nome:'TJ Goiás', sistema:'projudi', validado:true, validadoEm:'2026-05-11' },
+  TJDF:       { nome:'TJ DF e Territórios', sistema:'pje', validado:false },
+  TJSP:       { nome:'TJ São Paulo (eSAJ)', sistema:'esaj', validado:false },
+  TJRJ:       { nome:'TJ Rio de Janeiro', sistema:'pje', validado:false },
+  TJMG:       { nome:'TJ Minas Gerais', sistema:'pje', validado:false },
+  TJES:       { nome:'TJ Espírito Santo', sistema:'pje', validado:false },
+  TJMT:       { nome:'TJ Mato Grosso', sistema:'pje', validado:false },
+  TJMS:       { nome:'TJ Mato Grosso do Sul', sistema:'esaj', validado:false },
+  TJPR:       { nome:'TJ Paraná (Projudi)', sistema:'projudi', validado:false },
+  TJPR_PJe:   { nome:'TJ Paraná (PJe)', sistema:'pje', validado:false },
+  TJSC:       { nome:'TJ Santa Catarina', sistema:'esaj', validado:false },
+  TJRS:       { nome:'TJ Rio Grande do Sul', sistema:'eproc', validado:false },
+  TJPI:       { nome:'TJ Piauí (MNI 2.2.3)', sistema:'pje', validado:false },
+  TJMA:       { nome:'TJ Maranhão (rota especial)', sistema:'pje', validado:false },
+  TJBA:       { nome:'TJ Bahia', sistema:'pje', validado:false },
+  TJPE:       { nome:'TJ Pernambuco', sistema:'pje', validado:false },
+  TJCE:       { nome:'TJ Ceará', sistema:'pje', validado:false },
+  TJRN:       { nome:'TJ Rio Grande do Norte', sistema:'pje', validado:false },
+  TJPB:       { nome:'TJ Paraíba', sistema:'pje', validado:false },
+  TJAL:       { nome:'TJ Alagoas', sistema:'esaj', validado:false },
+  TJSE:       { nome:'TJ Sergipe', sistema:'eproc', validado:false },
+  TJTO:       { nome:'TJ Tocantins', sistema:'eproc', validado:false },
+  TJPA:       { nome:'TJ Pará', sistema:'projudi', validado:false },
+  TJAM:       { nome:'TJ Amazonas', sistema:'projudi', validado:false },
+  TJRR:       { nome:'TJ Roraima', sistema:'projudi', validado:false },
+  TJAC:       { nome:'TJ Acre', sistema:'esaj', validado:false },
+  TJAP:       { nome:'TJ Amapá', sistema:'tucujuris', validado:false, naoSuportado:true, motivo:'TJAP usa Tucujuris — sem MNI.' },
+  TJRO:       { nome:'TJ Rondônia', sistema:'pje', validado:false },
+  TRT18:      { nome:'TRT 18ª Região (GO)', sistema:'pje', validado:false },
+  TRT2:       { nome:'TRT 2ª Região (SP)', sistema:'pje', validado:false },
+  TRT10:      { nome:'TRT 10ª Região (DF/TO)', sistema:'pje', validado:false }
 };
 let TRIBUNAIS = { ...FALLBACK_TRIBUNAIS };
 let DEFAULT_TRIBUNAL = 'TJGO';

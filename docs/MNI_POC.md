@@ -21,23 +21,50 @@
 | `tools/mni-poc.html` | Página standalone de teste com dropdown de tribunal + health check + consulta. |
 | `docs/MNI_POC.md` | Este arquivo. |
 
-## Tribunais no registry (atualizado 11/05/2026 após health checks)
+## Tribunais no registry (v0.3.0 · 41 tribunais)
 
-| Código | Sistema | Status | Endpoint |
-|---|---|---|---|
-| `TJGO` | Projudi | ✓ **validado** | `https://projudi.tjgo.jus.br/IntercomunicacaoService` |
-| `TRF1` | PJe 1g | ✓ **validado** (health check OK ~3s) | `https://pje1g.trf1.jus.br/pje/intercomunicacao` |
-| `STJ` | — | ⛔ **não suportado** | só REST DataJud · MNI não público |
-| `TJDFT` | — | ⛔ **não suportado** | só REST (jurisdf, RH) · sem WSDL MNI |
-| `TJSP` | eSAJ | ⛔ **não suportado** | eSAJ não expõe MNI |
-| `TRT18` | PJe-JT | ⛔ **endpoint não localizado** | testados 5 paths, todos 404 |
+Registry expandido a partir de `tribunal_registry.py` (UC Jurídico v4.3.0, Eduardo). Total: **41 tribunais** cobrindo Superiores + TRFs + 26 TJs + 3 TRTs.
 
-### Status detalhado dos não-suportados
+| Esfera | Códigos | Sistemas |
+|---|---|---|
+| Superior | STF, STJ, TST | eSTF, eSTJ, PJe |
+| Federal (TRFs) | TRF1, TRF1_eProc, TRF2, TRF3, TRF4, TRF5, TRF6 | PJe, eProc |
+| Estadual (26 TJs) | TJGO, TJDF, TJSP, TJRJ, TJMG, TJES, TJMT, TJMS, TJPR, TJPR_PJe, TJSC, TJRS, TJPI, TJMA, TJBA, TJPE, TJCE, TJRN, TJPB, TJAL, TJSE, TJTO, TJPA, TJAM, TJRR, TJAC, TJRO | PJe, eSAJ, eProc, Projudi |
+| Sem MNI | TJAP | Tucujuris (usar DataJud) |
+| Trabalho | TRT18, TRT2, TRT10 | PJe-JT |
 
-- **STJ**: portal de dados abertos do STJ oferece apenas REST (DataJud, decisões em XML). Hostname `ws.stj.jus.br` (analogia com STF) retornou ECONNREFUSED. Cooperações técnicas com MPF/MPT são privadas. **Caminho alternativo**: DataJud REST (já temos worker `datajud-worker.js`, módulo desabilitado por ora).
-- **TJDFT**: página oficial de webservices (`tjdft.jus.br/transparencia/.../webservice-ou-api`) lista APENAS REST: `jurisdf.tjdft.jus.br/api/v1/pesquisa` (jurisprudência) e `rest-rh.tjdft.jus.br` (recursos humanos). MNI não publicado. Health check em `pje.tjdft.jus.br/pje/intercomunicacao` retornou HTTP 403 — WAF, não path inexistente.
-- **TJSP**: eSAJ é sistema proprietário, sem MNI. Caminho viável: DJEN nacional (já temos).
-- **TRT18**: MNI implementado em 2020 em cooperação com MPT Digital. Endpoint público não localizado após testar `/pje`, `/primeirograu`, `/pje-consulta-api`, `/pje-1g-services`, `/pje-trt18-services` (todos 404). Se Eduardo tiver acesso ao path correto via credencial OAB ou contato no TRT, atualizar o registry.
+### Validados (health check + parser OK)
+
+- ✓ **TJGO** (Projudi) — POC validada 11/05/2026
+- ✓ **TRF1** (PJe 1g) — health check OK ~3s
+
+### Status dos demais
+
+`validado: false` significa "endpoint cadastrado mas não testado por mim ainda". Eduardo já confirmou alguns como `ativo` no protótipo v4.3.0:
+
+- **STF**: acesso restrito (credencial CINT/SPR)
+- **STJ**: endpoint público confirmado pelo Eduardo — health via Cloudflare deu ECONNREFUSED (provável WAF, hostname existe)
+- **TJDF**: prioritário (OAB/DF). Health deu 403 (provável WAF)
+- **TJSP**: ativo no protótipo via eSAJ HTTP — atenção: endpoint HTTP (não HTTPS), pode bloquear Cloudflare
+- **TJMA**: rota especial `/ConsultaPJe` (não `/intercomunicacao`)
+- **TJAM**: rota especial `consultaProcessualWebService`
+- **TJPE**: subdomínio dedicado `pjemni.app.tjpe.jus.br`
+- **TJPI**: MNI 2.2.3 (todos os outros são 2.2.2)
+- **TJMG**: exige ICP-Brasil (Provimento 355/2018)
+- **TRF4**: referência do eProc (criou o sistema)
+
+### Detecção automática por CNJ
+
+Operação `detectarPorCnj` no Worker: dado um número CNJ, devolve o tribunal pelo segmento (J=4 federal, 5 trabalho, 8 estadual) + código TT (Resolução CNJ 65/2008). Útil pro MNI.2 (botão "🔍 Buscar MNI") detectar tribunal automaticamente.
+
+Exemplo:
+```
+POST { operacao: "detectarPorCnj", cnj: "0234509-41.2014.8.09.0006" }
+→ { sucesso: true, codigo: "TJGO", tribunal: {...} }
+
+POST { operacao: "detectarPorCnj", cnj: "0000123-45.2024.4.01.3400" }
+→ { sucesso: true, multiplos: true, candidatos: ["TRF1", "TRF1_eProc"] }
+```
 
 ## Setup (1 vez)
 
