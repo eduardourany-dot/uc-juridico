@@ -600,6 +600,105 @@ async function addHistory(action, data) {
 }
 
 // ====================================================================
+// === MNI Crypto · cofre cliente-side (sprint MNI.1.2) ================
+// ====================================================================
+// Cifra senhas PJe/Projudi pra armazenar no Firestore.
+// PBKDF2-SHA256 (200k iter) → AES-GCM-256.
+// A passphrase ("chave mestra MNI") fica só em memória de janela.
+// Travada por padrão; o user destrava ao começar a usar credenciais.
+// Locks: refresh, logout, ou manual.
+window.MniCrypto = (() => {
+  const CANARY_PLAIN = 'uc-mni-canary-2026';
+  const PBKDF2_ITER = 200000;
+  let _key = null;     // CryptoKey ou null quando travado
+  let _meta = null;    // { saltB64, canary, setupEm } cache opcional
+
+  function _bytesToB64(arr) {
+    const a = arr instanceof Uint8Array ? arr : new Uint8Array(arr);
+    let s = '';
+    for (let i = 0; i < a.length; i++) s += String.fromCharCode(a[i]);
+    return btoa(s);
+  }
+  function _b64ToBytes(s) {
+    const bin = atob(s);
+    const a = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) a[i] = bin.charCodeAt(i);
+    return a;
+  }
+
+  async function deriveKey(passphrase, saltB64) {
+    const enc = new TextEncoder();
+    const salt = _b64ToBytes(saltB64);
+    const base = await crypto.subtle.importKey('raw', enc.encode(passphrase), 'PBKDF2', false, ['deriveKey']);
+    return crypto.subtle.deriveKey(
+      { name: 'PBKDF2', salt, iterations: PBKDF2_ITER, hash: 'SHA-256' },
+      base,
+      { name: 'AES-GCM', length: 256 },
+      false,
+      ['encrypt', 'decrypt']
+    );
+  }
+
+  async function encryptWith(plaintext, key) {
+    const enc = new TextEncoder();
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, enc.encode(plaintext));
+    return { iv: _bytesToB64(iv), ct: _bytesToB64(ct), v: 1 };
+  }
+
+  async function decryptWith(blob, key) {
+    const dec = new TextDecoder();
+    const iv = _b64ToBytes(blob.iv);
+    const ct = _b64ToBytes(blob.ct);
+    const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, ct);
+    return dec.decode(pt);
+  }
+
+  return {
+    isUnlocked() { return !!_key; },
+    lock() { _key = null; },
+
+    generateSalt() { return _bytesToB64(crypto.getRandomValues(new Uint8Array(16))); },
+
+    // Setup primeira vez: gera salt, deriva chave, cifra canary.
+    // Retorna { saltB64, canary } pra persistir em settings.
+    async firstSetup(passphrase) {
+      if (!passphrase || passphrase.length < 8) {
+        throw new Error('Chave mestra precisa de pelo menos 8 caracteres.');
+      }
+      const saltB64 = this.generateSalt();
+      const key = await deriveKey(passphrase, saltB64);
+      const canary = await encryptWith(CANARY_PLAIN, key);
+      _key = key;
+      _meta = { saltB64, canary };
+      return { saltB64, canary };
+    },
+
+    // Destrava existente: deriva, testa canary, guarda chave em memória.
+    async unlock(passphrase, saltB64, canary) {
+      try {
+        const key = await deriveKey(passphrase, saltB64);
+        const v = await decryptWith(canary, key);
+        if (v !== CANARY_PLAIN) return false;
+        _key = key;
+        _meta = { saltB64, canary };
+        return true;
+      } catch { return false; }
+    },
+
+    async encrypt(plaintext) {
+      if (!_key) throw new Error('Cofre MNI travado. Destrave com a chave mestra.');
+      return encryptWith(plaintext, _key);
+    },
+
+    async decrypt(blob) {
+      if (!_key) throw new Error('Cofre MNI travado. Destrave com a chave mestra.');
+      return decryptWith(blob, _key);
+    }
+  };
+})();
+
+// ====================================================================
 // === STATE & ROUTING ================================================
 // ====================================================================
 
@@ -11686,6 +11785,7 @@ async function renderSettings() {
       <button class="tab ${tab === 'appearance' ? 'active' : ''}" onclick="setSettingsTab('appearance')">Aparência</button>
       <button class="tab ${tab === 'equipe' ? 'active' : ''}" onclick="setSettingsTab('equipe')">Equipe</button>
       <button class="tab ${tab === 'djen' ? 'active' : ''}" onclick="setSettingsTab('djen')">DJEN</button>
+      <button class="tab ${tab === 'mni' ? 'active' : ''}" onclick="setSettingsTab('mni')">MNI</button>
       <button class="tab ${tab === 'prompts' ? 'active' : ''}" onclick="setSettingsTab('prompts')">Prompts</button>
       <button class="tab ${tab === 'backup' ? 'active' : ''}" onclick="setSettingsTab('backup')">Backup</button>
       <button class="tab ${tab === 'sync' ? 'active' : ''}" onclick="setSettingsTab('sync')">Sincronização</button>
@@ -11895,6 +11995,126 @@ function renderSettingsTab(tab, prompts, defaultPromptId) {
           <button class="btn btn-secondary" onclick="djenRunSearch()">🔔 Pesquisar agora</button>
           <button class="btn btn-outline" onclick="djenViewHistory()">Ver histórico de publicações</button>
         </div>
+      </div>
+    `;
+  }
+  if (tab === 'mni') {
+    const cache = state._mniCache || {};
+    const config = cache.config || {};
+    const credentials = cache.credentials || [];
+    const tribunais = cache.tribunais || {};
+    const desbloqueado = window.MniCrypto?.isUnlocked();
+    const jaFoiSetup = !!(config?.salt && config?.canary);
+
+    // Caso 1: nunca foi configurado
+    if (!jaFoiSetup) {
+      return `
+        <div class="card mb-3">
+          <h3 class="font-serif text-lg font-semibold smallcaps mb-3" style="color: var(--uc-black);">MNI — Modelo Nacional de Interoperabilidade</h3>
+          <p style="color: var(--uc-graphite); font-size: 14px; margin-bottom: 12px;">
+            Conecta o app diretamente ao SOAP/MNI dos tribunais (Projudi, PJe). Permite consultar
+            processos, baixar movimentos e — em sprints futuros — receber avisos e peticionar.
+            Cada advogado guarda suas credenciais de tribunal aqui, <strong>cifradas com uma chave mestra</strong>
+            que só você conhece.
+          </p>
+          <p class="help-text mb-3">
+            <strong>Primeira vez:</strong> defina uma chave mestra. Ela deriva (PBKDF2-SHA256, 200k iter)
+            uma chave AES-GCM-256 que cifra suas senhas Projudi/PJe. A chave mestra <strong>não é salva</strong>
+            em lugar nenhum — só fica na memória da janela enquanto você usa. Se perder a chave, perde acesso
+            às credenciais cifradas (mas pode redefinir e re-cadastrar).
+          </p>
+          <button class="btn btn-primary" onclick="mniFirstSetupFlow()">🔐 Configurar cofre MNI</button>
+        </div>
+      `;
+    }
+
+    // Caso 2: configurado mas travado nessa sessão
+    if (!desbloqueado) {
+      return `
+        <div class="card mb-3">
+          <h3 class="font-serif text-lg font-semibold smallcaps mb-3" style="color: var(--uc-black);">Cofre MNI · <span style="color:var(--uc-amber);">🔒 travado</span></h3>
+          <p class="help-text mb-3">
+            ${credentials.length} credencia${credentials.length === 1 ? 'l' : 'is'} cifrada${credentials.length === 1 ? '' : 's'} no Firestore.
+            Destrave com a chave mestra pra ver, editar ou usar.
+          </p>
+          <button class="btn btn-primary" onclick="mniUnlockFlow()">🔓 Destravar cofre</button>
+          ${config.setupEm ? `<p class="help-text" style="margin-top:8px;font-size:11px;">Configurado em ${formatDate(config.setupEm)}</p>` : ''}
+        </div>
+      `;
+    }
+
+    // Caso 3: destravado — UI normal
+    return `
+      <div class="card mb-3">
+        <h3 class="font-serif text-lg font-semibold smallcaps mb-3" style="color: var(--uc-black);">Cofre MNI · <span style="color:var(--uc-green);">🔓 destravado</span></h3>
+        <p class="help-text mb-2">
+          Chave mestra ativa nesta sessão. Recarregar a página trava novamente. Você pode travar manualmente abaixo.
+        </p>
+        <div class="flex gap-2 flex-wrap">
+          <button class="btn btn-ghost btn-sm" onclick="mniLock()">🔒 Travar cofre agora</button>
+        </div>
+      </div>
+
+      <div class="card mb-3">
+        <h4 class="font-serif font-semibold smallcaps mb-2" style="color: var(--uc-black);">Worker MNI</h4>
+        <p class="help-text mb-2">URL do Cloudflare Worker que roteia SOAP para os tribunais. Veja <code>workers/mni-worker.js</code>.</p>
+        <input class="input" id="mniWorkerUrlInput" value="${escapeHtml(config.workerUrl || '')}" placeholder="https://uc-mni.SEU-USER.workers.dev">
+        <div class="flex gap-2 mt-2 flex-wrap">
+          <button class="btn btn-primary btn-sm" id="mniSaveConfigBtn">Salvar</button>
+          <button class="btn btn-outline btn-sm" id="mniLoadTribunaisBtn">↻ Carregar tribunais da Worker</button>
+        </div>
+        <div id="mniWorkerStatus" style="font-size:12px;color:var(--uc-warm-gray);margin-top:8px;"></div>
+      </div>
+
+      <div class="card mb-3">
+        <div class="flex justify-between items-center mb-3">
+          <h4 class="font-serif font-semibold smallcaps" style="color: var(--uc-black);">Credenciais cifradas (${credentials.length})</h4>
+          <button class="btn btn-primary btn-sm" onclick="mniAddCredencialFlow()">+ Adicionar</button>
+        </div>
+        <p class="help-text mb-3">
+          Cada credencial é o par <em>(advogado × tribunal)</em>. Senha fica cifrada — só destravando o cofre
+          dá pra revelar/usar. CPF fica em claro (não é segredo no SOAP, vai no body).
+        </p>
+        ${credentials.length === 0 ? `
+          <p style="color:var(--uc-warm-gray);font-size:13px;">Nenhuma credencial salva. Use o botão acima.</p>
+        ` : `
+          <div style="display:grid;gap:8px;">
+            ${credentials.map(c => {
+              const tribInfo = tribunais[c.tribunal] || {};
+              const tribStatus = tribInfo.naoSuportado ? '⛔' : (tribInfo.validado ? '✓' : '⚠');
+              return `
+                <div class="card" style="background:var(--uc-cream);padding:10px;">
+                  <div class="flex justify-between items-start gap-2 flex-wrap">
+                    <div style="flex:1;min-width:0;">
+                      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+                        <strong>${escapeHtml(c.advogado || '—')}</strong>
+                        <span class="badge badge-gray">${tribStatus} ${escapeHtml(c.tribunal)}</span>
+                        ${c.atualizadoEm ? `<span class="help-text" style="font-size:11px;">${formatDate(c.atualizadoEm, { relative: true })}</span>` : ''}
+                      </div>
+                      <div style="font-size:12px;color:var(--uc-warm-gray);margin-top:2px;">
+                        CPF: <code>${escapeHtml(mniMaskCpf(c.cpf))}</code> · senha: <code>●●●●●●●●</code>
+                      </div>
+                    </div>
+                    <div class="flex gap-1 flex-wrap">
+                      <button class="btn btn-ghost btn-sm" onclick="mniRevealSenhaFlow('${escapeHtml(c.id)}')" title="Revelar senha temporariamente">👁</button>
+                      <button class="btn btn-ghost btn-sm" onclick="mniEditCredencialFlow('${escapeHtml(c.id)}')">✎</button>
+                      <button class="btn btn-ghost btn-sm" onclick="mniDeleteCredencial('${escapeHtml(c.id)}')">🗑</button>
+                    </div>
+                  </div>
+                </div>
+              `;
+            }).join('')}
+          </div>
+        `}
+      </div>
+
+      <div class="card mb-3" style="border-left:3px solid var(--uc-amber);">
+        <h4 class="font-serif font-semibold smallcaps mb-2" style="color: var(--uc-black);">⚠ Zona de risco</h4>
+        <p class="help-text mb-2">
+          <strong>Esquecer a chave mestra:</strong> as credenciais cifradas tornam-se inutilizáveis (Firestore não tem cópia em claro).
+          Você pode resetar o cofre — apaga todas as credenciais e canary, e recomeça.
+        </p>
+        <button class="btn btn-danger btn-sm" onclick="mniResetCofre()">↺ Resetar cofre MNI</button>
       </div>
     `;
   }
@@ -12179,6 +12399,20 @@ function setupSettingsHandlers(tab) {
       toast('Configurações salvas', '', 'success');
     };
   }
+  if (tab === 'mni') {
+    mniLoadSettingsCache().then(() => {
+      if (!state._mniRenderedFresh) {
+        state._mniRenderedFresh = true;
+        renderSettings();
+      } else {
+        state._mniRenderedFresh = false;
+      }
+    });
+    const saveBtn = $('mniSaveConfigBtn');
+    if (saveBtn) saveBtn.onclick = mniSaveConfigFlow;
+    const loadBtn = $('mniLoadTribunaisBtn');
+    if (loadBtn) loadBtn.onclick = mniLoadTribunaisFlow;
+  }
   if (tab === 'about') {
     if (state.installPrompt) {
       $('installSection').classList.remove('hidden');
@@ -12289,6 +12523,280 @@ async function djenViewHistory() {
       <button class="btn btn-primary btn-full" onclick="this.closest('.modal-backdrop').remove()" style="margin-top:12px;">Fechar</button>
     </div>`;
   $('modalContainer').appendChild(modal);
+}
+
+// ====================================================================
+// === MNI · UI handlers (sprint MNI.1.2) ==============================
+// ====================================================================
+// Settings → MNI tab. Setup do cofre, gerenciamento de credenciais
+// cifradas. Crypto lives in window.MniCrypto (definido perto do DB).
+//
+// Storage:
+//   DB.setting('mniConfig') = { workerUrl, salt, canary, setupEm }
+//   DB.setting('mniCredentials') = [
+//     { id, advogado, tribunal, cpf, senhaCifrada: {iv,ct,v}, atualizadoEm }
+//   ]
+//   DB.setting('mniTribunaisRegistry') = registry carregado da Worker (opcional cache)
+
+const MNI_TRIBUNAIS_FALLBACK = {
+  TJGO:  { nome:'Tribunal de Justiça de Goiás', sistema:'projudi', validado:true,  validadoEm:'2026-05-11' },
+  TRF1:  { nome:'Tribunal Regional Federal da 1ª Região', sistema:'pje', validado:false },
+  STJ:   { nome:'Superior Tribunal de Justiça', sistema:'pje', validado:false },
+  TJDFT: { nome:'Tribunal de Justiça do DF e Territórios', sistema:'pje', validado:false },
+  TJSP:  { nome:'Tribunal de Justiça de São Paulo', sistema:'esaj', validado:false, naoSuportado:true, motivo:'eSAJ não expõe MNI público' },
+  TRT18: { nome:'Tribunal Regional do Trabalho da 18ª Região (Goiás)', sistema:'pje', validado:false }
+};
+
+async function mniLoadSettingsCache() {
+  const config = (await DB.getSetting('mniConfig', null)) || {};
+  const credentials = (await DB.getSetting('mniCredentials', [])) || [];
+  const tribunais = (await DB.getSetting('mniTribunaisRegistry', null)) || MNI_TRIBUNAIS_FALLBACK;
+  state._mniCache = { config, credentials, tribunais };
+}
+
+function mniMaskCpf(cpf) {
+  const d = String(cpf || '').replace(/\D/g, '');
+  if (d.length !== 11) return cpf || '—';
+  return `${d.slice(0,3)}.***.***.${d.slice(9)}`;
+}
+
+function mniNewId() {
+  return 'mni_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8);
+}
+
+async function mniFirstSetupFlow() {
+  const r = await showModal('Configurar cofre MNI', [
+    { label: 'Chave mestra (mín. 8 caracteres)', type: 'password',
+      help: 'Você vai digitar essa chave todo início de sessão. Anote em local seguro — se perder, não dá pra recuperar credenciais cifradas.' },
+    { label: 'Repita a chave mestra', type: 'password' }
+  ], { confirmLabel: 'Configurar e destravar', intro: 'A chave mestra deriva uma chave AES-GCM-256 que cifra suas senhas Projudi/PJe. Ela <strong>não é salva</strong> em lugar nenhum — só fica na memória da janela.' });
+  if (!r) return;
+  const [pass, pass2] = r;
+  if (!pass || pass.length < 8) { toast('Chave mestra muito curta', 'Mínimo 8 caracteres', 'error'); return; }
+  if (pass !== pass2) { toast('As chaves não conferem', '', 'error'); return; }
+  try {
+    const { saltB64, canary } = await window.MniCrypto.firstSetup(pass);
+    const config = {
+      workerUrl: '',
+      salt: saltB64,
+      canary,
+      setupEm: new Date().toISOString()
+    };
+    await DB.setSetting('mniConfig', config);
+    state._mniCache = { ...(state._mniCache || {}), config };
+    toast('Cofre configurado e destravado', '', 'success');
+    renderSettings();
+  } catch (e) {
+    console.error('[MNI] setup error', e);
+    toast('Falha no setup', String(e.message || e), 'error');
+  }
+}
+
+async function mniUnlockFlow() {
+  const config = (await DB.getSetting('mniConfig', null)) || {};
+  if (!config.salt || !config.canary) {
+    toast('Cofre não configurado', '', 'error');
+    return;
+  }
+  const r = await showModal('Destravar cofre MNI', [
+    { label: 'Chave mestra', type: 'password' }
+  ], { confirmLabel: 'Destravar' });
+  if (!r) return;
+  const [pass] = r;
+  if (!pass) return;
+  const ok = await window.MniCrypto.unlock(pass, config.salt, config.canary);
+  if (!ok) {
+    toast('Chave mestra incorreta', '', 'error');
+    return;
+  }
+  toast('Cofre destravado', 'Vai travar de novo ao recarregar', 'success');
+  renderSettings();
+}
+
+function mniLock() {
+  window.MniCrypto.lock();
+  toast('Cofre travado', '', 'info');
+  renderSettings();
+}
+
+async function mniSaveConfigFlow() {
+  const config = (await DB.getSetting('mniConfig', null)) || {};
+  const workerUrl = ($('mniWorkerUrlInput')?.value || '').trim();
+  config.workerUrl = workerUrl;
+  await DB.setSetting('mniConfig', config);
+  state._mniCache = { ...(state._mniCache || {}), config };
+  toast('Worker URL salva', '', 'success');
+}
+
+async function mniLoadTribunaisFlow() {
+  const config = (await DB.getSetting('mniConfig', null)) || {};
+  const workerUrl = (config.workerUrl || ($('mniWorkerUrlInput')?.value || '').trim()).replace(/\/$/, '');
+  if (!workerUrl) {
+    toast('Defina a URL da Worker primeiro', '', 'error');
+    return;
+  }
+  const statusEl = $('mniWorkerStatus');
+  if (statusEl) statusEl.innerHTML = '↻ carregando registry…';
+  try {
+    const resp = await fetch(workerUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ operacao: 'listarTribunais' })
+    });
+    const data = await resp.json();
+    if (data.sucesso && data.tribunais) {
+      await DB.setSetting('mniTribunaisRegistry', data.tribunais);
+      state._mniCache = { ...(state._mniCache || {}), tribunais: data.tribunais };
+      if (statusEl) statusEl.innerHTML = `<span style="color:var(--uc-green);">✓ ${Object.keys(data.tribunais).length} tribunais carregados</span>`;
+      toast('Tribunais sincronizados', `${Object.keys(data.tribunais).length} disponíveis`, 'success');
+      renderSettings();
+    } else {
+      if (statusEl) statusEl.innerHTML = `<span style="color:var(--uc-red);">✗ ${escapeHtml(data.error || 'falhou')}</span>`;
+    }
+  } catch (e) {
+    if (statusEl) statusEl.innerHTML = `<span style="color:var(--uc-red);">✗ ${escapeHtml(e.message || e)}</span>`;
+  }
+}
+
+function _mniTribunalOptions() {
+  const tribunais = state._mniCache?.tribunais || MNI_TRIBUNAIS_FALLBACK;
+  return Object.entries(tribunais)
+    .filter(([_, t]) => !t.naoSuportado)
+    .map(([codigo, t]) => ({
+      value: codigo,
+      label: `${t.validado ? '✓' : '⚠'} ${codigo} — ${t.nome || codigo}`
+    }));
+}
+
+function _mniAdvogadoOptions() {
+  return ADVOGADOS.map(n => ({ value: n, label: n }));
+}
+
+async function mniAddCredencialFlow(existingId = null) {
+  if (!window.MniCrypto.isUnlocked()) {
+    toast('Destrave o cofre primeiro', '', 'error');
+    return;
+  }
+  const credentials = (await DB.getSetting('mniCredentials', [])) || [];
+  const existing = existingId ? credentials.find(c => c.id === existingId) : null;
+
+  const r = await showModal(existing ? 'Editar credencial MNI' : 'Adicionar credencial MNI', [
+    { label: 'Advogado', type: 'select', options: _mniAdvogadoOptions(), default: existing?.advogado || (ADVOGADOS[0] || '') },
+    { label: 'Tribunal', type: 'select', options: _mniTribunalOptions(), default: existing?.tribunal || 'TJGO' },
+    { label: 'CPF do advogado (login no tribunal)', placeholder: '000.000.000-00', default: existing?.cpf || '' },
+    { label: 'Senha do tribunal', type: 'password',
+      help: existing ? 'Deixe vazio pra manter a senha atual.' : 'Vai ser cifrada com a chave mestra antes de ir pro Firestore.' }
+  ], { confirmLabel: existing ? 'Salvar alterações' : 'Adicionar e cifrar' });
+  if (!r) return;
+  const [advogado, tribunal, cpfRaw, senha] = r;
+  const cpf = String(cpfRaw || '').replace(/\D/g, '');
+  if (!advogado) { toast('Selecione um advogado', '', 'error'); return; }
+  if (!tribunal) { toast('Selecione um tribunal', '', 'error'); return; }
+  if (cpf.length !== 11) { toast('CPF inválido', 'Precisa de 11 dígitos', 'error'); return; }
+  if (!existing && !senha) { toast('Senha obrigatória', '', 'error'); return; }
+
+  // Detecta duplicata (advogado × tribunal) — só permite uma por par
+  if (!existing) {
+    const dup = credentials.find(c => c.advogado === advogado && c.tribunal === tribunal);
+    if (dup) {
+      toast('Credencial já existe', `${advogado} já tem credencial pro ${tribunal}. Edite a existente.`, 'error');
+      return;
+    }
+  }
+
+  try {
+    let senhaCifrada = existing?.senhaCifrada;
+    if (senha) {
+      senhaCifrada = await window.MniCrypto.encrypt(senha);
+    }
+    if (existing) {
+      existing.advogado = advogado;
+      existing.tribunal = tribunal;
+      existing.cpf = cpf;
+      if (senha) existing.senhaCifrada = senhaCifrada;
+      existing.atualizadoEm = new Date().toISOString();
+    } else {
+      credentials.push({
+        id: mniNewId(),
+        advogado, tribunal, cpf,
+        senhaCifrada,
+        atualizadoEm: new Date().toISOString()
+      });
+    }
+    await DB.setSetting('mniCredentials', credentials);
+    state._mniCache = { ...(state._mniCache || {}), credentials };
+    toast(existing ? 'Credencial atualizada' : 'Credencial adicionada', '', 'success');
+    renderSettings();
+  } catch (e) {
+    console.error('[MNI] save credential error', e);
+    toast('Falha ao cifrar/salvar', String(e.message || e), 'error');
+  }
+}
+
+function mniEditCredencialFlow(id) {
+  return mniAddCredencialFlow(id);
+}
+
+async function mniDeleteCredencial(id) {
+  const credentials = (await DB.getSetting('mniCredentials', [])) || [];
+  const c = credentials.find(x => x.id === id);
+  if (!c) return;
+  const ok = await confirmDialog('Remover credencial?',
+    `${c.advogado} @ ${c.tribunal} — esta credencial cifrada será apagada do Firestore.`,
+    true);
+  if (!ok) return;
+  const nova = credentials.filter(x => x.id !== id);
+  await DB.setSetting('mniCredentials', nova);
+  state._mniCache = { ...(state._mniCache || {}), credentials: nova };
+  toast('Credencial removida', '', 'success');
+  renderSettings();
+}
+
+async function mniRevealSenhaFlow(id) {
+  if (!window.MniCrypto.isUnlocked()) {
+    toast('Destrave o cofre primeiro', '', 'error');
+    return;
+  }
+  const credentials = (await DB.getSetting('mniCredentials', [])) || [];
+  const c = credentials.find(x => x.id === id);
+  if (!c || !c.senhaCifrada) return;
+  try {
+    const senha = await window.MniCrypto.decrypt(c.senhaCifrada);
+    // Modal de visualização — não readonly, copiável
+    const modal = document.createElement('div');
+    modal.className = 'modal-backdrop';
+    modal.innerHTML = `
+      <div class="modal">
+        <h3 class="modal-title">Senha de ${escapeHtml(c.advogado)} @ ${escapeHtml(c.tribunal)}</h3>
+        <p class="help-text" style="margin-bottom:12px;">A senha aparece aqui temporariamente. Não compartilhe a tela.</p>
+        <div style="background:var(--uc-cream);padding:10px;border-radius:6px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:14px;word-break:break-all;user-select:all;">${escapeHtml(senha)}</div>
+        <div class="flex gap-2" style="margin-top:16px;">
+          <button class="btn btn-outline" id="_mniRevealCopy" style="flex:1;">📋 Copiar</button>
+          <button class="btn btn-primary" id="_mniRevealClose" style="flex:1;">Fechar</button>
+        </div>
+      </div>`;
+    $('modalContainer').appendChild(modal);
+    $('_mniRevealCopy').onclick = async () => {
+      try { await navigator.clipboard.writeText(senha); toast('Senha copiada', 'Cuidado com o clipboard', 'info'); } catch {}
+    };
+    $('_mniRevealClose').onclick = () => modal.remove();
+  } catch (e) {
+    toast('Falha ao decifrar', 'Cofre travou ou credencial corrompida?', 'error');
+  }
+}
+
+async function mniResetCofre() {
+  const credentials = (await DB.getSetting('mniCredentials', [])) || [];
+  const ok = await confirmDialog('Resetar cofre MNI?',
+    `Vai apagar TODAS as ${credentials.length} credencial${credentials.length === 1 ? '' : 'es'} cifradas + canary + salt. Não dá pra desfazer. Você terá que re-cadastrar tudo.`,
+    true);
+  if (!ok) return;
+  await DB.setSetting('mniConfig', null);
+  await DB.setSetting('mniCredentials', []);
+  window.MniCrypto.lock();
+  state._mniCache = null;
+  toast('Cofre resetado', '', 'info');
+  renderSettings();
 }
 
 async function setTheme(theme) {
