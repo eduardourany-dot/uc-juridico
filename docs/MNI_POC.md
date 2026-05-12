@@ -21,37 +21,46 @@
 | `tools/mni-poc.html` | Página standalone de teste com dropdown de tribunal + health check + consulta. |
 | `docs/MNI_POC.md` | Este arquivo. |
 
-## Tribunais no registry (v0.3.0 · 41 tribunais)
+## Tribunais no registry (v0.4.0 · 63 tribunais)
 
-Registry expandido a partir de `tribunal_registry.py` (UC Jurídico v4.3.0, Eduardo). Total: **41 tribunais** cobrindo Superiores + TRFs + 26 TJs + 3 TRTs.
+Registry expandido a partir de `tribunal_registry.py` (UC Jurídico v4.3.0, Eduardo) + 21 TRTs adicionados (TRT1-24 completo) + correções de path via health check 11/05/2026.
 
-| Esfera | Códigos | Sistemas |
-|---|---|---|
-| Superior | STF, STJ, TST | eSTF, eSTJ, PJe |
-| Federal (TRFs) | TRF1, TRF1_eProc, TRF2, TRF3, TRF4, TRF5, TRF6 | PJe, eProc |
-| Estadual (26 TJs) | TJGO, TJDF, TJSP, TJRJ, TJMG, TJES, TJMT, TJMS, TJPR, TJPR_PJe, TJSC, TJRS, TJPI, TJMA, TJBA, TJPE, TJCE, TJRN, TJPB, TJAL, TJSE, TJTO, TJPA, TJAM, TJRR, TJAC, TJRO | PJe, eSAJ, eProc, Projudi |
-| Sem MNI | TJAP | Tucujuris (usar DataJud) |
-| Trabalho | TRT18, TRT2, TRT10 | PJe-JT |
+### ✓ Validados via health check (10)
 
-### Validados (health check + parser OK)
+| Código | Tempo | Sistema | Endpoint |
+|---|---|---|---|
+| TJGO | 99ms | Projudi | `projudi.tjgo.jus.br/IntercomunicacaoService` |
+| TRF1 | 206ms | PJe | `pje1g.trf1.jus.br/pje/intercomunicacao` |
+| TRF5 | 271ms | PJe | `pje.trf5.jus.br/pje/intercomunicacao` |
+| TJMT | 436ms | PJe | `pje.tjmt.jus.br/pje/intercomunicacao` |
+| TJMS | 147ms | eSAJ | `esaj.tjms.jus.br/mniws/.../intercomunicacao` |
+| **TJSP** | **45ms** | eSAJ | `http://esaj.tjsp.jus.br/mniws/.../intercomunicacao` ⚠ HTTP |
+| TJES | 87ms | PJe | `pje.tjes.jus.br/pje/intercomunicacao` |
+| TJMA | 429ms | PJe | `pje.tjma.jus.br/pje/ConsultaPJe` ⚠ rota especial |
+| TJCE | 356ms | PJe | `pje.tjce.jus.br/pje1grau/intercomunicacao` |
+| TJAC | 1055ms | eSAJ | `esaj.tjac.jus.br/mniws/.../intercomunicacao` |
 
-- ✓ **TJGO** (Projudi) — POC validada 11/05/2026
-- ✓ **TRF1** (PJe 1g) — health check OK ~3s
+### ⛔ Não suportados
 
-### Status dos demais
+| Código | Motivo |
+|---|---|
+| TJAP | Tucujuris (sistema próprio, sem MNI) |
+| TRF1_eProc | Hostname eproc1g.trf1.jus.br não existe (eProc no TRF1 está nas seções judiciárias, hosts próprios) |
 
-`validado: false` significa "endpoint cadastrado mas não testado por mim ainda". Eduardo já confirmou alguns como `ativo` no protótipo v4.3.0:
+### Status dos demais (categorias)
 
-- **STF**: acesso restrito (credencial CINT/SPR)
-- **STJ**: endpoint público confirmado pelo Eduardo — health via Cloudflare deu ECONNREFUSED (provável WAF, hostname existe)
-- **TJDF**: prioritário (OAB/DF). Health deu 403 (provável WAF)
-- **TJSP**: ativo no protótipo via eSAJ HTTP — atenção: endpoint HTTP (não HTTPS), pode bloquear Cloudflare
-- **TJMA**: rota especial `/ConsultaPJe` (não `/intercomunicacao`)
-- **TJAM**: rota especial `consultaProcessualWebService`
-- **TJPE**: subdomínio dedicado `pjemni.app.tjpe.jus.br`
-- **TJPI**: MNI 2.2.3 (todos os outros são 2.2.2)
-- **TJMG**: exige ICP-Brasil (Provimento 355/2018)
-- **TRF4**: referência do eProc (criou o sistema)
+- **Bloqueio Cloudflare (12)**: TST, TRF2, TRF3, TRF4, TRF6, TJDF, TJRJ, TJSC, TJBA, TJAL, TJTO — HTTP 530/520/403 indica que origin existe mas firewall bloqueia o IP do Cloudflare. Provável funcionar via browser real do user. Testar com credenciais.
+- **Cert SSL inválido (2)**: STF, TJPE — HTTP 526. Configuração do tribunal precisa ser corrigida.
+- **Timeout (2)**: STJ, TJPA — origin não respondeu em 8s.
+- **Path errado (9)**: TJMG, TJPR, TJPR_PJe, TJRS, TJRN, TJSE, TJAM, TJRR, TJRO — endpoint cadastrado responde HTTP 200/404 mas não WSDL. Provavelmente migrou path (como o TJGO fez de `/projudi/webservices/` pra `/IntercomunicacaoService`).
+- **Não testado (28)**: TJPA_PJe + TRT1, TRT3-TRT9, TRT11-TRT17, TRT19-TRT24 (21 TRTs adicionados após descoberta do path real).
+
+### Correções importantes (v0.4)
+
+- **TJPI**: path corrigido de `/pje/intercomunicacao` → `/1g/intercomunicacao` (WSDL válido confirmado via WebFetch). MNI 2.2.3.
+- **TRT18, TRT2, TRT10 + 21 novos TRTs**: path real é `/primeirograu/servicosweb/mni222/intercomunicacao` (descoberto via TRT15 que documenta publicamente). Antes o registry usava `/pje/intercomunicacao` que dava 404.
+- **TJPA_PJe**: adicionado como sistema paralelo (Eduardo sinalizou).
+- **TRT1-24 completo**: registry agora cobre TODOS os Tribunais Regionais do Trabalho do Brasil.
 
 ### Detecção automática por CNJ
 
@@ -64,6 +73,9 @@ POST { operacao: "detectarPorCnj", cnj: "0234509-41.2014.8.09.0006" }
 
 POST { operacao: "detectarPorCnj", cnj: "0000123-45.2024.4.01.3400" }
 → { sucesso: true, multiplos: true, candidatos: ["TRF1", "TRF1_eProc"] }
+
+POST { operacao: "detectarPorCnj", cnj: "0000123-45.2024.5.18.0011" }
+→ { sucesso: true, codigo: "TRT18", tribunal: {...} }
 ```
 
 ## Setup (1 vez)
