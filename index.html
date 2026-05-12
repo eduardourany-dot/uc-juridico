@@ -2812,8 +2812,8 @@ async function renderProcessDetail() {
         </p>
       </div>
       <div class="flex gap-2">
-        ${/* DataJud desabilitado — funções permanecem no código. Reativar trocando ${''} pelo bloco abaixo:
-            p.cnj ? '<button class="btn btn-secondary btn-sm" onclick="datajudRefreshProcess(\'' + p.id + '\')" title="Atualizar via DataJud">🔄 DataJud</button>' : '' */ ''}
+        ${p.cnj ? `<button class="btn btn-secondary btn-sm" onclick="mniBuscarProcessoFlow('${p.id}')" title="Consultar dados atualizados via SOAP/MNI no tribunal de origem">🔍 Buscar MNI</button>` : ''}
+        ${/* DataJud desabilitado — funções permanecem no código. */ ''}
         <button class="btn btn-outline btn-sm" onclick="editProcessFlow()">Editar</button>
         <button class="btn btn-secondary btn-sm" onclick="generateProcessFiche()">Gerar ficha</button>
         <button class="btn btn-primary btn-sm" onclick="gerarPeticaoFlow()" title="Gerar petição a partir de modelo cadastrado">📝 Gerar petição</button>
@@ -12856,6 +12856,288 @@ async function mniResetCofre() {
   state._mniCache = null;
   toast('Cofre resetado', '', 'info');
   renderSettings();
+}
+
+// ====================================================================
+// === MNI.2 · Buscar processo no tribunal (sprint MNI.2) ==============
+// ====================================================================
+// Botão "🔍 Buscar MNI" no detalhe do processo:
+//   1. Detecta tribunal (campo p.tribunal OU via /detectarPorCnj no CNJ)
+//   2. Confere se o tribunal suporta MNI no registry
+//   3. Destrava cofre se travado
+//   4. Procura credencial do advogado responsável p/ esse tribunal
+//   5. Decifra senha e chama o Worker
+//   6. Mostra modal com preview dos dados retornados
+//
+// Chunk 1 (este): exibe resultado em modal simples · sem auto-apply ainda.
+// Chunk 2 (próximo): merge inteligente com processo (partes, movimentos, classe...).
+
+async function _mniGetConfig() {
+  return (await DB.getSetting('mniConfig', null)) || {};
+}
+
+async function _mniGetRegistry() {
+  // Usa cache se disponível, senão fallback embarcado
+  const cache = (await DB.getSetting('mniTribunaisRegistry', null));
+  return cache || MNI_TRIBUNAIS_FALLBACK;
+}
+
+// Detecta tribunal do processo. Retorna { codigo, conf } ou null.
+// Se p.tribunal estiver setado e existir no registry, usa esse direto.
+// Senão tenta detectar via /detectarPorCnj no Worker (precisa workerUrl).
+async function _mniDetectarTribunal(p) {
+  const registry = await _mniGetRegistry();
+  // 1. Tribunal já está no processo?
+  if (p.tribunal) {
+    const codigo = String(p.tribunal).toUpperCase().replace(/[^A-Z0-9_]/g, '');
+    const conf = registry[codigo];
+    if (conf) return { codigo, conf, source: 'campo_processo' };
+  }
+  // 2. Tenta detectar pelo CNJ via Worker
+  if (!p.cnj) return null;
+  const config = await _mniGetConfig();
+  if (!config.workerUrl) return null;
+  try {
+    const resp = await fetch(config.workerUrl.replace(/\/$/, ''), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ operacao: 'detectarPorCnj', cnj: p.cnj })
+    });
+    const data = await resp.json();
+    if (data.sucesso && data.codigo) {
+      return { codigo: data.codigo, conf: data.tribunal, source: 'detectado_cnj' };
+    }
+    if (data.sucesso && data.multiplos) {
+      // Múltiplos candidatos — preferir validado, senão primeiro
+      const validado = data.candidatos.find(c => registry[c]?.validado);
+      const escolhido = validado || data.candidatos[0];
+      return { codigo: escolhido, conf: registry[escolhido], source: 'multiplos_cnj', candidatos: data.candidatos };
+    }
+  } catch (e) {
+    console.warn('[MNI.2] detectarPorCnj falhou', e);
+  }
+  return null;
+}
+
+async function _mniBuscarCredencial(advogadoNome, tribunalCodigo) {
+  const credentials = (await DB.getSetting('mniCredentials', [])) || [];
+  return credentials.find(c => c.advogado === advogadoNome && c.tribunal === tribunalCodigo) || null;
+}
+
+async function mniBuscarProcessoFlow(processId) {
+  const p = await DB.getProcess(processId);
+  if (!p) { toast('Processo não encontrado', '', 'error'); return; }
+
+  // 1. Detecta tribunal
+  const detect = await _mniDetectarTribunal(p);
+  if (!detect) {
+    toast('Tribunal não identificado',
+      p.cnj ? 'Configure Worker MNI em Configurações ou edite o processo definindo o tribunal.' : 'Processo sem CNJ — preencha o CNJ pra detectar automaticamente.',
+      'error');
+    return;
+  }
+  const { codigo, conf } = detect;
+  if (conf?.naoSuportado) {
+    toast(`${codigo} não suporta MNI`, conf.motivo || 'Tribunal sem MNI público.', 'error');
+    return;
+  }
+
+  // 2. Worker URL
+  const config = await _mniGetConfig();
+  if (!config.workerUrl) {
+    toast('Worker MNI não configurada', 'Vá em Configurações → MNI pra cadastrar.', 'error');
+    return;
+  }
+
+  // 3. Destrava cofre se necessário
+  if (!window.MniCrypto.isUnlocked()) {
+    if (!config.salt || !config.canary) {
+      toast('Cofre MNI não configurado', 'Configure em Configurações → MNI antes.', 'error');
+      return;
+    }
+    // Prompt inline pra destravar
+    const r = await showModal(`Destravar cofre pra consultar ${codigo}`, [
+      { label: 'Chave mestra MNI', type: 'password' }
+    ], { confirmLabel: 'Destravar e buscar' });
+    if (!r) return;
+    const ok = await window.MniCrypto.unlock(r[0], config.salt, config.canary);
+    if (!ok) { toast('Chave mestra incorreta', '', 'error'); return; }
+  }
+
+  // 4. Procura credencial pelo advogado responsável (ou suplente como fallback)
+  const meEmail = (window.UC_Auth?.getUser?.() || {}).email || '';
+  const meuNome = (typeof defaultAdvogado === 'function' ? defaultAdvogado(meEmail) : '') || '';
+  const candidatos = [p.advogadoResponsavel, p.advogadoSuplente, meuNome].filter(Boolean);
+  let cred = null;
+  let usedAdvogado = null;
+  for (const adv of candidatos) {
+    cred = await _mniBuscarCredencial(adv, codigo);
+    if (cred) { usedAdvogado = adv; break; }
+  }
+  if (!cred) {
+    toast('Sem credencial cadastrada',
+      `Nenhum advogado (${candidatos.join(', ') || 'definido'}) tem credencial pro ${codigo}. Cadastre em Configurações → MNI.`,
+      'error');
+    return;
+  }
+
+  // 5. Decifra senha
+  let senha;
+  try {
+    senha = await window.MniCrypto.decrypt(cred.senhaCifrada);
+  } catch (e) {
+    toast('Falha ao decifrar credencial', String(e.message || e), 'error');
+    return;
+  }
+
+  // 6. Chama Worker — mostra modal de loading
+  const loadingModal = _mniMakeLoadingModal(codigo, p.cnj);
+  $('modalContainer').appendChild(loadingModal);
+
+  const t0 = Date.now();
+  let data;
+  try {
+    const resp = await fetch(config.workerUrl.replace(/\/$/, ''), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        tribunal: codigo,
+        operacao: 'consultarProcesso',
+        cnj: p.cnj,
+        cpf: cred.cpf,
+        senha
+      })
+    });
+    data = await resp.json();
+  } catch (e) {
+    loadingModal.remove();
+    toast('Falha de rede', String(e.message || e), 'error');
+    return;
+  } finally {
+    senha = null; // limpa senha da memória ASAP
+  }
+  loadingModal.remove();
+
+  // 7. Exibe modal de resultado (chunk 1 = preview cru; chunk 2 = diff/merge)
+  _mniShowResultModal(p, codigo, usedAdvogado, data, Date.now() - t0);
+}
+
+function _mniMakeLoadingModal(codigo, cnj) {
+  const modal = document.createElement('div');
+  modal.className = 'modal-backdrop';
+  modal.innerHTML = `
+    <div class="modal" style="max-width: 420px; text-align: center;">
+      <div style="display:inline-block;border:3px solid #d4cfc0;border-top-color:var(--uc-gold);border-radius:50%;width:32px;height:32px;animation:spin 0.8s linear infinite;margin-bottom:12px;"></div>
+      <h3 class="modal-title" style="margin: 0 0 4px;">Consultando ${escapeHtml(codigo)}…</h3>
+      <p class="help-text" style="margin: 0 0 8px;">${escapeHtml(cnj || '')}</p>
+      <p class="help-text" style="font-size: 11px;">SOAP/MNI 2.2.2 via Cloudflare Worker · pode levar 5–30s</p>
+      <style>@keyframes spin { to { transform: rotate(360deg); } }</style>
+    </div>`;
+  return modal;
+}
+
+function _mniShowResultModal(p, codigo, advogadoUsado, data, elapsedTotal) {
+  const modal = document.createElement('div');
+  modal.className = 'modal-backdrop';
+  const sucesso = data.sucesso !== false && !data.erro;
+
+  let body;
+  if (!sucesso) {
+    body = `
+      <div class="status err" style="background:#f3d8cf;color:#7a2a18;border-left:3px solid var(--uc-red);padding:12px;border-radius:6px;margin-bottom:12px;">
+        <strong>✗ Não foi possível buscar</strong><br>
+        <small>${escapeHtml(data.erro || 'erro desconhecido')}</small>
+        ${data.mensagem ? '<br><small style="opacity:.8;">' + escapeHtml(data.mensagem) + '</small>' : ''}
+        ${data.httpStatus ? '<br><small>HTTP ' + data.httpStatus + '</small>' : ''}
+      </div>
+      <details>
+        <summary style="cursor:pointer;font-size:12px;color:var(--uc-warm-gray);">Ver JSON cru</summary>
+        <pre style="background:var(--uc-cream);padding:8px;border-radius:5px;overflow:auto;font-size:11px;max-height:200px;">${escapeHtml(JSON.stringify(data, null, 2))}</pre>
+      </details>
+    `;
+  } else {
+    // Sucesso — preview legível
+    const rows = [];
+    if (data.cnj && data.cnj !== p.cnj) rows.push(['CNJ', `${data.cnj} <span class="badge badge-amber">≠ atual</span>`]);
+    if (data.classe?.codigo) rows.push(['Classe (TPU)', data.classe.codigo]);
+    if (data.assunto?.descricao) rows.push(['Assunto', data.assunto.descricao]);
+    if (data.orgaoJulgador) rows.push(['Vara/órgão', data.orgaoJulgador]);
+    if (data.serventia) rows.push(['Serventia', data.serventia]);
+    if (data.dataAjuizamento) rows.push(['Ajuizado em', data.dataAjuizamento]);
+    if (data.valorCausa) rows.push(['Valor causa', 'R$ ' + data.valorCausa]);
+    if (data.processoFase) rows.push(['Fase', data.processoFase]);
+    if (data.processoStatus) rows.push(['Status', data.processoStatus]);
+    if (data.magistradoAtuante) rows.push(['Magistrado', data.magistradoAtuante]);
+
+    const partesHtml = (data.partes || []).slice(0, 20).map(pa => {
+      const polo = pa.polo === 'AT' ? '<span class="badge badge-green">ATIVO</span>' :
+                   pa.polo === 'PA' ? '<span class="badge badge-amber">PASSIVO</span>' :
+                   `<span class="badge badge-gray">${escapeHtml(pa.polo || '?')}</span>`;
+      const advs = (pa.advogados || []).map(a => `${escapeHtml(a.nome || '')}${a.oab ? ` <small>(${escapeHtml(a.oab)})</small>` : ''}`).join(', ') || '—';
+      return `<tr><td>${polo}</td><td><strong>${escapeHtml(pa.nome || '—')}</strong></td><td><small>${escapeHtml(pa.cpfCnpj || '—')}</small></td><td><small>${advs}</small></td></tr>`;
+    }).join('');
+
+    const movsHtml = (data.movimentos || []).slice(0, 15).map(m => {
+      const dt = m.dataIso ? m.dataIso.replace('T', ' ').slice(0, 16) : (m.dataHora || '');
+      return `<tr><td><small>${escapeHtml(dt)}</small></td><td><strong>${escapeHtml(m.descricao || '—')}</strong>${m.complemento ? `<div style="font-size:11px;color:var(--uc-warm-gray);">${escapeHtml(m.complemento.slice(0, 200))}${m.complemento.length > 200 ? '…' : ''}</div>` : ''}</td></tr>`;
+    }).join('');
+
+    body = `
+      <div class="status ok" style="background:#d4e8d4;color:#2a5a2a;border-left:3px solid var(--uc-green);padding:12px;border-radius:6px;margin-bottom:12px;">
+        <strong>✓ Dados recebidos do ${escapeHtml(codigo)}</strong><br>
+        <small>${data.partes?.length || 0} parte(s) · ${data.movimentos?.length || 0} movimento(s)${data.movimentosTotal > (data.movimentos?.length||0) ? ` de ${data.movimentosTotal}` : ''} · Worker ${data.elapsedMs}ms · total ${elapsedTotal}ms</small>
+      </div>
+
+      ${rows.length ? `
+        <h4 class="font-serif font-semibold smallcaps mb-2" style="color: var(--uc-black);font-size:13px;">Identificação</h4>
+        <table style="width:100%;font-size:13px;margin-bottom:16px;">
+          ${rows.map(([k, v]) => `<tr><td style="color:var(--uc-warm-gray);width:130px;padding:4px 0;font-size:11px;text-transform:uppercase;letter-spacing:.04em;">${k}</td><td style="padding:4px 0;">${v}</td></tr>`).join('')}
+        </table>
+      ` : ''}
+
+      ${partesHtml ? `
+        <h4 class="font-serif font-semibold smallcaps mb-2" style="color: var(--uc-black);font-size:13px;">Partes (${data.partes.length})</h4>
+        <table style="width:100%;font-size:12px;margin-bottom:16px;border-collapse:collapse;">
+          <tr style="border-bottom:1px solid var(--uc-line);"><th style="text-align:left;padding:4px 6px;font-size:10px;color:var(--uc-warm-gray);">Polo</th><th style="text-align:left;padding:4px 6px;font-size:10px;color:var(--uc-warm-gray);">Nome</th><th style="text-align:left;padding:4px 6px;font-size:10px;color:var(--uc-warm-gray);">CPF/CNPJ</th><th style="text-align:left;padding:4px 6px;font-size:10px;color:var(--uc-warm-gray);">Advogados</th></tr>
+          ${partesHtml}
+        </table>
+      ` : ''}
+
+      ${movsHtml ? `
+        <h4 class="font-serif font-semibold smallcaps mb-2" style="color: var(--uc-black);font-size:13px;">Últimos movimentos (${Math.min(15, data.movimentos.length)}${data.movimentosTotal > 15 ? ' de ' + data.movimentosTotal : ''})</h4>
+        <table style="width:100%;font-size:12px;margin-bottom:8px;border-collapse:collapse;">
+          <tr style="border-bottom:1px solid var(--uc-line);"><th style="text-align:left;padding:4px 6px;font-size:10px;color:var(--uc-warm-gray);width:120px;">Data</th><th style="text-align:left;padding:4px 6px;font-size:10px;color:var(--uc-warm-gray);">Descrição</th></tr>
+          ${movsHtml}
+        </table>
+      ` : ''}
+
+      <p class="help-text" style="margin-top:16px;padding:8px 12px;background:#f5e3c4;border-left:3px solid var(--uc-amber);border-radius:5px;">
+        ℹ <strong>Próximo chunk MNI.2 (em breve):</strong> botão "Aplicar mudanças" vai mesclar
+        partes/movimentos/classe ao processo automaticamente, preservando notas. Por ora isso é
+        só preview.
+      </p>
+    `;
+  }
+
+  modal.innerHTML = `
+    <div class="modal scroll-thin" style="max-width: 760px;">
+      <h3 class="modal-title">${sucesso ? '✓' : '✗'} MNI · ${escapeHtml(codigo)} · ${escapeHtml(p.cnj || p.name)}</h3>
+      <p class="help-text" style="margin: 0 0 16px; font-size: 12px;">
+        Credencial usada: <strong>${escapeHtml(advogadoUsado || '?')}</strong>
+      </p>
+      <div>${body}</div>
+      <div class="flex gap-2" style="margin-top: 16px;">
+        <button class="btn btn-outline" id="_mniResultClose" style="flex:1;">Fechar</button>
+        ${sucesso ? `<button class="btn btn-ghost btn-sm" id="_mniCopyJson" style="flex:0;">📋 Copiar JSON</button>` : ''}
+      </div>
+    </div>
+  `;
+  $('modalContainer').appendChild(modal);
+  $('_mniResultClose').onclick = () => modal.remove();
+  const copyBtn = $('_mniCopyJson');
+  if (copyBtn) copyBtn.onclick = async () => {
+    try { await navigator.clipboard.writeText(JSON.stringify(data, null, 2)); toast('JSON copiado', '', 'info'); } catch {}
+  };
 }
 
 async function setTheme(theme) {
