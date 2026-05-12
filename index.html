@@ -2526,7 +2526,12 @@ async function newProcessFlow() {
           </div>
           <div>
             <label class="label">Número CNJ (opcional)</label>
-            <input type="text" class="input" id="newProcessCnj" placeholder="0000000-00.0000.0.00.0000">
+            <p class="help-text" style="margin-bottom: 6px;">Tem o CNJ? Clique em <strong>Buscar MNI</strong> pra puxar tribunal, partes, advogados e movimentos direto do tribunal.</p>
+            <div style="display: flex; gap: 8px; align-items: stretch;">
+              <input type="text" class="input" id="newProcessCnj" placeholder="0000000-00.0000.0.00.0000" style="flex: 1;">
+              <button class="btn btn-secondary btn-sm" type="button" id="_npBuscarMniBtn" title="Detecta o tribunal pelo número do CNJ e busca dados via SOAP/MNI">🔍 Buscar MNI</button>
+            </div>
+            <div id="_npMniStatus" style="font-size:12px;color:var(--uc-warm-gray);margin-top:6px;"></div>
           </div>
           <div>
             <label class="label">Cliente</label>
@@ -2615,6 +2620,132 @@ async function newProcessFlow() {
     $('modalContainer').appendChild(modal);
 
     const cleanup = () => modal.remove();
+    // Stash de dados MNI retornados pra anexar no save
+    let _mniStash = null;
+
+    // ===== Botão "🔍 Buscar MNI" no campo CNJ =====
+    document.getElementById('_npBuscarMniBtn').onclick = async () => {
+      const cnj = document.getElementById('newProcessCnj').value.trim();
+      const statusEl = document.getElementById('_npMniStatus');
+      if (!cnj.replace(/\D/g, '')) {
+        statusEl.innerHTML = '<span style="color:var(--uc-red);">✗ Preencha o CNJ antes</span>';
+        return;
+      }
+      statusEl.innerHTML = '<span class="spinner" style="display:inline-block;border:2px solid #d4cfc0;border-top-color:var(--uc-gold);border-radius:50%;width:12px;height:12px;animation:spin 0.8s linear infinite;vertical-align:-2px;margin-right:6px;"></span> Detectando tribunal…';
+
+      // Detecta tribunal via worker
+      const pTemp = { cnj };
+      const detect = await _mniDetectarTribunal(pTemp);
+      if (!detect) {
+        statusEl.innerHTML = '<span style="color:var(--uc-red);">✗ Tribunal não identificado. Configure Worker em Configurações → MNI ou preencha tribunal manualmente.</span>';
+        return;
+      }
+      const { codigo, conf } = detect;
+      if (conf?.naoSuportado) {
+        statusEl.innerHTML = `<span style="color:var(--uc-amber);">⛔ ${codigo} não suporta MNI. ${escapeHtml(conf.motivo || '')}</span>`;
+        // Ainda assim, preenche o campo tribunal
+        document.getElementById('newProcessTribunal').value = codigo;
+        return;
+      }
+
+      statusEl.innerHTML = `<span class="spinner" style="display:inline-block;border:2px solid #d4cfc0;border-top-color:var(--uc-gold);border-radius:50%;width:12px;height:12px;animation:spin 0.8s linear infinite;vertical-align:-2px;margin-right:6px;"></span> Tribunal: <strong>${escapeHtml(codigo)}</strong> · consultando MNI…`;
+
+      // Worker URL
+      const cfg = await _mniGetConfig();
+      if (!cfg.workerUrl) {
+        statusEl.innerHTML = '<span style="color:var(--uc-red);">✗ Worker MNI não configurada. Vá em Configurações → MNI.</span>';
+        document.getElementById('newProcessTribunal').value = codigo;
+        return;
+      }
+
+      // Destrava cofre se preciso
+      if (!window.MniCrypto.isUnlocked()) {
+        if (!cfg.salt || !cfg.canary) {
+          statusEl.innerHTML = '<span style="color:var(--uc-red);">✗ Cofre MNI não configurado.</span>';
+          document.getElementById('newProcessTribunal').value = codigo;
+          return;
+        }
+        const r = await showModal(`Destravar cofre pra consultar ${codigo}`, [
+          { label: 'Chave mestra MNI', type: 'password' }
+        ], { confirmLabel: 'Destravar e buscar' });
+        if (!r) {
+          statusEl.innerHTML = '<span style="color:var(--uc-warm-gray);">Cancelado.</span>';
+          return;
+        }
+        const ok = await window.MniCrypto.unlock(r[0], cfg.salt, cfg.canary);
+        if (!ok) {
+          statusEl.innerHTML = '<span style="color:var(--uc-red);">✗ Chave mestra incorreta.</span>';
+          return;
+        }
+      }
+
+      // Procura credencial — user logado primeiro
+      const meEmail = (window.UC_Auth?.getUser?.() || {}).email || '';
+      const meuNome = defaultAdvogado(meEmail);
+      let cred = meuNome ? await _mniBuscarCredencial(meuNome, codigo) : null;
+      // Fallback: qualquer credencial do tribunal
+      if (!cred) {
+        const all = (await DB.getSetting('mniCredentials', [])) || [];
+        cred = all.find(c => c.tribunal === codigo);
+      }
+      if (!cred) {
+        statusEl.innerHTML = `<span style="color:var(--uc-red);">✗ Sem credencial cadastrada pro ${codigo}. <a onclick="navigate('settings');document.querySelector('.modal-backdrop').remove();setTimeout(()=>setSettingsTab('mni'),100);" style="color:var(--uc-gold);cursor:pointer;text-decoration:underline;">Cadastrar agora</a></span>`;
+        document.getElementById('newProcessTribunal').value = codigo;
+        return;
+      }
+
+      // Decifra senha e chama Worker
+      let senha;
+      try { senha = await window.MniCrypto.decrypt(cred.senhaCifrada); }
+      catch (e) {
+        statusEl.innerHTML = '<span style="color:var(--uc-red);">✗ Falha ao decifrar credencial.</span>';
+        return;
+      }
+
+      try {
+        const resp = await fetch(cfg.workerUrl.replace(/\/$/, ''), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ tribunal: codigo, operacao: 'consultarProcesso', cnj, cpf: cred.cpf, senha })
+        });
+        const data = await resp.json();
+        senha = null;
+
+        if (!resp.ok || data.sucesso === false) {
+          statusEl.innerHTML = `<span style="color:var(--uc-red);">✗ ${escapeHtml(data.erro || 'falhou')}${data.mensagem ? ' · ' + escapeHtml(data.mensagem.slice(0, 120)) : ''}</span>`;
+          // Mesmo com erro, preenche tribunal
+          document.getElementById('newProcessTribunal').value = codigo;
+          return;
+        }
+
+        // Sucesso — preenche campos do form
+        _mniStash = data;
+        document.getElementById('newProcessTribunal').value = codigo;
+        if (data.orgaoJulgador) document.getElementById('newProcessLocal').value = data.orgaoJulgador;
+        // Heurística pra área (chuta baseado em código CNJ + assunto)
+        const areaSugerida = _mniSugerirArea(codigo, data.assunto?.descricao || '');
+        if (areaSugerida) document.getElementById('newProcessArea').value = areaSugerida;
+        // Heurística pra polo (procura OAB do usuário nas partes)
+        const poloSugerido = _mniSugerirPolo(data, cred.cpf);
+        if (poloSugerido) document.getElementById('newProcessPolo').value = poloSugerido;
+        // Tipo de ação: usa classe se vier descrição (TJGO devolve só código; melhor user escolher)
+        // Se name vazio, sugere "[primeira parte ativa] x [primeira parte passiva]"
+        const nameField = document.getElementById('newProcessName');
+        if (!nameField.value.trim()) {
+          const ativos = (data.partes || []).filter(p => p.polo === 'AT');
+          const passivos = (data.partes || []).filter(p => p.polo === 'PA');
+          if (ativos.length && passivos.length) {
+            nameField.value = `${ativos[0].nome.split('-')[0].trim()} × ${passivos[0].nome.split('-')[0].trim()}`.slice(0, 120);
+          }
+        }
+
+        statusEl.innerHTML = `<span style="color:var(--uc-green);">✓ ${data.partes?.length || 0} parte(s) · ${data.movimentos?.length || 0} movimento(s) · ${data.elapsedMs}ms. Campos preenchidos. Revise e cadastre.</span>`;
+      } catch (e) {
+        senha = null;
+        statusEl.innerHTML = `<span style="color:var(--uc-red);">✗ ${escapeHtml(e.message || e)}</span>`;
+      }
+    };
+
     document.getElementById('_npCancel').onclick = () => { cleanup(); resolve(null); };
     document.getElementById('_npConfirm').onclick = async () => {
       const name = document.getElementById('newProcessName').value.trim();
@@ -2718,7 +2849,50 @@ async function newProcessFlow() {
         };
       }
 
+      // Se tem dados do MNI (clicou em "Buscar MNI" antes de salvar), anexa
+      if (_mniStash) {
+        const { partes: prt, advogados: adv } = _mniConvertPartes(_mniStash.partes);
+        p.partes = prt;
+        p.advogados = adv;
+        p.mniLastSync = Date.now();
+        p.mniData = {
+          tribunal: _mniStash.tribunal || tribunalRaw || null,
+          classe: _mniStash.classe || null,
+          assunto: _mniStash.assunto || null,
+          orgaoJulgador: _mniStash.orgaoJulgador || null,
+          serventia: _mniStash.serventia || null,
+          dataAjuizamento: _mniStash.dataAjuizamento || null,
+          valorCausa: _mniStash.valorCausa || null,
+          magistradoAtuante: _mniStash.magistradoAtuante || null,
+          processoFase: _mniStash.processoFase || null,
+          processoStatus: _mniStash.processoStatus || null,
+          movimentosTotal: _mniStash.movimentosTotal || 0
+        };
+        // Movimentos cru pra criação dos eventos depois
+        p.mniMovimentos = (_mniStash.movimentos || []).slice(0, 100);
+      }
+
       await DB.saveProcess(p);
+
+      // Se MNI trouxe movimentos, materializa como eventos (até 30 mais recentes)
+      if (p.mniMovimentos && p.mniMovimentos.length) {
+        for (const mov of p.mniMovimentos.slice(0, 30)) {
+          const event = {
+            id: uid(),
+            processId: p.id,
+            eventNumber: 'MNI-' + (mov.codigoNacional || mov.codigoLocal || ''),
+            date: mov.dataIso || (mov.dataHora ? `${mov.dataHora.slice(0,4)}-${mov.dataHora.slice(4,6)}-${mov.dataHora.slice(6,8)}` : ''),
+            description: mov.descricao || '',
+            details: mov.complemento || '',
+            type: 'movimento_mni',
+            createdAt: Date.now()
+          };
+          try { await DB.saveEvent(event); } catch (e) { console.warn('falha ao salvar evento MNI', e); }
+        }
+        // Remove o array do processo após materializar (fica só metadata em p.mniData)
+        delete p.mniMovimentos;
+        await DB.saveProcess(p);
+      }
 
       // Se tem dados do DataJud, cria eventos automaticamente das movimentações
       if (p.datajudData && p.datajudData.movimentos) {
@@ -12856,6 +13030,68 @@ async function mniResetCofre() {
   state._mniCache = null;
   toast('Cofre resetado', '', 'info');
   renderSettings();
+}
+
+// ====================================================================
+// === MNI.2 · helpers de heurística (área e polo) =====================
+// ====================================================================
+// Sugere área baseado no codigo do tribunal + descrição do assunto MNI.
+// Lista: Tributário, Cível, Execução Fiscal, Recuperacional, Administrativo,
+// Constitucional, Consumidor, Trabalhista, Família, Sucessões, Criminal, Outros.
+function _mniSugerirArea(codigoTribunal, assuntoDesc) {
+  const s = String(assuntoDesc || '').toLowerCase();
+  // Por código do tribunal primeiro
+  if (/^TRT/i.test(codigoTribunal) || codigoTribunal === 'TST') return 'Trabalhista';
+  // Por palavras-chave no assunto
+  if (/execu[çc][ãa]o fiscal/.test(s)) return 'Execução Fiscal';
+  if (/tribut[áa]rio|imposto|icms|iptu|iss|cofins|pis|csll|irpj|ipi/.test(s)) return 'Tributário';
+  if (/recupera[çc][ãa]o judicial|fal[êe]ncia/.test(s)) return 'Recuperacional';
+  if (/consumidor|cdc|defesa do consumidor/.test(s)) return 'Consumidor';
+  if (/fam[íi]lia|alimentos|div[óo]rcio|guarda|uni[ãa]o est[áa]vel/.test(s)) return 'Família';
+  if (/sucess[ãa]o|invent[áa]rio|heran[çc]a|partilha/.test(s)) return 'Sucessões';
+  if (/penal|criminal|crime/.test(s)) return 'Criminal';
+  if (/constitucional|adin|adpf|adc/.test(s)) return 'Constitucional';
+  if (/administrativo|servidor p[úu]blico|licita[çc][ãa]o/.test(s)) return 'Administrativo';
+  if (/civil|contrat|cobran[çc]a|indeniza|reparação/.test(s)) return 'Cível';
+  return null; // deixa user escolher
+}
+
+// Sugere polo (Defesa/Ataque) baseado em onde está o CPF do consultante.
+// Se OAB/CPF está nas partes ativas → "Ataque"; nas passivas → "Defesa".
+function _mniSugerirPolo(data, cpfConsultante) {
+  if (!cpfConsultante) return null;
+  const cpfNorm = String(cpfConsultante).replace(/\D/g, '');
+  for (const parte of (data.partes || [])) {
+    for (const adv of (parte.advogados || [])) {
+      const advCpfNorm = String(adv.cpf || '').replace(/\D/g, '');
+      if (advCpfNorm && advCpfNorm === cpfNorm) {
+        if (parte.polo === 'AT') return 'Ataque';
+        if (parte.polo === 'PA') return 'Defesa';
+        return null;
+      }
+    }
+  }
+  return null;
+}
+
+// Converte partes MNI ({nome, polo:'AT'|'PA', cpfCnpj, advogados[]}) pro
+// formato do processo ({partes:{ativo:[],passivo:[]}, advogados:{ativo:[],passivo:[]}}).
+function _mniConvertPartes(dataPartes) {
+  const partes = { ativo: [], passivo: [] };
+  const advogados = { ativo: [], passivo: [] };
+  for (const p of (dataPartes || [])) {
+    const polo = p.polo === 'AT' ? 'ativo' : p.polo === 'PA' ? 'passivo' : null;
+    if (!polo) continue;
+    partes[polo].push({ nome: p.nome || '', cpfCnpj: p.cpfCnpj || '', tipoPessoa: p.tipoPessoa || '' });
+    for (const a of (p.advogados || [])) {
+      const oab = a.oab || '';
+      // dedupe por OAB
+      if (oab && !advogados[polo].some(x => x.oab === oab)) {
+        advogados[polo].push({ nome: a.nome || '', oab, cpf: a.cpf || '' });
+      }
+    }
+  }
+  return { partes, advogados };
 }
 
 // ====================================================================
