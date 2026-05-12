@@ -3242,6 +3242,17 @@ async function renderProcessCliente(p) {
   `;
 }
 
+// Renderiza um <li> de parte. Tolerante a dois formatos legados:
+//   - String (DJEN extractor antigo escreve nome cru)
+//   - Object { nome, cpfCnpj?, tipoPessoa? } (MNI escreve estruturado)
+function _renderParteLi(parte) {
+  if (typeof parte === 'string') return `<li>${escapeHtml(parte)}</li>`;
+  if (!parte || typeof parte !== 'object') return '';
+  const nome = parte.nome || '';
+  const doc = parte.cpfCnpj || '';
+  return `<li>${escapeHtml(nome)}${doc ? ` <small style="color:var(--uc-warm-gray);">· ${escapeHtml(doc)}</small>` : ''}</li>`;
+}
+
 function renderProcessOverview(p, events, deadlines, notes, jurisprudence) {
   const activeDeadlines = deadlines.filter(d => prazoEstaAtivo(d));
   const today = new Date(); today.setHours(0,0,0,0);
@@ -3364,7 +3375,7 @@ function renderProcessOverview(p, events, deadlines, notes, jurisprudence) {
         <div style="margin-bottom: 10px;">
           <div style="color: var(--uc-warm-gray); font-size: 11px; font-variant: small-caps; letter-spacing: 0.06em; margin-bottom: 4px;">Polo Ativo</div>
           <ul style="margin: 0; padding-left: 18px; font-size: 13px;">
-            ${p.partes.ativo.map(parte => `<li>${escapeHtml(parte)}</li>`).join('')}
+            ${p.partes.ativo.map(parte => _renderParteLi(parte)).join('')}
           </ul>
           ${p.advogados?.ativo?.length ? `
             <div style="margin-top: 4px; font-size: 12px; color: var(--uc-graphite); padding-left: 18px;">
@@ -3377,7 +3388,7 @@ function renderProcessOverview(p, events, deadlines, notes, jurisprudence) {
         <div style="margin-bottom: 6px;">
           <div style="color: var(--uc-warm-gray); font-size: 11px; font-variant: small-caps; letter-spacing: 0.06em; margin-bottom: 4px;">Polo Passivo</div>
           <ul style="margin: 0; padding-left: 18px; font-size: 13px;">
-            ${p.partes.passivo.map(parte => `<li>${escapeHtml(parte)}</li>`).join('')}
+            ${p.partes.passivo.map(parte => _renderParteLi(parte)).join('')}
           </ul>
           ${p.advogados?.passivo?.length ? `
             <div style="margin-top: 4px; font-size: 12px; color: var(--uc-graphite); padding-left: 18px;">
