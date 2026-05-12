@@ -1,0 +1,84 @@
+{
+  "_meta": {
+    "version": "0.1.0",
+    "atualizado": "2026-05-11",
+    "default": "TJGO",
+    "sobre": "Registry de tribunais MNI 2.2.2. Source-of-truth do frontend (dropdown de tribunal) e do Worker (rota endpoint/namespace). Sempre que mudar, sincronizar com TRIBUNAIS_REGISTRY no workers/mni-worker.js."
+  },
+  "tribunais": {
+    "TJGO": {
+      "codigo": "TJGO",
+      "nome": "Tribunal de Justiça de Goiás",
+      "sistema": "projudi",
+      "esfera": "estadual",
+      "endpoint": "https://projudi.tjgo.jus.br/IntercomunicacaoService",
+      "wsdl": "https://projudi.tjgo.jus.br/IntercomunicacaoService?WSDL",
+      "namespace": "http://www.cnj.jus.br/servico-intercomunicacao-2.2.2/",
+      "soapAction": "",
+      "validado": true,
+      "validadoEm": "2026-05-11",
+      "observacoes": "POC validada. Schema usa atributos em <pessoa nome=...> e <movimentoLocal descricao=...>. SOAPAction precisa ser vazio (\"\")."
+    },
+    "TRF1": {
+      "codigo": "TRF1",
+      "nome": "Tribunal Regional Federal da 1ª Região",
+      "sistema": "pje",
+      "esfera": "federal",
+      "endpoint": "https://pje1g.trf1.jus.br/pje/intercomunicacao",
+      "wsdl": "https://pje1g.trf1.jus.br/pje/intercomunicacao?wsdl",
+      "namespace": "http://www.cnj.jus.br/servico-intercomunicacao-2.2.2/",
+      "soapAction": "",
+      "validado": false,
+      "observacoes": "Não validado ainda. Endpoint baseado no padrão PJe 1º grau. Pode precisar de variação pra 2º grau (pje2g.trf1.jus.br)."
+    },
+    "STJ": {
+      "codigo": "STJ",
+      "nome": "Superior Tribunal de Justiça",
+      "sistema": "pje",
+      "esfera": "superior",
+      "endpoint": "https://ww2.stj.jus.br/processo/pje/intercomunicacao",
+      "wsdl": "https://ww2.stj.jus.br/processo/pje/intercomunicacao?wsdl",
+      "namespace": "http://www.cnj.jus.br/servico-intercomunicacao-2.2.2/",
+      "soapAction": "",
+      "validado": false,
+      "observacoes": "Não validado. STJ historicamente tem MNI mas o caminho exato muda — confirmar via health check antes de uso."
+    },
+    "TJDFT": {
+      "codigo": "TJDFT",
+      "nome": "Tribunal de Justiça do Distrito Federal e Territórios",
+      "sistema": "pje",
+      "esfera": "estadual",
+      "endpoint": "https://pje.tjdft.jus.br/pje/intercomunicacao",
+      "wsdl": "https://pje.tjdft.jus.br/pje/intercomunicacao?wsdl",
+      "namespace": "http://www.cnj.jus.br/servico-intercomunicacao-2.2.2/",
+      "soapAction": "",
+      "validado": false,
+      "observacoes": "Não validado. Padrão PJe estadual."
+    },
+    "TJSP": {
+      "codigo": "TJSP",
+      "nome": "Tribunal de Justiça de São Paulo",
+      "sistema": "esaj",
+      "esfera": "estadual",
+      "endpoint": null,
+      "wsdl": null,
+      "namespace": null,
+      "soapAction": null,
+      "validado": false,
+      "naoSuportado": true,
+      "observacoes": "TJSP usa eSAJ e historicamente NÃO expõe MNI público. Pra TJSP a integração tem que ser por outro caminho (DJEN, scraping autorizado, ou API REST se vier a existir)."
+    },
+    "TRT18": {
+      "codigo": "TRT18",
+      "nome": "Tribunal Regional do Trabalho da 18ª Região (Goiás)",
+      "sistema": "pje",
+      "esfera": "trabalho",
+      "endpoint": "https://pje.trt18.jus.br/pje/intercomunicacao",
+      "wsdl": "https://pje.trt18.jus.br/pje/intercomunicacao?wsdl",
+      "namespace": "http://www.cnj.jus.br/servico-intercomunicacao-2.2.2/",
+      "soapAction": "",
+      "validado": false,
+      "observacoes": "Não validado. PJe-JT Goiás."
+    }
+  }
+}
