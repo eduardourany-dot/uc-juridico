@@ -90,6 +90,10 @@ small.warn{display:block;background:#f5e3c4;color:#5a4118;padding:8px 12px;borde
     <p class="help">Cole no formato <code>0000000-00.0000.0.00.0000</code> ou só dígitos.</p>
     <input id="cnj" type="text" placeholder="0000000-00.0000.0.00.0000">
   </div>
+  <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;margin:8px 0 12px;">
+    <input type="checkbox" id="debugMode" style="width:auto;cursor:pointer;">
+    🐞 Modo debug · retorna o XML cru completo (pra eu refinar o parser)
+  </label>
   <button id="btnConsultar">▶ Consultar processo</button>
   <button id="btnLimpar" class="btn-secondary" style="margin-left:8px;">Limpar resultado</button>
 </div>
@@ -150,10 +154,11 @@ $('btnConsultar').onclick = async () => {
 
   const t0 = Date.now();
   try {
+    const debug = document.getElementById('debugMode').checked;
     const resp = await fetch(workerUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ cnj, cpf, senha, operacao: 'consultarProcesso' })
+      body: JSON.stringify({ cnj, cpf, senha, operacao: 'consultarProcesso', debug })
     });
     const elapsed = Date.now() - t0;
     const data = await resp.json();

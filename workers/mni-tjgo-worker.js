@@ -62,6 +62,7 @@ export default {
     const cnj = String(body.cnj || '').replace(/\D/g, '');
     const cpf = String(body.cpf || '').replace(/\D/g, '');
     const senha = String(body.senha || '');
+    const debug = !!body.debug;
 
     if (!cpf || !senha) {
       return json({ error: 'cpf_senha_obrigatorios' }, 400, corsHeaders);
@@ -70,7 +71,7 @@ export default {
     try {
       if (operacao === 'consultarProcesso') {
         if (!cnj) return json({ error: 'cnj_obrigatorio' }, 400, corsHeaders);
-        const result = await consultarProcesso({ cnj, cpf, senha });
+        const result = await consultarProcesso({ cnj, cpf, senha, debug });
         return json(result, 200, corsHeaders);
       }
       return json({ error: 'operacao_nao_suportada', operacao }, 400, corsHeaders);
@@ -85,7 +86,7 @@ export default {
 // Operação consultarProcesso
 // ============================================================
 
-async function consultarProcesso({ cnj, cpf, senha }) {
+async function consultarProcesso({ cnj, cpf, senha, debug }) {
   // Parâmetros sem prefixo de namespace (elementFormDefault="unqualified",
   // padrão da maioria das implementações MNI Projudi). Se vier SOAP Fault
   // dizendo "expected {alguma uri}param", a gente prefixa eles.
@@ -139,12 +140,15 @@ async function consultarProcesso({ cnj, cpf, senha }) {
 
   // Parse the response
   const parsed = parseConsultarProcesso(text);
-  return {
+  const result = {
     sucesso: parsed.sucesso !== false,
     elapsedMs: elapsed,
     ...parsed,
     rawSize: text.length
   };
+  // Em modo debug, anexa o XML cru completo pra inspeção/refinamento de parser
+  if (debug) result.rawXml = text;
+  return result;
 }
 
 // ============================================================
