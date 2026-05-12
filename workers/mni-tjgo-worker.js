@@ -26,8 +26,9 @@
 // protótipo Python v4.3.1 que apontava pra /projudi/webservices/...).
 // GET ?WSDL retorna o WSDL · POST sem ?WSDL executa operação SOAP.
 const TJGO_ENDPOINT = 'https://projudi.tjgo.jus.br/IntercomunicacaoService';
-const MNI_NS_INT    = 'http://www.cnj.jus.br/intercomunicacao-2.2.2';
-const MNI_NS_TIP    = 'http://www.cnj.jus.br/tipos-servicos-intercomunicacao-2.2.2';
+// Namespace que o Projudi/TJGO espera (descoberto via SOAP Fault).
+// Note: tem prefixo "servico-" e trailing slash — diferente do protótipo Python.
+const MNI_NS_INT    = 'http://www.cnj.jus.br/servico-intercomunicacao-2.2.2/';
 
 export default {
   async fetch(request, env) {
@@ -85,13 +86,16 @@ export default {
 // ============================================================
 
 async function consultarProcesso({ cnj, cpf, senha }) {
+  // Parâmetros sem prefixo de namespace (elementFormDefault="unqualified",
+  // padrão da maioria das implementações MNI Projudi). Se vier SOAP Fault
+  // dizendo "expected {alguma uri}param", a gente prefixa eles.
   const envelope = buildEnvelope('consultarProcesso', `
-    <tip:idConsultante>${escapeXml(cpf)}</tip:idConsultante>
-    <tip:senhaConsultante>${escapeXml(senha)}</tip:senhaConsultante>
-    <tip:numeroProcesso>${escapeXml(cnj)}</tip:numeroProcesso>
-    <tip:movimentos>true</tip:movimentos>
-    <tip:incluirCabecalho>true</tip:incluirCabecalho>
-    <tip:incluirDocumentos>false</tip:incluirDocumentos>
+    <idConsultante>${escapeXml(cpf)}</idConsultante>
+    <senhaConsultante>${escapeXml(senha)}</senhaConsultante>
+    <numeroProcesso>${escapeXml(cnj)}</numeroProcesso>
+    <movimentos>true</movimentos>
+    <incluirCabecalho>true</incluirCabecalho>
+    <incluirDocumentos>false</incluirDocumentos>
   `);
 
   const t0 = Date.now();
@@ -148,8 +152,7 @@ function buildEnvelope(operacao, bodyXml) {
   return `<?xml version="1.0" encoding="UTF-8"?>
 <soap:Envelope
   xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"
-  xmlns:int="${MNI_NS_INT}"
-  xmlns:tip="${MNI_NS_TIP}">
+  xmlns:int="${MNI_NS_INT}">
   <soap:Header/>
   <soap:Body>
     <int:${operacao}>
