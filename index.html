@@ -13734,7 +13734,19 @@ async function _mniShowAvisosModal(codigo, advogado, data) {
             }
           } else {
             btn.textContent = '📄 Ver teor';
-            teorBox.innerHTML = `<small style="color:var(--uc-red);">✗ ${escapeHtml(teor.erro || 'falhou')}${teor.mensagem ? ' · ' + escapeHtml(teor.mensagem.slice(0, 200)) : ''}</small>`;
+            const tentativasHtml = teor.tentativas ? `
+              <details style="margin-top:6px;">
+                <summary style="cursor:pointer;font-size:11px;color:var(--uc-warm-gray);">Detalhes das ${teor.tentativas.length} tentativas</summary>
+                ${teor.tentativas.map(t => `<div style="font-size:10px;color:var(--uc-graphite);padding:4px;background:#fff;margin-top:4px;border-radius:3px;"><strong>${escapeHtml(t.nome)}</strong> · HTTP ${t.httpStatus} · ${t.elapsedMs}ms<br><pre style="white-space:pre-wrap;font-size:9px;margin:4px 0 0;max-height:120px;overflow:auto;">${escapeHtml(t.snippet || '')}</pre></div>`).join('')}
+              </details>
+            ` : '';
+            const rawHtml = teor.raw ? `
+              <details style="margin-top:6px;">
+                <summary style="cursor:pointer;font-size:11px;color:var(--uc-warm-gray);">Resposta crua do servidor</summary>
+                <pre style="font-size:10px;background:var(--uc-cream);padding:6px;border-radius:3px;max-height:200px;overflow:auto;white-space:pre-wrap;">${escapeHtml(teor.raw.slice(0, 4000))}</pre>
+              </details>
+            ` : '';
+            teorBox.innerHTML = `<small style="color:var(--uc-red);">✗ ${escapeHtml(teor.erro || 'falhou')}${teor.mensagem ? '<br>' + escapeHtml(teor.mensagem.slice(0, 500)) : ''}</small>${tentativasHtml}${rawHtml}`;
           }
         } catch (e) {
           btn.disabled = false;

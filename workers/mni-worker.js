@@ -345,40 +345,68 @@ async function consultarAvisosPendentes(conf, endpoint, { cpf, senha, debug, dat
 // consultarAvisosPendentes). Retorna o teor — pode vir como texto puro,
 // HTML, base64 (PDF/binário) ou referência a documento.
 async function consultarTeorComunicacao(conf, endpoint, { cpf, senha, idAviso, debug }) {
-  // Schema MNI: idsAviso pode ser um único id ou lista. Tentamos com 1 só.
-  // Alguns tribunais usam <idsAviso>X</idsAviso>, outros <idAviso>X</idAviso>,
-  // outros <idComunicacao>X</idComunicacao>. Mandamos os 3 — o que casar.
-  const params = `
-    <idConsultante>${escapeXml(cpf)}</idConsultante>
-    <senhaConsultante>${escapeXml(senha)}</senhaConsultante>
-    <idsAviso>${escapeXml(idAviso)}</idsAviso>
-  `;
-  const envelope = buildEnvelope(conf.namespace, 'consultarTeorComunicacao', params);
+  // Projudi/MNI: o nome do parâmetro varia entre implementações.
+  // Tentamos em ordem: idsAviso (CNJ canônico) → idAviso → idComunicacao.
+  // Loga qual funcionou em `tentativa`.
+  const variantes = [
+    { nome: 'idsAviso', tagXml: 'idsAviso' },
+    { nome: 'idAviso', tagXml: 'idAviso' },
+    { nome: 'idComunicacao', tagXml: 'idComunicacao' }
+  ];
 
-  const t0 = Date.now();
-  const resp = await fetch(endpoint, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'text/xml; charset=utf-8',
-      'SOAPAction': conf.soapAction === '' || conf.soapAction == null ? '""' : `"${conf.soapAction}"`,
-      'User-Agent': 'UC-Juridico-MNI/0.7'
-    },
-    body: envelope
-  });
-  const elapsed = Date.now() - t0;
-  const text = await resp.text();
+  const tentativas = [];
+  for (const v of variantes) {
+    const params = `
+      <idConsultante>${escapeXml(cpf)}</idConsultante>
+      <senhaConsultante>${escapeXml(senha)}</senhaConsultante>
+      <${v.tagXml}>${escapeXml(idAviso)}</${v.tagXml}>
+    `;
+    const envelope = buildEnvelope(conf.namespace, 'consultarTeorComunicacao', params);
+    const t0 = Date.now();
+    const resp = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'text/xml; charset=utf-8',
+        'SOAPAction': conf.soapAction === '' || conf.soapAction == null ? '""' : `"${conf.soapAction}"`,
+        'User-Agent': 'UC-Juridico-MNI/0.7'
+      },
+      body: envelope
+    });
+    const elapsed = Date.now() - t0;
+    const text = await resp.text();
+    tentativas.push({ nome: v.nome, httpStatus: resp.status, elapsedMs: elapsed, snippet: text.slice(0, 400) });
 
-  if (!resp.ok) {
-    return { sucesso: false, erro: 'http_' + resp.status, httpStatus: resp.status, elapsedMs: elapsed, raw: text.slice(0, 4000) };
+    // HTTP 500 (Projudi) significa fault no servidor — tenta próxima variante
+    if (!resp.ok) continue;
+
+    // Verifica SOAP Fault dentro do body 200
+    const fault = extractFault(text);
+    if (fault) {
+      // Se a mensagem de fault sugere parâmetro inválido, tenta próxima
+      if (/par[âa]metro|expected|unexpected element|elemento|argument/i.test(fault)) continue;
+      // Senão (ex: "credencial inválida"), retorna o erro
+      return { sucesso: false, erro: 'soap_fault', mensagem: fault, elapsedMs: elapsed, raw: text.slice(0, 4000), tentativas };
+    }
+
+    // Sucesso!
+    const parsed = parseTeorComunicacao(text);
+    const result = { sucesso: parsed.sucesso !== false, elapsedMs: elapsed, parametroUsado: v.nome, ...parsed, rawSize: text.length };
+    if (debug) result.rawXml = text;
+    if (debug) result.tentativas = tentativas;
+    return result;
   }
-  const fault = extractFault(text);
-  if (fault) {
-    return { sucesso: false, erro: 'soap_fault', mensagem: fault, elapsedMs: elapsed, raw: text.slice(0, 4000) };
-  }
-  const parsed = parseTeorComunicacao(text);
-  const result = { sucesso: parsed.sucesso !== false, elapsedMs: elapsed, ...parsed, rawSize: text.length };
-  if (debug) result.rawXml = text;
-  return result;
+
+  // Todas as variantes falharam — retorna detalhes pra debug
+  const ultima = tentativas[tentativas.length - 1];
+  return {
+    sucesso: false,
+    erro: 'http_' + ultima.httpStatus,
+    httpStatus: ultima.httpStatus,
+    elapsedMs: ultima.elapsedMs,
+    raw: ultima.snippet,
+    tentativas,
+    mensagem: `Tentei ${variantes.length} formatos de parâmetro (${variantes.map(v => v.nome).join(', ')}). Todos retornaram erro. Veja "tentativas" pra detalhes.`
+  };
 }
 
 // Parser tolerante de consultarTeorComunicacaoResposta.
