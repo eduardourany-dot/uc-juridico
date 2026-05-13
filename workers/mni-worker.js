@@ -345,23 +345,36 @@ async function consultarAvisosPendentes(conf, endpoint, { cpf, senha, debug, dat
 // consultarAvisosPendentes). Retorna o teor — pode vir como texto puro,
 // HTML, base64 (PDF/binário) ou referência a documento.
 async function consultarTeorComunicacao(conf, endpoint, { cpf, senha, idAviso, debug }) {
-  // Projudi/MNI: o nome do parâmetro varia entre implementações.
-  // Tentamos em ordem: idsAviso (CNJ canônico) → idAviso → idComunicacao.
-  // Loga qual funcionou em `tentativa`.
+  // Projudi/TJGO exige parâmetros no namespace tipos-servico-intercomunicacao-2.2.2
+  // (não tolera elementos sem namespace como nas outras operações). Erro típico:
+  // "Unmarshalling Error: elemento inesperado (uri:'', local:'idsAviso')".
+  //
+  // Tenta 2 variantes de nome de parâmetro com prefixo 'tip:' (CNJ MNI 2.2.2):
+  //   1. tip:idsAviso (canônico) — recebe ID do <aviso>
+  //   2. tip:numeroProcesso (caso o Projudi exija CNJ em vez de idAviso —
+  //      a mensagem de fault sugere essa alternativa)
+  const NS_TIPOS = 'http://www.cnj.jus.br/tipos-servico-intercomunicacao-2.2.2';
   const variantes = [
-    { nome: 'idsAviso', tagXml: 'idsAviso' },
-    { nome: 'idAviso', tagXml: 'idAviso' },
-    { nome: 'idComunicacao', tagXml: 'idComunicacao' }
+    { nome: 'idsAviso', body: `<tip:idsAviso>${escapeXml(idAviso)}</tip:idsAviso>` },
+    { nome: 'numeroProcesso', body: `<tip:numeroProcesso>${escapeXml(idAviso)}</tip:numeroProcesso>` }
   ];
 
   const tentativas = [];
   for (const v of variantes) {
-    const params = `
-      <idConsultante>${escapeXml(cpf)}</idConsultante>
-      <senhaConsultante>${escapeXml(senha)}</senhaConsultante>
-      <${v.tagXml}>${escapeXml(idAviso)}</${v.tagXml}>
-    `;
-    const envelope = buildEnvelope(conf.namespace, 'consultarTeorComunicacao', params);
+    const envelope = `<?xml version="1.0" encoding="UTF-8"?>
+<soap:Envelope
+  xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"
+  xmlns:int="${conf.namespace}"
+  xmlns:tip="${NS_TIPOS}">
+  <soap:Header/>
+  <soap:Body>
+    <int:consultarTeorComunicacao>
+      <tip:idConsultante>${escapeXml(cpf)}</tip:idConsultante>
+      <tip:senhaConsultante>${escapeXml(senha)}</tip:senhaConsultante>
+      ${v.body}
+    </int:consultarTeorComunicacao>
+  </soap:Body>
+</soap:Envelope>`;
     const t0 = Date.now();
     const resp = await fetch(endpoint, {
       method: 'POST',
@@ -374,21 +387,21 @@ async function consultarTeorComunicacao(conf, endpoint, { cpf, senha, idAviso, d
     });
     const elapsed = Date.now() - t0;
     const text = await resp.text();
-    tentativas.push({ nome: v.nome, httpStatus: resp.status, elapsedMs: elapsed, snippet: text.slice(0, 400) });
+    tentativas.push({
+      nome: v.nome,
+      httpStatus: resp.status,
+      elapsedMs: elapsed,
+      snippet: text.slice(0, 1500)  // aumentado pra ver faultstring completa
+    });
 
-    // HTTP 500 (Projudi) significa fault no servidor — tenta próxima variante
     if (!resp.ok) continue;
 
-    // Verifica SOAP Fault dentro do body 200
     const fault = extractFault(text);
     if (fault) {
-      // Se a mensagem de fault sugere parâmetro inválido, tenta próxima
-      if (/par[âa]metro|expected|unexpected element|elemento|argument/i.test(fault)) continue;
-      // Senão (ex: "credencial inválida"), retorna o erro
+      if (/par[âa]metro|expected|unexpected element|elemento\s+inesperado|argument|unmarshalling/i.test(fault)) continue;
       return { sucesso: false, erro: 'soap_fault', mensagem: fault, elapsedMs: elapsed, raw: text.slice(0, 4000), tentativas };
     }
 
-    // Sucesso!
     const parsed = parseTeorComunicacao(text);
     const result = { sucesso: parsed.sucesso !== false, elapsedMs: elapsed, parametroUsado: v.nome, ...parsed, rawSize: text.length };
     if (debug) result.rawXml = text;
@@ -405,7 +418,7 @@ async function consultarTeorComunicacao(conf, endpoint, { cpf, senha, idAviso, d
     elapsedMs: ultima.elapsedMs,
     raw: ultima.snippet,
     tentativas,
-    mensagem: `Tentei ${variantes.length} formatos de parâmetro (${variantes.map(v => v.nome).join(', ')}). Todos retornaram erro. Veja "tentativas" pra detalhes.`
+    mensagem: `Tentei ${variantes.length} formatos de parâmetro (${variantes.map(v => v.nome).join(', ')}) com namespace tipos-servico-intercomunicacao-2.2.2. Todos falharam. Veja "tentativas" para faultstring completa.`
   };
 }
 
