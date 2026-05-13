@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.39.1 (DJEN: publicações vêm desmarcadas por padrão — seleção manual)
-const CACHE_NAME = 'uc-juridico-v6-39-1';
+// Service Worker — UC Jurídico v6.39.2 (DJEN: prévia maior + modal "Ver completa" + entidades HTML decodificadas)
+const CACHE_NAME = 'uc-juridico-v6-39-2';
 const APP_SHELL = [
   './',
   './index.html',
