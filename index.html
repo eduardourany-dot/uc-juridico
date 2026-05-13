@@ -4700,8 +4700,9 @@ async function renderDeadlines() {
         <h1 class="page-title"><span class="smallcaps-prefix">Publicações</span></h1>
         <p class="page-subtitle">${active.length} publicação(ões) com prazo ativo na carteira</p>
       </div>
-      <div class="flex gap-2">
+      <div class="flex gap-2 flex-wrap">
         <button class="btn btn-secondary btn-sm" onclick="djenRunSearch()" title="Buscar publicações novas no Diário de Justiça Eletrônico (CNJ)">🔔 Pesquisar DJ</button>
+        <button class="btn btn-secondary btn-sm" onclick="mniAvisosPendentesFlow()" title="Consultar intimações pendentes diretamente no tribunal via SOAP/MNI">📬 Avisos MNI</button>
         <button class="btn btn-outline btn-sm" onclick="exportDeadlinesCsv()">Exportar CSV</button>
       </div>
     </div>
@@ -13456,6 +13457,252 @@ async function _mniDetectarTribunal(p) {
 async function _mniBuscarCredencial(advogadoNome, tribunalCodigo) {
   const credentials = (await DB.getSetting('mniCredentials', [])) || [];
   return credentials.find(c => c.advogado === advogadoNome && c.tribunal === tribunalCodigo) || null;
+}
+
+// ====================================================================
+// === MNI.3 · consultarAvisosPendentes ===============================
+// ====================================================================
+// Consulta intimações pendentes do advogado num tribunal e mostra modal
+// com cada aviso. Permite vincular ao processo (se CNJ casa) ou cadastrar.
+async function mniAvisosPendentesFlow() {
+  const config = await _mniGetConfig();
+  if (!config.workerUrl) {
+    toast('Worker MNI não configurada', 'Vá em Configurações → MNI pra cadastrar.', 'error');
+    return;
+  }
+  if (!config.salt || !config.canary) {
+    toast('Cofre MNI não configurado', 'Configure em Configurações → MNI antes.', 'error');
+    return;
+  }
+
+  // Quais credenciais o user tem? Monta opções tribunal+advogado
+  const credentials = (await DB.getSetting('mniCredentials', [])) || [];
+  if (credentials.length === 0) {
+    toast('Sem credenciais MNI', 'Cadastre ao menos uma em Configurações → MNI.', 'error');
+    return;
+  }
+  const registry = await _mniGetRegistry();
+  const opcoes = credentials
+    .filter(c => !registry[c.tribunal]?.naoSuportado)
+    .map(c => ({ value: c.id, label: `${c.advogado} @ ${c.tribunal}` }));
+  if (opcoes.length === 0) {
+    toast('Sem credenciais utilizáveis', 'As credenciais cadastradas são de tribunais sem MNI suportado.', 'error');
+    return;
+  }
+
+  const r = await showModal('Consultar avisos pendentes (MNI)', [
+    { label: 'Credencial (advogado @ tribunal)', type: 'select', options: opcoes, default: opcoes[0].value },
+    { label: 'Buscar a partir de (opcional)', type: 'date', help: 'Deixe vazio pra todos os avisos pendentes.' }
+  ], { confirmLabel: 'Consultar avisos' });
+  if (!r) return;
+  const [credId, dataRef] = r;
+  const cred = credentials.find(c => c.id === credId);
+  if (!cred) { toast('Credencial não encontrada', '', 'error'); return; }
+  const codigo = cred.tribunal;
+
+  // Destrava cofre se preciso
+  if (!window.MniCrypto.isUnlocked()) {
+    const r2 = await showModal(`Destravar cofre pra consultar ${codigo}`, [
+      { label: 'Chave mestra MNI', type: 'password' }
+    ], { confirmLabel: 'Destravar e consultar' });
+    if (!r2) return;
+    const ok = await window.MniCrypto.unlock(r2[0], config.salt, config.canary);
+    if (!ok) { toast('Chave mestra incorreta', '', 'error'); return; }
+  }
+
+  // Decifra senha
+  let senha;
+  try { senha = await window.MniCrypto.decrypt(cred.senhaCifrada); }
+  catch (e) { toast('Falha ao decifrar credencial', String(e.message || e), 'error'); return; }
+
+  // Loading modal
+  const loadingModal = _mniMakeLoadingModal(codigo, 'avisos pendentes');
+  $('modalContainer').appendChild(loadingModal);
+
+  let data;
+  try {
+    const dataReferencia = dataRef ? dataRef.replace(/\D/g, '') : '';
+    const resp = await fetch(config.workerUrl.replace(/\/$/, ''), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tribunal: codigo, operacao: 'consultarAvisosPendentes', cpf: cred.cpf, senha, dataReferencia })
+    });
+    data = await resp.json();
+  } catch (e) {
+    loadingModal.remove();
+    toast('Falha de rede', String(e.message || e), 'error');
+    return;
+  } finally { senha = null; }
+  loadingModal.remove();
+
+  _mniShowAvisosModal(codigo, cred.advogado, data);
+}
+
+async function _mniShowAvisosModal(codigo, advogado, data) {
+  const sucesso = data.sucesso !== false && !data.erro;
+  const modal = document.createElement('div');
+  modal.className = 'modal-backdrop';
+
+  let body;
+  if (!sucesso) {
+    body = `
+      <div class="status err" style="background:#f3d8cf;color:#7a2a18;border-left:3px solid var(--uc-red);padding:12px;border-radius:6px;margin-bottom:12px;">
+        <strong>✗ Não foi possível consultar avisos</strong><br>
+        <small>${escapeHtml(data.erro || 'erro desconhecido')}</small>
+        ${data.mensagem ? '<br><small style="opacity:.8;">' + escapeHtml(data.mensagem) + '</small>' : ''}
+        ${data.httpStatus ? '<br><small>HTTP ' + data.httpStatus + '</small>' : ''}
+      </div>
+      <details><summary style="cursor:pointer;font-size:12px;color:var(--uc-warm-gray);">Ver JSON cru</summary>
+        <pre style="background:var(--uc-cream);padding:8px;border-radius:5px;overflow:auto;font-size:11px;max-height:200px;">${escapeHtml(JSON.stringify(data, null, 2))}</pre>
+      </details>
+    `;
+  } else if (!data.avisos || data.avisos.length === 0) {
+    body = `
+      <div class="status ok" style="background:#d4e8d4;color:#2a5a2a;border-left:3px solid var(--uc-green);padding:12px;border-radius:6px;">
+        <strong>✓ Nenhum aviso pendente</strong><br>
+        <small>${escapeHtml(codigo)} não retornou intimações pendentes pra ${escapeHtml(advogado)}. (${data.elapsedMs}ms)</small>
+      </div>
+    `;
+  } else {
+    // Casa cada aviso com processo existente
+    const allProcs = await DB.getAllProcesses();
+    const procByCnj = {};
+    for (const p of allProcs) {
+      if (p.cnj) procByCnj[String(p.cnj).replace(/\D/g, '')] = p;
+    }
+    const linhas = data.avisos.map((av, i) => {
+      const cnjNorm = String(av.numeroProcesso || '').replace(/\D/g, '');
+      const proc = cnjNorm ? procByCnj[cnjNorm] : null;
+      const vinculo = proc
+        ? `<span class="badge badge-green">vinculável: ${escapeHtml(proc.name.slice(0, 30))}</span>`
+        : (cnjNorm ? `<span class="badge badge-amber">processo não cadastrado</span>` : `<span class="badge badge-gray">sem CNJ</span>`);
+      const teorPreview = av.teor ? `<div style="font-size:11px;color:var(--uc-graphite);margin-top:4px;line-height:1.5;">${escapeHtml(av.teor.slice(0, 280))}${av.teor.length > 280 ? '…' : ''}</div>` : '';
+      const acaoBtn = proc
+        ? `<button class="btn btn-primary btn-sm" data-acao="vincular" data-idx="${i}" data-proc="${proc.id}">⏰ Criar prazo</button>`
+        : (cnjNorm ? `<button class="btn btn-outline btn-sm" data-acao="cadastrar" data-idx="${i}">+ Cadastrar processo</button>` : '');
+      return `
+        <div class="card" style="background:var(--uc-cream);padding:10px;margin-bottom:8px;">
+          <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:flex-start;">
+            <div style="flex:1;min-width:200px;">
+              <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:4px;">
+                <span class="process-cnj" style="font-size:11px;font-weight:600;">${escapeHtml(av.numeroProcesso || '(sem CNJ)')}</span>
+                ${vinculo}
+                ${av.tipoComunicacao ? `<span class="badge badge-gray">${escapeHtml(av.tipoComunicacao)}</span>` : ''}
+                ${av.prazo ? `<span class="badge badge-amber">prazo ${escapeHtml(String(av.prazo))} d</span>` : ''}
+              </div>
+              <div style="font-size:12px;color:var(--uc-warm-gray);">
+                ${av.dataDisponibilizacao ? escapeHtml(av.dataDisponibilizacao) + ' · ' : ''}${escapeHtml(av.nomeOrgao || av.siglaOrgao || '')}${av.destinatario ? ' · ' + escapeHtml(av.destinatario) : ''}
+              </div>
+              ${teorPreview}
+            </div>
+            <div>${acaoBtn}</div>
+          </div>
+        </div>
+      `;
+    }).join('');
+    body = `
+      <div class="status ok" style="background:#d4e8d4;color:#2a5a2a;border-left:3px solid var(--uc-green);padding:12px;border-radius:6px;margin-bottom:12px;">
+        <strong>✓ ${data.avisos.length} aviso(s) pendente(s)</strong> em ${escapeHtml(codigo)} · ${escapeHtml(advogado)} · ${data.elapsedMs}ms
+        ${data.avisosTotal > data.avisos.length ? `<br><small>Mostrando ${data.avisos.length} de ${data.avisosTotal}</small>` : ''}
+      </div>
+      ${linhas}
+      <p class="help-text" style="margin-top:12px;padding:8px 12px;background:#f4f1e8;border-left:3px solid var(--uc-gold);border-radius:5px;font-size:11px;">
+        ℹ "Criar prazo" calcula a data fatal a partir da disponibilização + dias do prazo (regra da Lei 11.419/2006) e cria uma publicação vinculada ao processo. Tribunal usado pra contagem de dias úteis: ${escapeHtml(codigo)}.
+      </p>
+    `;
+  }
+
+  modal.innerHTML = `
+    <div class="modal scroll-thin" style="max-width: 820px;">
+      <h3 class="modal-title">📬 Avisos MNI · ${escapeHtml(codigo)}</h3>
+      <p class="help-text" style="margin:0 0 16px;font-size:12px;">Advogado: <strong>${escapeHtml(advogado)}</strong></p>
+      <div>${body}</div>
+      <div class="flex gap-2" style="margin-top:16px;">
+        <button class="btn btn-outline" id="_mniAvisosClose" style="flex:1;">Fechar</button>
+        ${sucesso && data.avisos?.length ? `<button class="btn btn-ghost btn-sm" id="_mniAvisosJson">📋 JSON</button>` : ''}
+      </div>
+    </div>
+  `;
+  $('modalContainer').appendChild(modal);
+  $('_mniAvisosClose').onclick = () => modal.remove();
+  const jsonBtn = $('_mniAvisosJson');
+  if (jsonBtn) jsonBtn.onclick = async () => { try { await navigator.clipboard.writeText(JSON.stringify(data, null, 2)); toast('JSON copiado', '', 'info'); } catch {} };
+
+  // Liga botões de ação por aviso
+  modal.querySelectorAll('[data-acao]').forEach(btn => {
+    btn.onclick = async () => {
+      const idx = parseInt(btn.dataset.idx);
+      const av = data.avisos[idx];
+      if (!av) return;
+      if (btn.dataset.acao === 'vincular') {
+        const procId = btn.dataset.proc;
+        await _mniCriarPrazoDeAviso(procId, av, codigo);
+        btn.disabled = true;
+        btn.textContent = '✓ prazo criado';
+      } else if (btn.dataset.acao === 'cadastrar') {
+        // Fecha o modal de avisos e abre o de novo processo com CNJ pré-preenchido
+        modal.remove();
+        const np = await newProcessFlow();
+        // após cadastrar, poderia re-abrir avisos, mas mantém simples
+        if (np) toast('Processo cadastrado', 'Re-abra "Avisos MNI" pra vincular o prazo.', 'info');
+      }
+    };
+  });
+}
+
+// Cria uma publicação (deadline) vinculada ao processo a partir de um aviso MNI.
+async function _mniCriarPrazoDeAviso(processId, aviso, tribunalCodigo) {
+  const p = await DB.getProcess(processId);
+  if (!p) { toast('Processo não encontrado', '', 'error'); return; }
+  const desc = aviso.tipoComunicacao || 'Intimação MNI';
+  const prazoDias = Number(aviso.prazo) || 15;
+  let deadlineDate, diario = null;
+  const dispISO = aviso.dataDisponibilizacao || '';
+  if (dispISO && /^\d{4}-\d{2}-\d{2}$/.test(dispISO) && typeof calcularDataFatal === 'function') {
+    try {
+      const calc = calcularDataFatal({
+        dataPublicacao: new Date(dispISO + 'T12:00:00'),
+        prazoDias,
+        unidade: 'UTEIS',
+        tribunal: tribunalCodigo,
+        emDobro: false
+      });
+      deadlineDate = calc.dataFatal;
+      diario = (typeof gerarDiarioCalculo === 'function') ? gerarDiarioCalculo(calc) : null;
+    } catch (e) { console.warn('[MNI.3] calcularDataFatal falhou', e); }
+  }
+  if (!deadlineDate) {
+    // Fallback simples: disponibilização + prazoDias corridos
+    const base = dispISO ? new Date(dispISO + 'T12:00:00') : new Date();
+    base.setDate(base.getDate() + prazoDias);
+    deadlineDate = base;
+  }
+  const d = {
+    id: uid(), processId,
+    description: desc,
+    type: 'mni',
+    intimationDate: dispISO ? new Date(dispISO + 'T12:00:00').toISOString() : null,
+    daysAllowed: prazoDias,
+    unidade: 'UTEIS',
+    emDobro: false,
+    tribunal: tribunalCodigo,
+    diarioCalculo: diario,
+    deadlineDate: deadlineDate.toISOString(),
+    status: STATUS_PRAZO.PENDENTE,
+    mniIdComunicacao: aviso.idComunicacao || '',
+    mniTeor: aviso.teor || '',
+    logs: [],
+    createdAt: Date.now()
+  };
+  if (typeof appendLogPrazo === 'function') appendLogPrazo(d, 'criado', { origem: 'mni', deadlineDate: d.deadlineDate, prazoDias, tribunal: tribunalCodigo });
+  // Dedupe por idComunicacao
+  const existentes = await DB.getDeadlinesByProcess(processId);
+  if (aviso.idComunicacao && existentes.some(x => x.mniIdComunicacao === aviso.idComunicacao)) {
+    toast('Prazo já existe', 'Esse aviso já foi importado antes.', 'info');
+    return;
+  }
+  await DB.saveDeadline(d);
+  toast('✓ Prazo criado', `${desc} · vence ${formatDate(deadlineDate)}`, 'success');
 }
 
 async function mniBuscarProcessoFlow(processId) {
