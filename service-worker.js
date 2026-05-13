@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.39.3 (DJEN: dedupe defensivo de publicações idênticas no resultado)
-const CACHE_NAME = 'uc-juridico-v6-39-3';
+// Service Worker — UC Jurídico v6.39.4 (DJEN: metadados do diário oficial — disp/pub/diário/caderno/pág/link)
+const CACHE_NAME = 'uc-juridico-v6-39-4';
 const APP_SHELL = [
   './',
   './index.html',
