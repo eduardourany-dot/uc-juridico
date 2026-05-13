@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.39.0 (MNI avisos migrado pro DJEN — publicações = fonte única de intimações)
-const CACHE_NAME = 'uc-juridico-v6-39-0';
+// Service Worker — UC Jurídico v6.39.1 (DJEN: publicações vêm desmarcadas por padrão — seleção manual)
+const CACHE_NAME = 'uc-juridico-v6-39-1';
 const APP_SHELL = [
   './',
   './index.html',
