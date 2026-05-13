@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.38.0 (Equipe Comparativo: tabela ranqueando advogados com sort + barras + drill-down)
-const CACHE_NAME = 'uc-juridico-v6-38-0';
+// Service Worker — UC Jurídico v6.38.1 (Hotfix: login Google no iPhone/iPad via signInWithRedirect + aviso PWA install)
+const CACHE_NAME = 'uc-juridico-v6-38-1';
 const APP_SHELL = [
   './',
   './index.html',

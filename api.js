@@ -7,7 +7,7 @@
 
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
 import {
-  getAuth, GoogleAuthProvider, signInWithPopup,
+  getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult,
   onAuthStateChanged, signOut, setPersistence, browserLocalPersistence
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
 import {
@@ -76,10 +76,26 @@ function showLoginOverlay() {
     'z-index:99999', 'padding:24px',
     'font-family:"EB Garamond","Times New Roman",serif'
   ].join(';');
+  // Mensagem específica pra iOS Safari fora de modo standalone (não instalado
+  // como PWA na home). O storage isolation do Safari quebra OAuth de
+  // signInWithRedirect/Popup quando authDomain (firebaseapp.com) é diferente
+  // do domínio do app. Solução real = custom auth domain. Paliativo = PWA.
+  const isStandalone = window.matchMedia && window.matchMedia('(display-mode: standalone)').matches
+    || window.navigator.standalone === true;
+  const iosWarning = (_isIosOrIpad() && !isStandalone) ? `
+    <div style="background:#fff7e6;border:1px solid #b87f1c;border-radius:6px;padding:12px 14px;margin:0 0 20px;text-align:left;font-family:system-ui,sans-serif;font-size:12px;line-height:1.5;color:#5a4118;">
+      <strong>📱 Você está no iPhone/iPad</strong><br>
+      O Safari bloqueia o login do Google por questões de privacidade.<br>
+      <strong>Instale o app na tela inicial:</strong> toque no botão de compartilhar
+      <span style="display:inline-block;border:1px solid #999;border-radius:3px;padding:0 3px;">↑</span>
+      → <em>"Adicionar à Tela de Início"</em> → abrir o app pelo ícone instalado e fazer login lá.
+    </div>
+  ` : '';
   overlay.innerHTML = `
     <div style="text-align:center;max-width:420px;">
       <h1 style="font-family:'EB Garamond',serif;font-size:42px;color:#1a1a1a;letter-spacing:0.08em;margin:0 0 8px;font-variant:small-caps;">UC Jurídico</h1>
-      <p style="color:#6b6b68;font-size:15px;font-style:italic;margin:0 0 36px;">Acesso restrito · entre com sua conta Google</p>
+      <p style="color:#6b6b68;font-size:15px;font-style:italic;margin:0 0 24px;">Acesso restrito · entre com sua conta Google</p>
+      ${iosWarning}
       <button id="uc-login-btn" style="display:inline-flex;align-items:center;gap:12px;padding:12px 24px;border:1px solid #d4cfc0;border-radius:6px;background:#fff;font-family:system-ui,sans-serif;font-size:14px;color:#1a1a1a;cursor:pointer;font-weight:500;">
         <svg width="18" height="18" viewBox="0 0 18 18" xmlns="http://www.w3.org/2000/svg"><path d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908c1.702-1.567 2.684-3.875 2.684-6.615z" fill="#4285F4"/><path d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 0 0 9 18z" fill="#34A853"/><path d="M3.964 10.71A5.41 5.41 0 0 1 3.682 9c0-.593.102-1.17.282-1.71V4.958H.957A8.996 8.996 0 0 0 0 9c0 1.452.348 2.827.957 4.042l3.007-2.332z" fill="#FBBC05"/><path d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 0 0 .957 4.958L3.964 7.29C4.672 5.163 6.656 3.58 9 3.58z" fill="#EA4335"/></svg>
         Entrar com Google
@@ -122,6 +138,31 @@ function setLoginLoading(on) {
 // Auth flow
 // ============================================================
 
+// Detecção: Safari iOS bloqueia popups OAuth de forma que o sessionStorage
+// fica isolado, quebrando signInWithPopup com "missing initial state".
+// Para iOS (Safari, Chrome, Firefox — todos usam WebKit lá), usar
+// signInWithRedirect que sobrevive ao isolamento de storage.
+// Detecta também iPadOS 13+ que reporta MacIntel mas tem touch screen.
+function _isIosOrIpad() {
+  const ua = navigator.userAgent || '';
+  const isIos = /iPad|iPhone|iPod/.test(ua) && !window.MSStream;
+  const isIpadDesktop = /Macintosh/.test(ua) && navigator.maxTouchPoints > 1;
+  return isIos || isIpadDesktop;
+}
+
+// Helper: captura Google ID token de um result e persiste
+function _capturarIdToken(result) {
+  const credential = GoogleAuthProvider.credentialFromResult(result);
+  if (credential && credential.idToken) {
+    googleIdToken = credential.idToken;
+    try {
+      const payload = JSON.parse(atob(credential.idToken.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+      googleIdTokenExp = Number(payload.exp) * 1000;
+    } catch (_) { googleIdTokenExp = Date.now() + 55 * 60 * 1000; }
+    saveStoredState();
+  }
+}
+
 async function doSignIn(silent = false) {
   const provider = new GoogleAuthProvider();
   provider.addScope('email');
@@ -129,21 +170,45 @@ async function doSignIn(silent = false) {
   // Sempre reconfirmar conta — garante que o user cookie corresponde ao escolhido
   provider.setCustomParameters({ prompt: silent ? 'none' : 'select_account' });
 
-  const result = await signInWithPopup(auth, provider);
-  // Capturar Google ID token (válido ~1h, usado no Apps Script para PDFs)
-  const credential = GoogleAuthProvider.credentialFromResult(result);
-  if (credential && credential.idToken) {
-    googleIdToken = credential.idToken;
-    // ID tokens Google têm exp ~1h; deduzir a partir do JWT
-    try {
-      const payload = JSON.parse(atob(credential.idToken.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
-      googleIdTokenExp = Number(payload.exp) * 1000;
-    } catch (_) { googleIdTokenExp = Date.now() + 55 * 60 * 1000; }
+  // iOS/iPadOS: usar redirect (popup quebra com "missing initial state").
+  // A navegação acontece imediatamente — não mostra spinner, página troca.
+  if (_isIosOrIpad()) {
+    await signInWithRedirect(auth, provider);
+    // Nunca chega aqui — página redireciona pro Google
+    return null;
   }
-  saveStoredState();
+
+  // Desktop e Android: popup
+  const result = await signInWithPopup(auth, provider);
+  _capturarIdToken(result);
   // checkAllowlist é chamado pelo onAuthStateChanged
   return result.user;
 }
+
+// Tratar retorno do redirect (executa quando volta da navegação OAuth no iOS).
+// Em desktop / sem redirect pendente, getRedirectResult resolve com null silenciosamente.
+async function _handleRedirectReturn() {
+  try {
+    const result = await getRedirectResult(auth);
+    if (result && result.user) {
+      _capturarIdToken(result);
+      // onAuthStateChanged vai disparar checkAllowlist em seguida
+    }
+  } catch (err) {
+    const code = err && err.code || '';
+    // Cancelamentos / fechamentos não são erros pra mostrar
+    if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request' ||
+        code === 'auth/user-cancelled' || code === 'auth/web-storage-unsupported') {
+      console.info('[UC_Auth] redirect cancelado/sem-storage:', code);
+      return;
+    }
+    console.warn('[UC_Auth] getRedirectResult error:', code, err && err.message);
+    setLoginError('Falha no retorno do login: ' + (err && err.message || err));
+  }
+}
+// Dispara no carregamento — se houver retorno pendente, processa.
+// Roda em paralelo ao onAuthStateChanged que também processa retornos válidos.
+_handleRedirectReturn();
 
 const BOOTSTRAP_ADMIN_EMAIL = 'eduardourany@uranydecastro.com.br';
 
