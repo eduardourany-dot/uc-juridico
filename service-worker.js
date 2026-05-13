@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.38.0 (Equipe Comparativo: tabela ranqueando advogados com sort + barras + drill-down)
-const CACHE_NAME = 'uc-juridico-v6-38-0';
+// Service Worker — UC Jurídico v6.39.0 (MNI avisos migrado pro DJEN — publicações = fonte única de intimações)
+const CACHE_NAME = 'uc-juridico-v6-39-0';
 const APP_SHELL = [
   './',
   './index.html',

@@ -1,5 +1,5 @@
 // UC Jurídico — MNI Worker genérico (multi-tribunal)
-// Versão: 0.7.0 · sprint MNI.3.5 (consultarTeorComunicacao)
+// Versão: 0.8.0 · MNI avisos migrado pro DJEN (publicações = fonte única)
 //
 // Roteia chamadas SOAP/MNI 2.2.2 pra múltiplos tribunais via registry interno.
 // Parser validado contra TJGO/Projudi.
@@ -13,18 +13,20 @@
 //
 // Endpoints (POST JSON):
 //   { tribunal: "TJGO", operacao: "consultarProcesso", cnj, cpf, senha, debug?, grau? (1|2) }
-//   { tribunal: "TJGO", operacao: "consultarAvisosPendentes", cpf, senha, dataReferencia? (YYYYMMDD), debug? }
-//   { tribunal: "TJGO", operacao: "consultarTeorComunicacao", cpf, senha, idAviso, debug? }
 //   { tribunal: "TRF1", operacao: "health" }
 //   { operacao: "listarTribunais" }
 //   { operacao: "detectarPorCnj", cnj: "0000000-00.0000.0.00.0000" }
 //
-// MUDANÇAS v0.3.0 vs v0.2.0:
-//   - Registry expandido de 6 → 41 tribunais (migrado de tribunal_registry.py
-//     do protótipo Python v4.3.0 + validações próprias)
-//   - Suporta `endpoint2g` opcional via { grau: 2 }
-//   - Novos campos: cnjCode, auth, mniVersion (informativos)
-//   - Nova operação `detectarPorCnj` (lookup pelo segmento+TT do CNJ)
+// MUDANÇAS v0.8.0 vs v0.7.0:
+//   - REMOVIDO: consultarAvisosPendentes + consultarTeorComunicacao
+//     Justificativa: DJEN (CNJ Nacional) já entrega o teor completo das
+//     publicações com parser de prazo maduro (parsearPublicacao no app).
+//     O Projudi/TJGO tinha bugs no consultarTeorComunicacao (server rejeita
+//     request válido pelo WSDL — provável buffer interno). DJEN é a fonte
+//     única de intimações; MNI fica só pra consultarProcesso (partes,
+//     advogados, movimentos detalhados).
+//   - Mantido o registry + detectarPorCnj + health + consultarProcesso.
+//   - Pra reativar: ver commits anteriores a 2026-05-13 (sandbox).
 
 // ============================================================
 // REGISTRY — manter em sync com workers/mni-tribunais.json
@@ -137,10 +139,10 @@ export default {
       const validados = codigos.filter(c => TRIBUNAIS_REGISTRY[c].validado);
       const naoSuportados = codigos.filter(c => TRIBUNAIS_REGISTRY[c].naoSuportado);
       return json({
-        worker: 'uc-mni', versao: '0.7.0',
+        worker: 'uc-mni', versao: '0.8.0',
         total: codigos.length,
         validados, naoSuportados,
-        operacoes: ['consultarProcesso', 'consultarAvisosPendentes', 'consultarTeorComunicacao', 'health', 'listarTribunais', 'detectarPorCnj']
+        operacoes: ['consultarProcesso', 'health', 'listarTribunais', 'detectarPorCnj']
       }, 200, corsHeaders);
     }
 
@@ -191,11 +193,6 @@ export default {
     const cpf = String(body.cpf || '').replace(/\D/g, '');
     const senha = String(body.senha || '');
     const debug = !!body.debug;
-    const dataReferencia = String(body.dataReferencia || '').replace(/\D/g, ''); // YYYYMMDD opcional
-    const idAviso = String(body.idAviso || '');
-    // Pra consultarTeorComunicacao, mantemos o CNJ COM pontuação (formato canônico
-    // CNJ). Apenas trim. Outros endpoints normalizam pra dígitos.
-    const cnjAviso = String(body.cnjAviso || body.numeroProcesso || '').trim();
 
     if (!cpf || !senha) return json({ error: 'cpf_senha_obrigatorios' }, 400, corsHeaders);
 
@@ -203,19 +200,6 @@ export default {
       if (operacao === 'consultarProcesso') {
         if (!cnj) return json({ error: 'cnj_obrigatorio' }, 400, corsHeaders);
         const result = await consultarProcesso(conf, endpoint, { cnj, cpf, senha, debug });
-        result.tribunal = codigo;
-        result.grau = grau;
-        return json(result, 200, corsHeaders);
-      }
-      if (operacao === 'consultarAvisosPendentes') {
-        const result = await consultarAvisosPendentes(conf, endpoint, { cpf, senha, debug, dataReferencia });
-        result.tribunal = codigo;
-        result.grau = grau;
-        return json(result, 200, corsHeaders);
-      }
-      if (operacao === 'consultarTeorComunicacao') {
-        if (!idAviso) return json({ error: 'idAviso_obrigatorio' }, 400, corsHeaders);
-        const result = await consultarTeorComunicacao(conf, endpoint, { cpf, senha, idAviso, cnjAviso, debug });
         result.tribunal = codigo;
         result.grau = grau;
         return json(result, 200, corsHeaders);
@@ -297,368 +281,6 @@ async function consultarProcesso(conf, endpoint, { cnj, cpf, senha, debug }) {
   const result = { sucesso: parsed.sucesso !== false, elapsedMs: elapsed, ...parsed, rawSize: text.length };
   if (debug) result.rawXml = text;
   return result;
-}
-
-// ============================================================
-// consultarAvisosPendentes — intimações pendentes do advogado
-// ============================================================
-// Operação MNI 2.2.2. Não precisa de CNJ — retorna TODOS os avisos
-// pendentes do advogado (CPF) no tribunal. Parser tolerante (schema
-// varia bastante entre tribunais).
-async function consultarAvisosPendentes(conf, endpoint, { cpf, senha, debug, dataReferencia }) {
-  // Parâmetros padrão MNI: idConsultante + senhaConsultante. Alguns
-  // tribunais aceitam dataReferencia (YYYYMMDD) pra filtrar a partir de uma data.
-  const params = `
-    <idConsultante>${escapeXml(cpf)}</idConsultante>
-    <senhaConsultante>${escapeXml(senha)}</senhaConsultante>
-    ${dataReferencia ? `<dataReferencia>${escapeXml(dataReferencia)}</dataReferencia>` : ''}
-  `;
-  const envelope = buildEnvelope(conf.namespace, 'consultarAvisosPendentes', params);
-
-  const t0 = Date.now();
-  const resp = await fetch(endpoint, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'text/xml; charset=utf-8',
-      'SOAPAction': conf.soapAction === '' || conf.soapAction == null ? '""' : `"${conf.soapAction}"`,
-      'User-Agent': 'UC-Juridico-MNI/0.6'
-    },
-    body: envelope
-  });
-  const elapsed = Date.now() - t0;
-  const text = await resp.text();
-
-  if (!resp.ok) {
-    return { sucesso: false, erro: 'http_' + resp.status, httpStatus: resp.status, elapsedMs: elapsed, raw: text.slice(0, 4000) };
-  }
-  const fault = extractFault(text);
-  if (fault) {
-    return { sucesso: false, erro: 'soap_fault', mensagem: fault, elapsedMs: elapsed, raw: text.slice(0, 4000) };
-  }
-  const parsed = parseAvisosPendentes(text);
-  const result = { sucesso: parsed.sucesso !== false, elapsedMs: elapsed, ...parsed, rawSize: text.length };
-  if (debug) result.rawXml = text;
-  return result;
-}
-
-// ============================================================
-// consultarTeorComunicacao — busca o texto/documento da comunicação
-// ============================================================
-// Operação MNI 2.2.2. Recebe idAviso (idAviso do <aviso> retornado por
-// consultarAvisosPendentes). Retorna o teor — pode vir como texto puro,
-// HTML, base64 (PDF/binário) ou referência a documento.
-async function consultarTeorComunicacao(conf, endpoint, { cpf, senha, idAviso, cnjAviso, debug }) {
-  // Projudi/TJGO exige parâmetros no namespace tipos-servico-intercomunicacao-2.2.2.
-  // Schema XSD oficial (confirmado pelo WSDL em projudi.tjgo.jus.br/IntercomunicacaoService?WSDL):
-  //   tipoConsultarTeorComunicacao:
-  //     idConsultante (xs:string, qualified)
-  //     senhaConsultante (xs:string, qualified)
-  //     numeroProcesso (tipoNumeroUnico=xs:string, qualified)
-  //     identificadorAviso (identificadorComunicacao=xs:string, qualified)
-  //   Todos minOccurs=0 no XSD MAS o servidor exige TODOS no runtime.
-  //
-  // O identificadorAviso deve ser o atributo idAviso do <aviso> retornado por
-  // consultarAvisosPendentes. Atenção: a mensagem de erro do business logic
-  // do Projudi mostra 'IdentificadorAviso' (I maiúsculo) — bug interno, o
-  // schema XSD é minúsculo.
-  //
-  // Erro "processo não está vinculado à pendência" significa que o aviso já
-  // foi consumido/lido no Projudi web — tratado no final desta função.
-  const NS_TIPOS = 'http://www.cnj.jus.br/tipos-servico-intercomunicacao-2.2.2';
-  const cnjFormatado = cnjAviso || '';                       // mantém pontuação
-  const cnjDigitos = String(cnjAviso || '').replace(/\D/g, ''); // só dígitos
-  // Variantes tentadas em ordem. Projudi/TJGO faultstring confirmou schema:
-  //   numeroProcesso, senhaConsultante, idConsultante, identificadorAviso (i minúsculo)
-  // Servidor exige numeroProcesso + identificadorAviso casarem — tenta 2 formatos.
-  const variantes = [];
-  if (cnjFormatado) {
-    variantes.push({
-      nome: 'CNJ-pontuado',
-      body: `<tip:numeroProcesso>${escapeXml(cnjFormatado)}</tip:numeroProcesso>\n      <tip:identificadorAviso>${escapeXml(idAviso)}</tip:identificadorAviso>`
-    });
-  }
-  if (cnjDigitos && cnjDigitos !== cnjFormatado) {
-    variantes.push({
-      nome: 'CNJ-digitos',
-      body: `<tip:numeroProcesso>${escapeXml(cnjDigitos)}</tip:numeroProcesso>\n      <tip:identificadorAviso>${escapeXml(idAviso)}</tip:identificadorAviso>`
-    });
-  }
-  // Fallback: sem numeroProcesso (caso o tribunal aceite só identificador)
-  variantes.push({
-    nome: 'apenas-identificadorAviso',
-    body: `<tip:identificadorAviso>${escapeXml(idAviso)}</tip:identificadorAviso>`
-  });
-
-  const tentativas = [];
-  for (const v of variantes) {
-    const envelope = `<?xml version="1.0" encoding="UTF-8"?>
-<soap:Envelope
-  xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"
-  xmlns:int="${conf.namespace}"
-  xmlns:tip="${NS_TIPOS}">
-  <soap:Header/>
-  <soap:Body>
-    <int:consultarTeorComunicacao>
-      <tip:idConsultante>${escapeXml(cpf)}</tip:idConsultante>
-      <tip:senhaConsultante>${escapeXml(senha)}</tip:senhaConsultante>
-      ${v.body}
-    </int:consultarTeorComunicacao>
-  </soap:Body>
-</soap:Envelope>`;
-    const t0 = Date.now();
-    const resp = await fetch(endpoint, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'text/xml; charset=utf-8',
-        'SOAPAction': conf.soapAction === '' || conf.soapAction == null ? '""' : `"${conf.soapAction}"`,
-        'User-Agent': 'UC-Juridico-MNI/0.7'
-      },
-      body: envelope
-    });
-    const elapsed = Date.now() - t0;
-    const text = await resp.text();
-    tentativas.push({
-      nome: v.nome,
-      httpStatus: resp.status,
-      elapsedMs: elapsed,
-      snippet: text.slice(0, 1500)  // aumentado pra ver faultstring completa
-    });
-
-    if (!resp.ok) continue;
-
-    const fault = extractFault(text);
-    if (fault) {
-      if (/par[âa]metro|expected|unexpected element|elemento\s+inesperado|argument|unmarshalling/i.test(fault)) continue;
-      return { sucesso: false, erro: 'soap_fault', mensagem: fault, elapsedMs: elapsed, raw: text.slice(0, 4000), tentativas };
-    }
-
-    const parsed = parseTeorComunicacao(text);
-    // Se o servidor retornou sucesso=false com mensagens conhecidas de
-    // formato/validação de parâmetro, tenta próxima variante.
-    if (parsed.sucesso === false && (
-      /(par[âa]metro|argumento)\s+\S+\s+(n[ãa]o\s+foi\s+informad|obrigat[óo]ri|inv[áa]lid)/i.test(parsed.mensagem || '') ||
-      /n[ãa]o\s+est[áa]\s+vinculad/i.test(parsed.mensagem || '')   // CNJ + identificador não casam
-    )) {
-      tentativas[tentativas.length - 1].sucessoFalse = parsed.mensagem;
-      continue;
-    }
-    const result = { sucesso: parsed.sucesso !== false, elapsedMs: elapsed, parametroUsado: v.nome, ...parsed, rawSize: text.length };
-    if (debug) result.rawXml = text;
-    if (debug) result.tentativas = tentativas;
-    return result;
-  }
-
-  // Todas as variantes falharam — retorna detalhes pra debug
-  const ultima = tentativas[tentativas.length - 1];
-
-  // Detecta o erro semântico "processo não está vinculado à pendência" —
-  // significa que o request está formato correto MAS o aviso já foi
-  // lido/consumido no Projudi web (some da fila de teor-consultável mas
-  // ainda aparece em consultarAvisosPendentes por buffer interno).
-  const naoVinculado = tentativas.some(t => /n[ãa]o\s+est[áa]\s+vinculad/i.test(t.snippet || ''));
-  if (naoVinculado) {
-    return {
-      sucesso: false,
-      erro: 'aviso_indisponivel',
-      httpStatus: ultima.httpStatus,
-      elapsedMs: ultima.elapsedMs,
-      raw: ultima.snippet,
-      tentativas,
-      mensagem: 'O Projudi rejeitou o identificador do aviso. Possíveis causas: (1) o aviso já foi LIDO no Projudi web antes — o teor sai da fila de consulta mas o aviso pode continuar listado em "pendentes"; (2) o aviso expirou; (3) bug do Projudi/TJGO. Tente com um aviso MUITO recente (últimas horas) que ainda não foi aberto no portal.',
-      dica: 'Se o aviso é recente e ainda dá esse erro, abre uma vez no Projudi web → volta aqui e clica "Ver teor" — às vezes o cache do Projudi se ajusta.'
-    };
-  }
-
-  return {
-    sucesso: false,
-    erro: 'http_' + ultima.httpStatus,
-    httpStatus: ultima.httpStatus,
-    elapsedMs: ultima.elapsedMs,
-    raw: ultima.snippet,
-    tentativas,
-    mensagem: `Tentei ${variantes.length} formatos de parâmetro (${variantes.map(v => v.nome).join(', ')}) com namespace tipos-servico-intercomunicacao-2.2.2. Todos falharam. Veja "tentativas" para faultstring completa.`
-  };
-}
-
-// Parser tolerante de consultarTeorComunicacaoResposta.
-// Schema do Projudi pode variar; possíveis caminhos pro teor:
-//   <teorComunicacao>texto/html</teorComunicacao>
-//   <comunicacao><teorComunicacao>...</teorComunicacao></comunicacao>
-//   <documento><conteudo>base64</conteudo><tipoDocumento>PDF</tipoDocumento></documento>
-//   <aviso idAviso="..."><texto>...</texto></aviso>
-function parseTeorComunicacao(xml) {
-  const sucessoTag = tagText(xml, 'sucesso');
-  const mensagem = tagText(xml, 'mensagem');
-  if (sucessoTag.toLowerCase() === 'false') {
-    return { sucesso: false, mensagem: mensagem || '(sem mensagem)', teor: '' };
-  }
-
-  // Procura o teor em vários campos possíveis
-  let teorTexto = '';
-  let teorBase64 = '';
-  let mimeType = '';
-  let nomeDocumento = '';
-
-  // 1) Tag direta <teorComunicacao> ou <teor>
-  const teor1 = tagText(xml, 'teorComunicacao') || tagText(xml, 'teor') || tagText(xml, 'texto');
-  if (teor1) teorTexto = _decodeXmlEntities(teor1);
-
-  // 2) Documento estruturado: <documento> com <conteudo> base64 + <tipoDocumento>
-  const docBlock = (xml.match(/<(?:\w+:)?documento\b[\s\S]*?<\/(?:\w+:)?documento>/i) || [''])[0];
-  if (docBlock) {
-    const conteudo = tagText(docBlock, 'conteudo') || tagText(docBlock, 'conteudoDocumento') || '';
-    if (conteudo && /^[A-Za-z0-9+/=\s]+$/.test(conteudo.slice(0, 100))) {
-      // Parece base64
-      teorBase64 = conteudo.replace(/\s/g, '');
-    } else if (conteudo) {
-      teorTexto = teorTexto || _decodeXmlEntities(conteudo);
-    }
-    mimeType = tagText(docBlock, 'tipoDocumento') || tagText(docBlock, 'mimetype') || tagText(docBlock, 'mimeType') || '';
-    nomeDocumento = tagText(docBlock, 'descricao') || tagText(docBlock, 'nome') || '';
-    // Atributos comuns
-    if (!mimeType) mimeType = (docBlock.match(/\bmimetype="([^"]*)"/i) || [])[1] || '';
-    if (!nomeDocumento) nomeDocumento = (docBlock.match(/\bdescricao="([^"]*)"/i) || [])[1] || '';
-  }
-
-  // 3) Atributo de teor em <conteudo>
-  if (!teorTexto && !teorBase64) {
-    const conteudoTag = tagText(xml, 'conteudo');
-    if (conteudoTag) {
-      if (/^[A-Za-z0-9+/=\s]+$/.test(conteudoTag.slice(0, 100)) && conteudoTag.length > 200) {
-        teorBase64 = conteudoTag.replace(/\s/g, '');
-      } else {
-        teorTexto = _decodeXmlEntities(conteudoTag);
-      }
-    }
-  }
-
-  // Retorna estrutura unificada
-  return {
-    sucesso: true,
-    teor: teorTexto,                    // texto plain / HTML decodificado
-    teorBase64: teorBase64,             // base64 (PDF binário) se for o caso
-    mimeType: mimeType || (teorBase64 ? 'application/pdf' : 'text/plain'),
-    nomeDocumento,
-    formato: teorBase64 ? 'base64' : (teorTexto && /<\w+/.test(teorTexto) ? 'html' : 'texto'),
-    tamanhoTexto: teorTexto.length,
-    tamanhoBase64: teorBase64.length
-  };
-}
-
-// Mapeia código curto de tipo de comunicação (Projudi) → nome legível.
-function _mapTipoComunicacao(codigo) {
-  const map = {
-    INT: 'Intimação', CIT: 'Citação', VIS: 'Vista', NOT: 'Notificação',
-    OFC: 'Ofício', CAR: 'Carta', MAN: 'Mandado', EDI: 'Edital', COM: 'Comunicação'
-  };
-  return map[String(codigo || '').toUpperCase()] || codigo || 'Comunicação';
-}
-
-// Parser de consultarAvisosPendentesResposta.
-// Schema real do Projudi/TJGO (validado 12/05/2026):
-//   <ns2:aviso idAviso="..." tipoComunicacao="INT">
-//     <ns3:destinatario>...</ns3:destinatario>  (opcional, em VIS)
-//     <ns3:processo numero="..." classeProcessual="..." nivelSigilo="...">
-//       <ns3:polo polo="AT|PA|TC">...</ns3:polo>
-//       <ns3:assunto principal="true"><ns3:assuntoLocal descricao="..."/></ns3:assunto>
-//       <ns3:magistradoAtuante>...</ns3:magistradoAtuante>
-//       <ns3:prioridade>N-Texto</ns3:prioridade>
-//       <ns3:outroParametro nome="Area|Serventia|ProcessoFase|..." valor="..."/>
-//       <ns3:valorCausa>...</ns3:valorCausa>
-//       <ns3:orgaoJulgador nomeOrgao="..." codigoMunicipioIBGE="..."/>
-//     </ns3:processo>
-//     <ns3:dataDisponibilizacao>YYYYMMDDHHMMSS</ns3:dataDisponibilizacao>
-//   </ns2:aviso>
-// NOTA: o Projudi NÃO retorna prazo nem teor aqui — pra ver o teor da
-// comunicação seria preciso consultarTeorComunicacao (operação separada).
-function parseAvisosPendentes(xml) {
-  const sucessoTag = tagText(xml, 'sucesso');
-  const mensagem = tagText(xml, 'mensagem');
-  if (sucessoTag.toLowerCase() === 'false') {
-    return { sucesso: false, mensagem: mensagem || '(sem mensagem)', avisos: [], avisosTotal: 0 };
-  }
-  const avisos = [];
-  const avisoBlocks = xml.match(/<(?:\w+:)?aviso\b[^>]*>[\s\S]*?<\/(?:\w+:)?aviso>/gi) || [];
-  for (const b of avisoBlocks) {
-    // Atributos do <aviso>
-    const idAviso = (b.match(/<(?:\w+:)?aviso\b[^>]*\bidAviso="([^"]*)"/) || [])[1] || '';
-    const tipoCodigo = (b.match(/<(?:\w+:)?aviso\b[^>]*\btipoComunicacao="([^"]*)"/) || [])[1] || '';
-
-    // Bloco <processo>
-    const procBlock = (b.match(/<(?:\w+:)?processo\b[\s\S]*?<\/(?:\w+:)?processo>/i) || [b])[0];
-    const procOpen = (procBlock.match(/<(?:\w+:)?processo\b[^>]*>/i) || [''])[0];
-    const numeroProcesso = (procOpen.match(/\bnumero="([^"]*)"/) || [])[1] || '';
-    const classeProcessual = (procOpen.match(/\bclasseProcessual="([^"]*)"/) || [])[1] || '';
-    const nivelSigilo = (procOpen.match(/\bnivelSigilo="([^"]*)"/) || [])[1] || '';
-
-    // orgaoJulgador (atributos)
-    const nomeOrgao = tagAttr(procBlock, 'orgaoJulgador', 'nomeOrgao') || '';
-    const codigoMunicipioIBGE = tagAttr(procBlock, 'orgaoJulgador', 'codigoMunicipioIBGE') || '';
-
-    // magistrado, prioridade, valorCausa
-    const magistradoAtuante = tagText(procBlock, 'magistradoAtuante') || '';
-    const prioridade = tagText(procBlock, 'prioridade') || '';
-    const valorCausa = tagText(procBlock, 'valorCausa') || '';
-
-    // assunto principal (descrição do assuntoLocal)
-    const assuntoBlock = (procBlock.match(/<(?:\w+:)?assunto\b[^>]*\bprincipal="true"[\s\S]*?<\/(?:\w+:)?assunto>/i)
-      || procBlock.match(/<(?:\w+:)?assunto\b[\s\S]*?<\/(?:\w+:)?assunto>/i) || [''])[0];
-    const assuntoDescricao = _decodeXmlEntities(tagAttr(assuntoBlock, 'assuntoLocal', 'descricao') || '');
-    const assuntoCodigoNacional = tagText(assuntoBlock, 'codigoNacional') || '';
-
-    // outroParametro
-    const outros = {};
-    const opMatches = procBlock.matchAll(/<(?:\w+:)?outroParametro\b[^>]*\bnome="([^"]*)"[^>]*\bvalor="([^"]*)"[^>]*\/?>/g);
-    for (const m of opMatches) outros[m[1]] = _decodeXmlEntities(m[2]);
-    const area = outros.Area || '';
-    const serventia = outros.Serventia || '';
-    const processoFase = outros.ProcessoFase || '';
-    const processoStatus = outros.ProcessoStatus || '';
-    const processoTipo = outros.ProcessoTipo || '';
-    const dataDistRaw = outros.DataDistribuicao || '';
-
-    // dataDisponibilizacao — elemento dentro de <aviso>, formato YYYYMMDDHHMMSS
-    const dispRaw = (tagText(b, 'dataDisponibilizacao') || '').replace(/\D/g, '');
-    const dataDisp = dispRaw.length >= 8 ? `${dispRaw.slice(0,4)}-${dispRaw.slice(4,6)}-${dispRaw.slice(6,8)}` : '';
-    const horaDisp = dispRaw.length >= 12 ? `${dispRaw.slice(8,10)}:${dispRaw.slice(10,12)}` : '';
-
-    // Destinatário (presente em alguns VIS) — primeira pessoa
-    const destBlock = (b.match(/<(?:\w+:)?destinatario\b[\s\S]*?<\/(?:\w+:)?destinatario>/i) || [''])[0];
-    const destinatario = (destBlock.match(/<(?:\w+:)?pessoa\b[^>]*\bnome="([^"]*)"/) || [])[1] || '';
-
-    avisos.push({
-      idAviso,
-      idComunicacao: idAviso,                  // alias pra compat
-      tipoComunicacao: _mapTipoComunicacao(tipoCodigo),
-      tipoComunicacaoCodigo: tipoCodigo,
-      numeroProcesso,
-      classeProcessual,
-      nivelSigilo,
-      nomeOrgao,
-      codigoMunicipioIBGE,
-      magistradoAtuante,
-      prioridade,
-      valorCausa,
-      assunto: { codigoNacional: assuntoCodigoNacional, descricao: assuntoDescricao },
-      area,
-      serventia,
-      processoFase,
-      processoStatus,
-      processoTipo,
-      dataDistribuicao: dataDistRaw && dataDistRaw.length >= 8
-        ? `${dataDistRaw.slice(0,4)}-${dataDistRaw.slice(4,6)}-${dataDistRaw.slice(6,8)}` : '',
-      dataDisponibilizacao: dataDisp,          // YYYY-MM-DD (date-only — fácil pro cálculo de prazo)
-      horaDisponibilizacao: horaDisp,          // HH:MM
-      destinatario,
-      // Projudi não retorna estes nesse SOAP:
-      prazo: '',
-      meio: '',
-      teor: ''
-    });
-  }
-  // Ordena por data disponibilização desc
-  avisos.sort((a, b) => (b.dataDisponibilizacao || '').localeCompare(a.dataDisponibilizacao || ''));
-  return { sucesso: true, avisos: avisos.slice(0, 200), avisosTotal: avisos.length };
 }
 
 // ============================================================
