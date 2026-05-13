@@ -14980,8 +14980,55 @@ async function djenFetchAll(oabs, dataInicio, dataFim, progressCb = null) {
   return allPubs;
 }
 
+// Hash determinístico simples (djb2) pra gerar chave composta de dedupe.
+// Não precisa ser criptográfico — só estabilidade no boot.
+function djenSimpleHash(s) {
+  let h = 5381;
+  for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0;
+  return (h >>> 0).toString(36);
+}
+
+// Dedupe defensivo das publicações DJEN. Cenários cobertos:
+//   1. API devolve a mesma publicação com hash idêntico (cache cruzado de OABs)
+//      → resolve pelo `pub.hash`.
+//   2. API devolve mesma publicação com hashes diferentes (ID interno volátil
+//      ou caso multi-OAB sem normalização do lado deles)
+//      → resolve pela chave composta `cnj|data|sample-hash` do texto.
+// Survivor recebe `_dedupeCount` (>=2 quando colapsou alguma cópia) e
+// `_oabsExtra` se outras OABs apontaram pra mesma publicação.
+function djenDedupePublications(pubs) {
+  const byApiHash = new Map();
+  const byComposite = new Map();
+  const survivors = [];
+  for (const pub of pubs) {
+    const cnj = (pub.numero_processo || pub.numeroProcesso || '').replace(/\D/g, '');
+    const data = pub.data_disponibilizacao || pub.data_publicacao || '';
+    const textoSample = (pub.texto || '').slice(0, 500);
+    const compositeKey = `${cnj}|${data}|${textoSample.length}|${djenSimpleHash(textoSample)}`;
+
+    const prior = (pub.hash && byApiHash.get(pub.hash)) || byComposite.get(compositeKey);
+    if (prior) {
+      prior._dedupeCount = (prior._dedupeCount || 1) + 1;
+      if (pub._oab && (!prior._oab || pub._oab.numero !== prior._oab.numero || pub._oab.uf !== prior._oab.uf)) {
+        prior._oabsExtra = prior._oabsExtra || [];
+        const already = prior._oabsExtra.some(o => o.numero === pub._oab.numero && o.uf === pub._oab.uf);
+        if (!already) prior._oabsExtra.push(pub._oab);
+      }
+      continue;
+    }
+    if (pub.hash) byApiHash.set(pub.hash, pub);
+    byComposite.set(compositeKey, pub);
+    survivors.push(pub);
+  }
+  return { pubs: survivors, removed: pubs.length - survivors.length };
+}
+
 // Match publications against existing processes by CNJ
 async function djenClassify(publications) {
+  // Dedupe ANTES de classificar — evita gastar lookup do DB e renderizar 2x.
+  const dedup = djenDedupePublications(publications);
+  if (dedup.removed > 0) console.log(`[DJEN] dedupe interno: ${dedup.removed} de ${publications.length} colapsadas`);
+
   const processes = await DB.getAllProcesses();
   const cnjMap = new Map();
   processes.forEach(p => {
@@ -14989,9 +15036,9 @@ async function djenClassify(publications) {
     if (norm) cnjMap.set(norm, p);
   });
 
-  const result = { matched: [], unmatched: [], duplicates: [] };
+  const result = { matched: [], unmatched: [], duplicates: [], internalDuplicates: dedup.removed };
 
-  for (const pub of publications) {
+  for (const pub of dedup.pubs) {
     const cnj = pub.numero_processo || pub.numeroProcesso || '';
     const cnjNorm = normalizeCnjForCompare(cnj);
     pub._cnjNormalized = cnjNorm;
@@ -15021,7 +15068,7 @@ async function djenShowResultsModal(classified, oabs, dataInicio, dataFim) {
       <p class="help-text" style="margin-bottom: 12px;">
         Período: ${formatDate(dataInicio)} a ${formatDate(dataFim)} ·
         ${oabs.length} OAB(s) consultada(s) ·
-        <strong>${total}</strong> publicações encontradas
+        <strong>${total}</strong> publicações encontradas${classified.internalDuplicates > 0 ? ` <span style="color:var(--uc-warm-gray);" title="DJEN devolveu a mesma publicação mais de uma vez (cruzamento de OAB ou bug do índice). Colapsadas no client pra não duplicar visualmente.">· ${classified.internalDuplicates} duplicata${classified.internalDuplicates > 1 ? 's' : ''} interna${classified.internalDuplicates > 1 ? 's' : ''} omitida${classified.internalDuplicates > 1 ? 's' : ''}</span>` : ''}
       </p>
 
       <div style="display:flex; gap:8px; margin-bottom:16px; flex-wrap:wrap;">
