@@ -13705,7 +13705,7 @@ async function _mniShowAvisosModal(codigo, advogado, data) {
         btn.disabled = true;
         btn.textContent = '⏳ Buscando…';
         try {
-          const teor = await _mniBuscarTeor(codigo, av.idAviso);
+          const teor = await _mniBuscarTeor(codigo, av.idAviso, av.numeroProcesso || '');
           btn.disabled = false;
           if (teor.sucesso) {
             teorBox.dataset.teorCache = teor.teor || teor.teorBase64 || '';
@@ -13760,7 +13760,9 @@ async function _mniShowAvisosModal(codigo, advogado, data) {
 
 // Busca o teor da comunicação via Worker (consultarTeorComunicacao).
 // Usa a credencial cadastrada pro tribunal. Devolve o objeto retornado pelo Worker.
-async function _mniBuscarTeor(tribunalCodigo, idAviso) {
+// cnjAviso opcional: o CNJ do processo do aviso (alguns tribunais exigem
+// numeroProcesso + identificadorAviso juntos).
+async function _mniBuscarTeor(tribunalCodigo, idAviso, cnjAviso = '') {
   const config = await _mniGetConfig();
   if (!config.workerUrl) return { sucesso: false, erro: 'worker_nao_configurada' };
   if (!window.MniCrypto.isUnlocked()) return { sucesso: false, erro: 'cofre_travado' };
@@ -13775,7 +13777,7 @@ async function _mniBuscarTeor(tribunalCodigo, idAviso) {
     const resp = await fetch(config.workerUrl.replace(/\/$/, ''), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tribunal: tribunalCodigo, operacao: 'consultarTeorComunicacao', cpf: cred.cpf, senha, idAviso })
+      body: JSON.stringify({ tribunal: tribunalCodigo, operacao: 'consultarTeorComunicacao', cpf: cred.cpf, senha, idAviso, cnjAviso })
     });
     senha = null;
     return await resp.json();

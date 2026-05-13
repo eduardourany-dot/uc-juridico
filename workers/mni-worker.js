@@ -193,6 +193,7 @@ export default {
     const debug = !!body.debug;
     const dataReferencia = String(body.dataReferencia || '').replace(/\D/g, ''); // YYYYMMDD opcional
     const idAviso = String(body.idAviso || '');
+    const cnjAviso = String(body.cnjAviso || body.numeroProcesso || '').replace(/\D/g, ''); // opcional pra consultarTeor
 
     if (!cpf || !senha) return json({ error: 'cpf_senha_obrigatorios' }, 400, corsHeaders);
 
@@ -212,7 +213,7 @@ export default {
       }
       if (operacao === 'consultarTeorComunicacao') {
         if (!idAviso) return json({ error: 'idAviso_obrigatorio' }, 400, corsHeaders);
-        const result = await consultarTeorComunicacao(conf, endpoint, { cpf, senha, idAviso, debug });
+        const result = await consultarTeorComunicacao(conf, endpoint, { cpf, senha, idAviso, cnjAviso, debug });
         result.tribunal = codigo;
         result.grau = grau;
         return json(result, 200, corsHeaders);
@@ -344,23 +345,28 @@ async function consultarAvisosPendentes(conf, endpoint, { cpf, senha, debug, dat
 // Operação MNI 2.2.2. Recebe idAviso (idAviso do <aviso> retornado por
 // consultarAvisosPendentes). Retorna o teor — pode vir como texto puro,
 // HTML, base64 (PDF/binário) ou referência a documento.
-async function consultarTeorComunicacao(conf, endpoint, { cpf, senha, idAviso, debug }) {
-  // Projudi/TJGO exige parâmetros no namespace tipos-servico-intercomunicacao-2.2.2
-  // (não tolera elementos sem namespace como nas outras operações). Erro típico:
-  // "Unmarshalling Error: elemento inesperado (uri:'', local:'idsAviso')".
-  //
-  // Tenta 2 variantes de nome de parâmetro com prefixo 'tip:' (CNJ MNI 2.2.2):
-  //   1. tip:idsAviso (canônico) — recebe ID do <aviso>
-  //   2. tip:numeroProcesso (caso o Projudi exija CNJ em vez de idAviso —
-  //      a mensagem de fault sugere essa alternativa)
+async function consultarTeorComunicacao(conf, endpoint, { cpf, senha, idAviso, cnjAviso, debug }) {
+  // Projudi/TJGO exige parâmetros no namespace tipos-servico-intercomunicacao-2.2.2.
+  // Schema XSD (revelado pela faultstring) aceita:
+  //   <tip:numeroProcesso>, <tip:senhaConsultante>, <tip:idConsultante>,
+  //   <tip:identificadorAviso>  ← 'i' MINÚSCULO no XML (a mensagem de erro
+  //   do business logic mostra com 'I' maiúsculo, mas o schema é minúsculo)
   const NS_TIPOS = 'http://www.cnj.jus.br/tipos-servico-intercomunicacao-2.2.2';
+  // Variantes tentadas em ordem. A variante 1 é a confirmada pelo Projudi/TJGO.
+  // 2 e 3 são fallbacks pra outros tribunais que podem ter schemas variantes.
   const variantes = [
-    // Projudi/TJGO: faultstring revelou "O parâmetro IdentificadorAviso não foi informado"
-    { nome: 'IdentificadorAviso', body: `<tip:IdentificadorAviso>${escapeXml(idAviso)}</tip:IdentificadorAviso>` },
-    // Canônico CNJ MNI 2.2.2 (fallback pra outros tribunais)
-    { nome: 'idsAviso', body: `<tip:idsAviso>${escapeXml(idAviso)}</tip:idsAviso>` },
-    // Alguns Projudi exigem o CNJ direto (a primeira faultstring listou)
-    { nome: 'numeroProcesso', body: `<tip:numeroProcesso>${escapeXml(idAviso)}</tip:numeroProcesso>` }
+    {
+      nome: 'identificadorAviso',
+      body: `<tip:identificadorAviso>${escapeXml(idAviso)}</tip:identificadorAviso>`
+    },
+    // Se temos CNJ, tenta com numeroProcesso + identificadorAviso (alguns
+    // tribunais exigem ambos)
+    ...(cnjAviso ? [{
+      nome: 'identificadorAviso+numeroProcesso',
+      body: `<tip:numeroProcesso>${escapeXml(cnjAviso)}</tip:numeroProcesso>\n      <tip:identificadorAviso>${escapeXml(idAviso)}</tip:identificadorAviso>`
+    }] : []),
+    // Canônico CNJ MNI 2.2.2 (idsAviso plural)
+    { nome: 'idsAviso', body: `<tip:idsAviso>${escapeXml(idAviso)}</tip:idsAviso>` }
   ];
 
   const tentativas = [];
