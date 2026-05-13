@@ -193,7 +193,9 @@ export default {
     const debug = !!body.debug;
     const dataReferencia = String(body.dataReferencia || '').replace(/\D/g, ''); // YYYYMMDD opcional
     const idAviso = String(body.idAviso || '');
-    const cnjAviso = String(body.cnjAviso || body.numeroProcesso || '').replace(/\D/g, ''); // opcional pra consultarTeor
+    // Pra consultarTeorComunicacao, mantemos o CNJ COM pontuação (formato canônico
+    // CNJ). Apenas trim. Outros endpoints normalizam pra dígitos.
+    const cnjAviso = String(body.cnjAviso || body.numeroProcesso || '').trim();
 
     if (!cpf || !senha) return json({ error: 'cpf_senha_obrigatorios' }, 400, corsHeaders);
 
@@ -352,22 +354,29 @@ async function consultarTeorComunicacao(conf, endpoint, { cpf, senha, idAviso, c
   //   <tip:identificadorAviso>  ← 'i' MINÚSCULO no XML (a mensagem de erro
   //   do business logic mostra com 'I' maiúsculo, mas o schema é minúsculo)
   const NS_TIPOS = 'http://www.cnj.jus.br/tipos-servico-intercomunicacao-2.2.2';
-  // Variantes tentadas em ordem. A variante 1 é a confirmada pelo Projudi/TJGO.
-  // 2 e 3 são fallbacks pra outros tribunais que podem ter schemas variantes.
-  const variantes = [
-    {
-      nome: 'identificadorAviso',
-      body: `<tip:identificadorAviso>${escapeXml(idAviso)}</tip:identificadorAviso>`
-    },
-    // Se temos CNJ, tenta com numeroProcesso + identificadorAviso (alguns
-    // tribunais exigem ambos)
-    ...(cnjAviso ? [{
-      nome: 'identificadorAviso+numeroProcesso',
-      body: `<tip:numeroProcesso>${escapeXml(cnjAviso)}</tip:numeroProcesso>\n      <tip:identificadorAviso>${escapeXml(idAviso)}</tip:identificadorAviso>`
-    }] : []),
-    // Canônico CNJ MNI 2.2.2 (idsAviso plural)
-    { nome: 'idsAviso', body: `<tip:idsAviso>${escapeXml(idAviso)}</tip:idsAviso>` }
-  ];
+  const cnjFormatado = cnjAviso || '';                       // mantém pontuação
+  const cnjDigitos = String(cnjAviso || '').replace(/\D/g, ''); // só dígitos
+  // Variantes tentadas em ordem. Projudi/TJGO faultstring confirmou schema:
+  //   numeroProcesso, senhaConsultante, idConsultante, identificadorAviso (i minúsculo)
+  // Servidor exige numeroProcesso + identificadorAviso casarem — tenta 2 formatos.
+  const variantes = [];
+  if (cnjFormatado) {
+    variantes.push({
+      nome: 'CNJ-pontuado',
+      body: `<tip:numeroProcesso>${escapeXml(cnjFormatado)}</tip:numeroProcesso>\n      <tip:identificadorAviso>${escapeXml(idAviso)}</tip:identificadorAviso>`
+    });
+  }
+  if (cnjDigitos && cnjDigitos !== cnjFormatado) {
+    variantes.push({
+      nome: 'CNJ-digitos',
+      body: `<tip:numeroProcesso>${escapeXml(cnjDigitos)}</tip:numeroProcesso>\n      <tip:identificadorAviso>${escapeXml(idAviso)}</tip:identificadorAviso>`
+    });
+  }
+  // Fallback: sem numeroProcesso (caso o tribunal aceite só identificador)
+  variantes.push({
+    nome: 'apenas-identificadorAviso',
+    body: `<tip:identificadorAviso>${escapeXml(idAviso)}</tip:identificadorAviso>`
+  });
 
   const tentativas = [];
   for (const v of variantes) {
@@ -413,9 +422,12 @@ async function consultarTeorComunicacao(conf, endpoint, { cpf, senha, idAviso, c
     }
 
     const parsed = parseTeorComunicacao(text);
-    // Se o servidor retornou sucesso=false dizendo "parâmetro X não foi informado",
-    // significa que esse nome de variante NÃO é o esperado — tenta a próxima.
-    if (parsed.sucesso === false && /(par[âa]metro|argumento)\s+\S+\s+(n[ãa]o\s+foi\s+informad|obrigat[óo]ri|inv[áa]lid)/i.test(parsed.mensagem || '')) {
+    // Se o servidor retornou sucesso=false com mensagens conhecidas de
+    // formato/validação de parâmetro, tenta próxima variante.
+    if (parsed.sucesso === false && (
+      /(par[âa]metro|argumento)\s+\S+\s+(n[ãa]o\s+foi\s+informad|obrigat[óo]ri|inv[áa]lid)/i.test(parsed.mensagem || '') ||
+      /n[ãa]o\s+est[áa]\s+vinculad/i.test(parsed.mensagem || '')   // CNJ + identificador não casam
+    )) {
       tentativas[tentativas.length - 1].sucessoFalse = parsed.mensagem;
       continue;
     }
