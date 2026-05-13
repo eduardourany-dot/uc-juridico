@@ -13571,7 +13571,27 @@ async function _mniShowAvisosModal(codigo, advogado, data) {
     for (const p of allProcs) {
       if (p.cnj) procByCnj[String(p.cnj).replace(/\D/g, '')] = p;
     }
-    const linhas = data.avisos.map((av, i) => {
+    // DEDUPE: o TJGO gera 1 <aviso> por advogado destinatário pro mesmo
+    // ato processual. Agrupa pela chave (CNJ + data + hora + tipo) e
+    // mostra só 1 card por grupo, com badge contando idênticos.
+    const grupos = new Map();
+    data.avisos.forEach((av, idx) => {
+      const key = [
+        String(av.numeroProcesso || '').replace(/\D/g, '') || `__no_cnj__${av.idAviso}`,
+        av.dataDisponibilizacao || '',
+        av.horaDisponibilizacao || '',
+        av.tipoComunicacaoCodigo || av.tipoComunicacao || ''
+      ].join('|');
+      if (!grupos.has(key)) grupos.set(key, { primeiro: av, primeiroIdx: idx, idsAgrupados: [], total: 0 });
+      const g = grupos.get(key);
+      g.idsAgrupados.push(av.idAviso);
+      g.total++;
+    });
+    const avisosUnicos = Array.from(grupos.values());
+    const linhas = avisosUnicos.map((grupo, gi) => {
+      const av = grupo.primeiro;
+      const i = grupo.primeiroIdx;       // índice no array original (pra clicar e criar publicação)
+      const replicas = grupo.total - 1;  // quantos idAvisos extras existem
       const cnjNorm = String(av.numeroProcesso || '').replace(/\D/g, '');
       const proc = cnjNorm ? procByCnj[cnjNorm] : null;
       const vinculo = proc
@@ -13597,6 +13617,7 @@ async function _mniShowAvisosModal(codigo, advogado, data) {
                 <span class="process-cnj" style="font-size:11px;font-weight:600;">${escapeHtml(av.numeroProcesso || '(sem CNJ)')}</span>
                 ${vinculo}
                 ${av.tipoComunicacao ? `<span class="badge badge-gray">${escapeHtml(av.tipoComunicacao)}</span>` : ''}
+                ${replicas > 0 ? `<span class="badge badge-amber" title="O TJGO gerou ${grupo.total} avisos idênticos (1 por advogado destinatário). Agrupados aqui — só 1 publicação será criada.">×${grupo.total}</span>` : ''}
                 ${datahora ? `<span style="font-size:11px;color:var(--uc-warm-gray);">${escapeHtml(datahora)}</span>` : ''}
                 ${av.valorCausa ? `<span style="font-size:11px;color:var(--uc-warm-gray);">R$ ${escapeHtml(av.valorCausa)}</span>` : ''}
               </div>
@@ -13609,10 +13630,13 @@ async function _mniShowAvisosModal(codigo, advogado, data) {
         </div>
       `;
     }).join('');
+    const totalRaw = data.avisos.length;
+    const totalUnicos = avisosUnicos.length;
     body = `
       <div class="status ok" style="background:#d4e8d4;color:#2a5a2a;border-left:3px solid var(--uc-green);padding:12px;border-radius:6px;margin-bottom:12px;">
-        <strong>✓ ${data.avisos.length} aviso(s) pendente(s)</strong> em ${escapeHtml(codigo)} · ${escapeHtml(advogado)} · ${data.elapsedMs}ms
-        ${data.avisosTotal > data.avisos.length ? `<br><small>Mostrando ${data.avisos.length} de ${data.avisosTotal}</small>` : ''}
+        <strong>✓ ${totalUnicos} aviso(s) pendente(s)</strong> em ${escapeHtml(codigo)} · ${escapeHtml(advogado)} · ${data.elapsedMs}ms
+        ${totalRaw > totalUnicos ? `<br><small>${totalRaw} avisos do TJGO agrupados em ${totalUnicos} únicos (o TJGO emite 1 aviso por advogado destinatário)</small>` : ''}
+        ${data.avisosTotal > totalRaw ? `<br><small>Mostrando ${totalRaw} de ${data.avisosTotal}</small>` : ''}
       </div>
       ${linhas}
       <p class="help-text" style="margin-top:12px;padding:8px 12px;background:#f4f1e8;border-left:3px solid var(--uc-gold);border-radius:5px;font-size:11px;">
