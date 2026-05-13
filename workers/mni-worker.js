@@ -355,7 +355,11 @@ async function consultarTeorComunicacao(conf, endpoint, { cpf, senha, idAviso, d
   //      a mensagem de fault sugere essa alternativa)
   const NS_TIPOS = 'http://www.cnj.jus.br/tipos-servico-intercomunicacao-2.2.2';
   const variantes = [
+    // Projudi/TJGO: faultstring revelou "O parâmetro IdentificadorAviso não foi informado"
+    { nome: 'IdentificadorAviso', body: `<tip:IdentificadorAviso>${escapeXml(idAviso)}</tip:IdentificadorAviso>` },
+    // Canônico CNJ MNI 2.2.2 (fallback pra outros tribunais)
     { nome: 'idsAviso', body: `<tip:idsAviso>${escapeXml(idAviso)}</tip:idsAviso>` },
+    // Alguns Projudi exigem o CNJ direto (a primeira faultstring listou)
     { nome: 'numeroProcesso', body: `<tip:numeroProcesso>${escapeXml(idAviso)}</tip:numeroProcesso>` }
   ];
 
@@ -403,6 +407,12 @@ async function consultarTeorComunicacao(conf, endpoint, { cpf, senha, idAviso, d
     }
 
     const parsed = parseTeorComunicacao(text);
+    // Se o servidor retornou sucesso=false dizendo "parâmetro X não foi informado",
+    // significa que esse nome de variante NÃO é o esperado — tenta a próxima.
+    if (parsed.sucesso === false && /(par[âa]metro|argumento)\s+\S+\s+(n[ãa]o\s+foi\s+informad|obrigat[óo]ri|inv[áa]lid)/i.test(parsed.mensagem || '')) {
+      tentativas[tentativas.length - 1].sucessoFalse = parsed.mensagem;
+      continue;
+    }
     const result = { sucesso: parsed.sucesso !== false, elapsedMs: elapsed, parametroUsado: v.nome, ...parsed, rawSize: text.length };
     if (debug) result.rawXml = text;
     if (debug) result.tentativas = tentativas;
