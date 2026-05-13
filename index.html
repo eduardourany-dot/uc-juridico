@@ -48,8 +48,8 @@ body{background:var(--uc-paper);color:var(--uc-graphite);font-size:15px;-webkit-
 .font-serif{font-family:'EB Garamond','Times New Roman',serif}
 .smallcaps{font-variant:small-caps;letter-spacing:0.08em}
 
-.app-shell{display:grid;grid-template-columns:260px 1fr;min-height:100vh}
-@media(max-width:768px){.app-shell{grid-template-columns:1fr;padding-bottom:70px}.sidebar{display:none !important}.mobile-nav{display:flex !important}}
+.app-shell{display:grid;grid-template-columns:260px minmax(0,1fr);min-height:100vh}
+@media(max-width:768px){.app-shell{grid-template-columns:minmax(0,1fr);padding-bottom:70px}.sidebar{display:none !important}.mobile-nav{display:flex !important}}
 .sidebar{background:white;border-right:1px solid var(--uc-line);padding:20px 0;position:sticky;top:0;height:100vh;overflow-y:auto;display:flex;flex-direction:column}
 [data-theme="dark"] .sidebar{background:#1c1a14}
 .sidebar-logo{padding:0 20px 20px;border-bottom:1px solid var(--uc-line-soft);margin-bottom:16px}
@@ -72,12 +72,18 @@ body{background:var(--uc-paper);color:var(--uc-graphite);font-size:15px;-webkit-
 
 /* Conteúdo principal · fluido em toda a janela.
    - Sem max-width fixo → ocupa toda a largura disponível ao lado da sidebar
+   - min-width:0 IMPORTANTE: impede que conteúdo intrínseco (botões em flex,
+     palavras longas) force o grid item a crescer além da viewport
    - Em telas >= 2200px aplica padding lateral maior pra evitar linhas longas
    - Em mobile reduz padding */
-.main-content{padding:24px 32px 60px;margin:0 auto;width:100%}
+.main-content{padding:24px 32px 60px;margin:0 auto;width:100%;min-width:0;overflow-x:hidden}
 @media(max-width:768px){.main-content{padding:16px 16px 30px}}
 @media(min-width:1600px){.main-content{padding:24px 48px 60px}}
 @media(min-width:2200px){.main-content{padding:24px 72px 60px}}
+
+/* Page header pode ter título longo + muitos botões → permite quebrar */
+.page-header{min-width:0}
+.page-title{overflow-wrap:anywhere;word-break:break-word}
 
 .page-header{display:flex;align-items:flex-end;justify-content:space-between;flex-wrap:wrap;gap:16px;margin-bottom:24px;padding-bottom:16px;border-bottom:1px solid var(--uc-line)}
 .page-title{font-family:'EB Garamond',serif;font-size:28px;font-weight:600;color:var(--uc-black);margin:0;line-height:1.2}
