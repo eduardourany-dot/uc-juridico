@@ -2972,6 +2972,7 @@ async function newProcessFlow() {
             description: mov.descricao || '',
             details: mov.complemento || '',
             type: 'movimento_mni',
+            mniIdentificador: mov.identificador || '',  // único do MNI, evita duplicatas
             createdAt: Date.now()
           };
           try { await DB.saveEvent(event); } catch (e) { console.warn('falha ao salvar evento MNI', e); }
@@ -3459,32 +3460,72 @@ function renderProcessEvents(p, events, notes) {
     return `
       <div class="empty-state">
         <h3 class="empty-state-title">Nenhum evento indexado</h3>
-        <p class="empty-state-msg">Importe um PDF do auto pela aba Ferramentas PDF e indexe-o. Os eventos detectados serão vinculados a este processo.</p>
+        <p class="empty-state-msg">Importe um PDF do auto pela aba Ferramentas PDF e indexe-o, ou clique em <strong>🔍 Buscar MNI</strong> pra puxar movimentos direto do tribunal.</p>
         <button class="btn btn-primary" onclick="importPdfToProcess()">📄 Importar PDF do auto</button>
       </div>
     `;
   }
-  const sorted = [...events].sort((a,b) => parseInt(a.eventNumber) - parseInt(b.eventNumber));
+  // Ordenação tolerante: MNI usa data ISO, PDF usa eventNumber numérico.
+  // Mais recentes primeiro pra MNI; sequencial pra PDF.
+  const sorted = [...events].sort((a, b) => {
+    const aMni = a.type === 'movimento_mni';
+    const bMni = b.type === 'movimento_mni';
+    if (aMni && bMni) return (b.date || '').localeCompare(a.date || ''); // mais recente primeiro
+    if (aMni) return -1; // MNI antes dos PDFs
+    if (bMni) return 1;
+    return parseInt(a.eventNumber) - parseInt(b.eventNumber); // PDFs por número
+  });
   return `
     <div class="flex justify-between items-center mb-3">
       <p class="text-sm" style="color: var(--uc-warm-gray);">${events.length} evento(s) · clique em um evento para ver detalhes ou adicionar nota</p>
-      <button class="btn btn-outline btn-sm" onclick="importPdfToProcess()">+ Importar mais peças</button>
+      <div class="flex gap-2 flex-wrap">
+        ${events.some(e => e.type === 'movimento_mni') ? `<button class="btn btn-ghost btn-sm" onclick="mniLimparMovimentosFlow('${p.id}')" title="Apaga todos os eventos vindos do MNI (mantém PDF importado e eventos manuais). Útil pra remover duplicatas antigas antes de re-importar.">🧹 Limpar movimentos MNI</button>` : ''}
+        ${p.cnj ? `<button class="btn btn-secondary btn-sm" onclick="mniBuscarProcessoFlow('${p.id}')">🔍 Atualizar via MNI</button>` : ''}
+        <button class="btn btn-outline btn-sm" onclick="importPdfToProcess()">+ Importar peças</button>
+      </div>
     </div>
     <div class="timeline">
       ${sorted.map(e => {
         const evNotes = notes.filter(n => n.eventId === e.id);
-        return `
-          <div class="timeline-event ${evNotes.length > 0 ? 'has-note' : ''}" onclick="openEventDetail('${e.id}')">
-            <div style="font-family: 'EB Garamond', serif; font-weight: 600; color: var(--uc-black); font-size: 16px;">
-              Evento ${escapeHtml(e.eventNumber)} · ${escapeHtml(e.type)}
-            </div>
-            <div style="font-size: 12px; color: var(--uc-warm-gray); margin-top: 2px;">
-              ${e.date ? escapeHtml(e.date) + ' · ' : ''}pgs ${e.startPage}–${e.endPage} (${e.pageCount} pgs)
-              ${evNotes.length > 0 ? ` · 📝 ${evNotes.length} nota(s)` : ''}
-            </div>
-          </div>
-        `;
+        return _renderEventoTimeline(e, evNotes.length);
       }).join('')}
+    </div>
+  `;
+}
+
+// Render tolerante a 2 fontes de evento:
+//   1) movimento_mni: título = descrição do movimento, sublinha = data + códigos
+//   2) PDF indexado: título = "Evento N · tipo", sublinha = data + páginas
+function _renderEventoTimeline(e, notesCount) {
+  const isMni = e.type === 'movimento_mni';
+  let titulo, subtitulo;
+  if (isMni) {
+    titulo = e.description || '(movimento sem descrição)';
+    const dataFmt = e.date ? e.date.replace('T', ' ').slice(0, 16) : '';
+    const code = (e.eventNumber || '').replace(/^MNI-/, '');
+    subtitulo = [dataFmt, code ? `cód. ${code}` : '', 'via MNI']
+      .filter(Boolean).join(' · ');
+  } else {
+    titulo = `Evento ${e.eventNumber || ''}${e.type ? ' · ' + e.type : ''}`;
+    const dataFmt = e.date || '';
+    const pgs = (e.startPage != null && e.endPage != null)
+      ? `pgs ${e.startPage}–${e.endPage}${e.pageCount ? ` (${e.pageCount} pgs)` : ''}`
+      : '';
+    subtitulo = [dataFmt, pgs].filter(Boolean).join(' · ');
+  }
+  const detalhesPreview = isMni && e.details
+    ? `<div style="font-size:12px;color:var(--uc-graphite);margin-top:4px;line-height:1.5;">${escapeHtml(e.details.slice(0, 240))}${e.details.length > 240 ? '…' : ''}</div>`
+    : '';
+  return `
+    <div class="timeline-event ${notesCount > 0 ? 'has-note' : ''}" onclick="openEventDetail('${e.id}')">
+      <div style="font-family: 'EB Garamond', serif; font-weight: 600; color: var(--uc-black); font-size: 16px;">
+        ${escapeHtml(titulo)}
+      </div>
+      <div style="font-size: 12px; color: var(--uc-warm-gray); margin-top: 2px;">
+        ${escapeHtml(subtitulo)}
+        ${notesCount > 0 ? ` · 📝 ${notesCount} nota(s)` : ''}
+      </div>
+      ${detalhesPreview}
     </div>
   `;
 }
@@ -4450,16 +4491,30 @@ async function openEventDetail(eventId) {
   const e = state._processView.events.find(x => x.id === eventId);
   if (!e) return;
   const evNotes = state._processView.notes.filter(n => n.eventId === eventId);
+  const isMni = e.type === 'movimento_mni';
   const modal = document.createElement('div');
   modal.className = 'modal-backdrop';
+  // Título e header tolerantes a formato MNI (movimento) vs PDF (evento numerado)
+  const titulo = isMni
+    ? (e.description || '(movimento sem descrição)')
+    : `Evento ${e.eventNumber || ''}`;
+  const headerHtml = isMni ? `
+    <div style="margin-bottom: 16px; font-size: 14px;">
+      ${e.date ? `<p><strong>Data:</strong> ${escapeHtml(e.date.replace('T', ' ').slice(0, 16))}</p>` : ''}
+      ${e.eventNumber ? `<p><strong>Código:</strong> <code>${escapeHtml(e.eventNumber.replace(/^MNI-/, ''))}</code> <small style="color:var(--uc-warm-gray);">· via MNI</small></p>` : ''}
+      ${e.details ? `<div style="margin-top:8px;padding:10px;background:var(--uc-cream);border-radius:5px;font-size:13px;white-space:pre-wrap;line-height:1.5;">${escapeHtml(e.details)}</div>` : ''}
+    </div>
+  ` : `
+    <div style="margin-bottom: 16px; font-size: 14px;">
+      <p><strong>Tipo:</strong> ${escapeHtml(e.type || '—')}</p>
+      ${e.date ? `<p><strong>Data:</strong> ${escapeHtml(e.date)}</p>` : ''}
+      ${(e.startPage != null && e.endPage != null) ? `<p><strong>Páginas:</strong> ${e.startPage}–${e.endPage}${e.pageCount ? ` (${e.pageCount} pgs)` : ''}</p>` : ''}
+    </div>
+  `;
   modal.innerHTML = `
     <div class="modal scroll-thin" style="max-width: 600px;">
-      <h3 class="modal-title">Evento ${escapeHtml(e.eventNumber)}</h3>
-      <div style="margin-bottom: 16px; font-size: 14px;">
-        <p><strong>Tipo:</strong> ${escapeHtml(e.type)}</p>
-        ${e.date ? `<p><strong>Data:</strong> ${escapeHtml(e.date)}</p>` : ''}
-        <p><strong>Páginas:</strong> ${e.startPage}–${e.endPage} (${e.pageCount} pgs)</p>
-      </div>
+      <h3 class="modal-title">${escapeHtml(titulo)}</h3>
+      ${headerHtml}
       <h4 class="font-serif font-semibold smallcaps mb-2" style="color: var(--uc-black);">Notas vinculadas</h4>
       ${evNotes.length === 0 ? `<p style="color: var(--uc-warm-gray); font-size: 13px;">Sem notas.</p>` :
         evNotes.map(n => `<div class="note-item"><div class="note-meta">${formatDateTime(n.createdAt)}</div><div style="white-space: pre-wrap;">${escapeHtml(n.text)}</div></div>`).join('')}
@@ -13586,6 +13641,30 @@ function _mniShowResultModal(p, codigo, advogadoUsado, data, elapsedTotal) {
   };
 }
 
+// Apaga TODOS os eventos do tipo 'movimento_mni' do processo.
+// Útil pra remover duplicatas antigas (anteriores à dedupe por identificador
+// implementada em MNI.2 chunk 2.1) antes de re-importar via 'Atualizar MNI'.
+async function mniLimparMovimentosFlow(processId) {
+  const eventos = await DB.getEventsByProcess(processId);
+  const mniEvents = eventos.filter(e => e.type === 'movimento_mni');
+  if (mniEvents.length === 0) {
+    toast('Nada pra limpar', 'Sem eventos MNI neste processo.', 'info');
+    return;
+  }
+  const ok = await confirmDialog('Limpar movimentos MNI?',
+    `Apaga os ${mniEvents.length} eventos vindos do MNI deste processo. Mantém PDFs importados e eventos manuais. Pra re-importar, clique em "🔍 Atualizar via MNI" depois.`,
+    true);
+  if (!ok) return;
+  let removidos = 0;
+  for (const e of mniEvents) {
+    try { await DB.deleteEvent(e.id); removidos++; } catch (err) { console.warn(err); }
+  }
+  toast('Movimentos MNI limpos', `${removidos} eventos removidos. Use "Atualizar via MNI" pra recarregar.`, 'success');
+  if (state.currentRoute === 'process' && state.currentProcessId === processId) {
+    renderProcessDetail();
+  }
+}
+
 // Aplica os dados retornados pelo MNI ao processo: merge inteligente que
 // preserva o que já existe e adiciona/atualiza o que veio do tribunal.
 //
@@ -13668,19 +13747,29 @@ async function mniAplicarMudancasFlow(processId, tribunalCodigo, data) {
   p.updatedAt = Date.now();
   await DB.saveProcess(p);
 
-  // --- Materializa movimentos como eventos (dedupe por chave) ---
+  // --- Materializa movimentos como eventos (dedupe por identificador único) ---
+  // Chave preferida: mniIdentificador (único por movimento no MNI). Fallback:
+  // eventNumber + date + descricao (pra eventos antigos sem identificador OU
+  // movimentos cujo MNI não retornou identificador). MNI manda 2 movimentos
+  // legítimos diferentes pra mesma data+codigo quando intimação é pra partes
+  // distintas — só o identificador distingue.
   const eventosAtuais = await DB.getEventsByProcess(p.id);
-  const existingKeys = new Set(eventosAtuais
-    .filter(e => e.type === 'movimento_mni')
-    .map(e => `${e.eventNumber || ''}::${e.date || ''}`));
+  const existingKeys = new Set();
+  for (const e of eventosAtuais) {
+    if (e.type !== 'movimento_mni') continue;
+    if (e.mniIdentificador) existingKeys.add('id:' + e.mniIdentificador);
+    // Fallback pra eventos antigos: inclui descricao no fingerprint
+    existingKeys.add('fp:' + (e.eventNumber || '') + '::' + (e.date || '') + '::' + (e.description || '').slice(0, 40));
+  }
   let novosEventos = 0;
   for (const mov of (data.movimentos || []).slice(0, 100)) {
     const eventNumber = 'MNI-' + (mov.codigoNacional || mov.codigoLocal || mov.identificador || '');
     const date = mov.dataIso || (mov.dataHora && mov.dataHora.length >= 8
       ? `${mov.dataHora.slice(0,4)}-${mov.dataHora.slice(4,6)}-${mov.dataHora.slice(6,8)}`
       : '');
-    const key = `${eventNumber}::${date}`;
-    if (existingKeys.has(key)) continue;
+    const idKey = mov.identificador ? 'id:' + mov.identificador : null;
+    const fpKey = 'fp:' + eventNumber + '::' + date + '::' + (mov.descricao || '').slice(0, 40);
+    if ((idKey && existingKeys.has(idKey)) || existingKeys.has(fpKey)) continue;
     try {
       await DB.saveEvent({
         id: uid(),
@@ -13690,9 +13779,11 @@ async function mniAplicarMudancasFlow(processId, tribunalCodigo, data) {
         description: mov.descricao || '',
         details: mov.complemento || '',
         type: 'movimento_mni',
+        mniIdentificador: mov.identificador || '',
         createdAt: Date.now()
       });
-      existingKeys.add(key);
+      if (idKey) existingKeys.add(idKey);
+      existingKeys.add(fpKey);
       novosEventos++;
     } catch (e) { console.warn('[MNI.2] falha ao criar evento', e); }
   }
