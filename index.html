@@ -70,8 +70,14 @@ body{background:var(--uc-paper);color:var(--uc-graphite);font-size:15px;-webkit-
 .mobile-nav-item svg{width:20px;height:20px}
 .mobile-nav-item span{font-size:10px;font-weight:500}
 
-.main-content{padding:24px 32px 60px;max-width:1400px;margin:0 auto;width:100%}
+/* Conteúdo principal · fluido em toda a janela.
+   - Sem max-width fixo → ocupa toda a largura disponível ao lado da sidebar
+   - Em telas >= 2200px aplica padding lateral maior pra evitar linhas longas
+   - Em mobile reduz padding */
+.main-content{padding:24px 32px 60px;margin:0 auto;width:100%}
 @media(max-width:768px){.main-content{padding:16px 16px 30px}}
+@media(min-width:1600px){.main-content{padding:24px 48px 60px}}
+@media(min-width:2200px){.main-content{padding:24px 72px 60px}}
 
 .page-header{display:flex;align-items:flex-end;justify-content:space-between;flex-wrap:wrap;gap:16px;margin-bottom:24px;padding-bottom:16px;border-bottom:1px solid var(--uc-line)}
 .page-title{font-family:'EB Garamond',serif;font-size:28px;font-weight:600;color:var(--uc-black);margin:0;line-height:1.2}
