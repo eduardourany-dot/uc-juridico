@@ -157,6 +157,10 @@ body{background:var(--uc-paper);color:var(--uc-graphite);font-size:15px;-webkit-
 @media(max-width:768px){.uc-bell{top:auto;bottom:85px;right:10px}.uc-bell-panel{top:auto;bottom:135px;right:10px;left:10px;width:auto;max-width:none}}
 
 .stat-card{background:var(--uc-cream);border:1px solid var(--uc-line);border-radius:8px;padding:16px}
+.stat-card-link{cursor:pointer;transition:all .15s;position:relative}
+.stat-card-link:hover{border-color:var(--uc-gold);background:#f0e9d6;transform:translateY(-1px)}
+.stat-card-link::after{content:'→';position:absolute;top:10px;right:12px;color:var(--uc-warm-gray);font-size:14px;opacity:.4;transition:opacity .15s}
+.stat-card-link:hover::after{opacity:1;color:var(--uc-gold)}
 .stat-label{font-size:11px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;color:var(--uc-warm-gray);margin-bottom:4px}
 .stat-value{font-family:'EB Garamond',serif;font-size:28px;font-weight:600;color:var(--uc-black);line-height:1}
 .stat-meta{font-size:12px;color:var(--uc-warm-gray);margin-top:4px}
@@ -3081,13 +3085,14 @@ async function renderProcessDetail() {
     <div class="detail-tabs scroll-thin">
       <button class="detail-tab ${state._processView.activeTab === 'overview' ? 'active' : ''}" onclick="setProcessTab('overview')">Visão geral</button>
       <button class="detail-tab ${state._processView.activeTab === 'cliente' ? 'active' : ''}" onclick="setProcessTab('cliente')">Cliente</button>
-      <button class="detail-tab ${state._processView.activeTab === 'events' ? 'active' : ''}" onclick="setProcessTab('events')">Eventos · ${events.length}</button>
-      <button class="detail-tab ${state._processView.activeTab === 'deadlines' ? 'active' : ''}" onclick="setProcessTab('deadlines')">Publicações · ${deadlines.filter(d => prazoEstaAtivo(d)).length}</button>
-      <button class="detail-tab ${state._processView.activeTab === 'jurisprudence' ? 'active' : ''}" onclick="setProcessTab('jurisprudence')">Jurisprudência · ${jurisprudence.length}</button>
-      <button class="detail-tab ${state._processView.activeTab === 'notes' ? 'active' : ''}" onclick="setProcessTab('notes')">Notas · ${notes.length}</button>
       <button class="detail-tab ${state._processView.activeTab === 'honorarios' ? 'active' : ''}" onclick="setProcessTab('honorarios')">Honorários · ${honorarios.length}</button>
       <button class="detail-tab ${state._processView.activeTab === 'compromissos' ? 'active' : ''}" onclick="setProcessTab('compromissos')">Compromissos · ${compromissos.length}</button>
       <button class="detail-tab ${state._processView.activeTab === 'peticoes' ? 'active' : ''}" onclick="setProcessTab('peticoes')">Petições · ${peticoes.length}</button>
+      ${/* Tabs 'atalho-cards' só aparecem quando ativas (acessadas via clique nos cards da visão geral). */ ''}
+      ${state._processView.activeTab === 'events' ? `<button class="detail-tab active" onclick="setProcessTab('events')">Eventos · ${events.length}</button>` : ''}
+      ${state._processView.activeTab === 'deadlines' ? `<button class="detail-tab active" onclick="setProcessTab('deadlines')">Publicações · ${deadlines.filter(d => prazoEstaAtivo(d)).length}</button>` : ''}
+      ${state._processView.activeTab === 'jurisprudence' ? `<button class="detail-tab active" onclick="setProcessTab('jurisprudence')">Jurisprudência · ${jurisprudence.length}</button>` : ''}
+      ${state._processView.activeTab === 'notes' ? `<button class="detail-tab active" onclick="setProcessTab('notes')">Notas · ${notes.length}</button>` : ''}
       ${state._processView.activeTab === 'analysis' ? `<button class="detail-tab active" onclick="setProcessTab('analysis')">Análise IA</button>` : ''}
     </div>
 
@@ -3276,10 +3281,10 @@ function renderProcessOverview(p, events, deadlines, notes, jurisprudence) {
 
   return `
     <div class="grid gap-4 mb-4" style="grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));">
-      <div class="stat-card"><div class="stat-label">Eventos</div><div class="stat-value">${events.length}</div></div>
-      <div class="stat-card"><div class="stat-label">Publicações ativas</div><div class="stat-value">${activeDeadlines.length}</div></div>
-      <div class="stat-card"><div class="stat-label">Jurisprudência</div><div class="stat-value">${jurisprudence.length}</div></div>
-      <div class="stat-card"><div class="stat-label">Notas</div><div class="stat-value">${notes.length}</div></div>
+      <div class="stat-card stat-card-link" onclick="setProcessTab('events')" title="Ver eventos do processo"><div class="stat-label">Eventos</div><div class="stat-value">${events.length}</div></div>
+      <div class="stat-card stat-card-link" onclick="setProcessTab('deadlines')" title="Ver publicações do processo"><div class="stat-label">Publicações ativas</div><div class="stat-value">${activeDeadlines.length}</div></div>
+      <div class="stat-card stat-card-link" onclick="setProcessTab('jurisprudence')" title="Ver jurisprudência vinculada"><div class="stat-label">Jurisprudência</div><div class="stat-value">${jurisprudence.length}</div></div>
+      <div class="stat-card stat-card-link" onclick="setProcessTab('notes')" title="Ver notas do processo"><div class="stat-label">Notas</div><div class="stat-value">${notes.length}</div></div>
     </div>
 
     ${nextDeadline ? `
