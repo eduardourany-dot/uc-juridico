@@ -81,9 +81,11 @@ body{background:var(--uc-paper);color:var(--uc-graphite);font-size:15px;-webkit-
 @media(min-width:1600px){.main-content{padding:24px 48px 60px}}
 @media(min-width:2200px){.main-content{padding:24px 72px 60px}}
 
-/* Page header pode ter título longo + muitos botões → permite quebrar */
-.page-header{min-width:0}
-.page-title{overflow-wrap:anywhere;word-break:break-word}
+/* Page header: título com largura mínima razoável (400px = quebra cedo
+   se há muitos botões à direita). Quando não cabe junto com botões,
+   flex-wrap empurra botões pra linha de baixo e título ocupa 100%. */
+.page-header > div:first-child{flex:1 1 400px !important;min-width:0}
+.page-title{overflow-wrap:break-word}
 
 .page-header{display:flex;align-items:flex-end;justify-content:space-between;flex-wrap:wrap;gap:16px;margin-bottom:24px;padding-bottom:16px;border-bottom:1px solid var(--uc-line)}
 .page-title{font-family:'EB Garamond',serif;font-size:28px;font-weight:600;color:var(--uc-black);margin:0;line-height:1.2}
