@@ -13536,10 +13536,11 @@ function _mniShowResultModal(p, codigo, advogadoUsado, data, elapsedTotal) {
         </table>
       ` : ''}
 
-      <p class="help-text" style="margin-top:16px;padding:8px 12px;background:#f5e3c4;border-left:3px solid var(--uc-amber);border-radius:5px;">
-        ℹ <strong>Próximo chunk MNI.2 (em breve):</strong> botão "Aplicar mudanças" vai mesclar
-        partes/movimentos/classe ao processo automaticamente, preservando notas. Por ora isso é
-        só preview.
+      <p class="help-text" style="margin-top:16px;padding:8px 12px;background:#f4f1e8;border-left:3px solid var(--uc-gold);border-radius:5px;">
+        ℹ <strong>Aplicar mudanças</strong> mescla partes (dedupe por CPF/CNPJ), advogados
+        (dedupe por OAB) e cria eventos novos pros movimentos. Campos top-level
+        (tribunal, local, valor, data ajuizamento) só sobrescrevem se estiverem vazios.
+        Notas e eventos manuais são preservados.
       </p>
     `;
   }
@@ -13551,9 +13552,10 @@ function _mniShowResultModal(p, codigo, advogadoUsado, data, elapsedTotal) {
         Credencial usada: <strong>${escapeHtml(advogadoUsado || '?')}</strong>
       </p>
       <div>${body}</div>
-      <div class="flex gap-2" style="margin-top: 16px;">
-        <button class="btn btn-outline" id="_mniResultClose" style="flex:1;">Fechar</button>
-        ${sucesso ? `<button class="btn btn-ghost btn-sm" id="_mniCopyJson" style="flex:0;">📋 Copiar JSON</button>` : ''}
+      <div class="flex gap-2" style="margin-top: 16px;flex-wrap:wrap;">
+        <button class="btn btn-outline" id="_mniResultClose" style="flex:1;min-width:120px;">Fechar</button>
+        ${sucesso ? `<button class="btn btn-ghost btn-sm" id="_mniCopyJson">📋 JSON</button>` : ''}
+        ${sucesso ? `<button class="btn btn-primary" id="_mniApplyChanges" style="flex:2;min-width:200px;">✓ Aplicar mudanças no processo</button>` : ''}
       </div>
     </div>
   `;
@@ -13563,6 +13565,145 @@ function _mniShowResultModal(p, codigo, advogadoUsado, data, elapsedTotal) {
   if (copyBtn) copyBtn.onclick = async () => {
     try { await navigator.clipboard.writeText(JSON.stringify(data, null, 2)); toast('JSON copiado', '', 'info'); } catch {}
   };
+  const applyBtn = $('_mniApplyChanges');
+  if (applyBtn) applyBtn.onclick = async () => {
+    applyBtn.disabled = true;
+    applyBtn.innerHTML = '<span style="display:inline-block;border:2px solid #d4cfc0;border-top-color:var(--uc-gold);border-radius:50%;width:12px;height:12px;animation:spin 0.8s linear infinite;vertical-align:-2px;margin-right:6px;"></span> Aplicando…';
+    try {
+      const resumo = await mniAplicarMudancasFlow(p.id, codigo, data);
+      modal.remove();
+      toast('✓ Atualizado via MNI', resumo, 'success');
+      // Re-render do detalhe do processo se ainda estiver nele
+      if (state.currentRoute === 'process' && state.currentProcessId === p.id) {
+        renderProcessDetail();
+      }
+    } catch (e) {
+      console.error('[MNI.2] apply error', e);
+      applyBtn.disabled = false;
+      applyBtn.innerHTML = '✓ Aplicar mudanças no processo';
+      toast('Falha ao aplicar', String(e.message || e), 'error');
+    }
+  };
+}
+
+// Aplica os dados retornados pelo MNI ao processo: merge inteligente que
+// preserva o que já existe e adiciona/atualiza o que veio do tribunal.
+//
+// Regras:
+// - Partes: dedupe por CPF/CNPJ (preferido) ou nome. Adiciona novas, não remove existentes.
+// - Advogados: dedupe por OAB. Mesma lógica.
+// - Movimentos: vira evento (tipo 'movimento_mni'). Dedupe por (codigoNacional|codigoLocal + data).
+// - Campos top-level (tribunal, localTramitacao, valorCausa, dataAjuizamento):
+//   só preenche se estiver vazio. Não sobrescreve dados editados manualmente.
+// - p.mniData: substitui completo (metadata sempre é a do MNI mais recente).
+// - p.mniLastSync: atualiza pra now.
+//
+// Retorna string resumo das mudanças aplicadas (ex: "+2 partes, +5 advs, +13 movs").
+async function mniAplicarMudancasFlow(processId, tribunalCodigo, data) {
+  const p = await DB.getProcess(processId);
+  if (!p) throw new Error('Processo não encontrado');
+
+  // --- Merge partes/advogados ---
+  const { partes: novasPartes, advogados: novosAdvs } = _mniConvertPartes(data.partes || []);
+  const mergedPartes = {
+    ativo: [...(p.partes?.ativo || [])],
+    passivo: [...(p.partes?.passivo || [])]
+  };
+  const mergedAdvs = {
+    ativo: [...(p.advogados?.ativo || [])],
+    passivo: [...(p.advogados?.passivo || [])]
+  };
+
+  let novasPartesCount = 0;
+  let novosAdvsCount = 0;
+  for (const polo of ['ativo', 'passivo']) {
+    for (const parte of (novasPartes[polo] || [])) {
+      const existe = mergedPartes[polo].some(x => {
+        if (typeof x === 'string') return x === parte.nome;
+        const xDoc = x.cpfCnpj || '';
+        const pDoc = parte.cpfCnpj || '';
+        if (xDoc && pDoc && xDoc === pDoc) return true;
+        return x.nome === parte.nome;
+      });
+      if (!existe) { mergedPartes[polo].push(parte); novasPartesCount++; }
+    }
+    for (const adv of (novosAdvs[polo] || [])) {
+      const existe = mergedAdvs[polo].some(x => x.oab === adv.oab && adv.oab);
+      if (!existe) { mergedAdvs[polo].push(adv); novosAdvsCount++; }
+    }
+  }
+  p.partes = mergedPartes;
+  p.advogados = mergedAdvs;
+
+  // --- Campos top-level (só se vazio) ---
+  let camposAtualizados = 0;
+  if (tribunalCodigo && !p.tribunal) { p.tribunal = tribunalCodigo; camposAtualizados++; }
+  if (data.orgaoJulgador && !p.localTramitacao) { p.localTramitacao = data.orgaoJulgador; camposAtualizados++; }
+  if (data.valorCausa && !p.valorCausa) {
+    const v = Number(String(data.valorCausa).replace(',', '.'));
+    if (!isNaN(v)) { p.valorCausa = v; camposAtualizados++; }
+  }
+  if (data.dataAjuizamento && !p.dataAjuizamento) { p.dataAjuizamento = data.dataAjuizamento; camposAtualizados++; }
+  // Comarca: tenta extrair de serventia/orgaoJulgador
+  if (!p.comarca) {
+    const comarca = _mniExtrairComarca(data.serventia || data.orgaoJulgador || '');
+    if (comarca) { p.comarca = comarca; camposAtualizados++; }
+  }
+
+  // --- mniData: substitui completo ---
+  p.mniData = {
+    tribunal: tribunalCodigo,
+    classe: data.classe || null,
+    assunto: data.assunto || null,
+    orgaoJulgador: data.orgaoJulgador || null,
+    serventia: data.serventia || null,
+    dataAjuizamento: data.dataAjuizamento || null,
+    valorCausa: data.valorCausa || null,
+    magistradoAtuante: data.magistradoAtuante || null,
+    processoFase: data.processoFase || null,
+    processoStatus: data.processoStatus || null,
+    movimentosTotal: data.movimentosTotal || 0
+  };
+  p.mniLastSync = Date.now();
+  p.updatedAt = Date.now();
+  await DB.saveProcess(p);
+
+  // --- Materializa movimentos como eventos (dedupe por chave) ---
+  const eventosAtuais = await DB.getEventsByProcess(p.id);
+  const existingKeys = new Set(eventosAtuais
+    .filter(e => e.type === 'movimento_mni')
+    .map(e => `${e.eventNumber || ''}::${e.date || ''}`));
+  let novosEventos = 0;
+  for (const mov of (data.movimentos || []).slice(0, 100)) {
+    const eventNumber = 'MNI-' + (mov.codigoNacional || mov.codigoLocal || mov.identificador || '');
+    const date = mov.dataIso || (mov.dataHora && mov.dataHora.length >= 8
+      ? `${mov.dataHora.slice(0,4)}-${mov.dataHora.slice(4,6)}-${mov.dataHora.slice(6,8)}`
+      : '');
+    const key = `${eventNumber}::${date}`;
+    if (existingKeys.has(key)) continue;
+    try {
+      await DB.saveEvent({
+        id: uid(),
+        processId: p.id,
+        eventNumber,
+        date,
+        description: mov.descricao || '',
+        details: mov.complemento || '',
+        type: 'movimento_mni',
+        createdAt: Date.now()
+      });
+      existingKeys.add(key);
+      novosEventos++;
+    } catch (e) { console.warn('[MNI.2] falha ao criar evento', e); }
+  }
+
+  // Resumo legível
+  const partes = [];
+  if (novasPartesCount) partes.push(`+${novasPartesCount} parte${novasPartesCount > 1 ? 's' : ''}`);
+  if (novosAdvsCount) partes.push(`+${novosAdvsCount} advogado${novosAdvsCount > 1 ? 's' : ''}`);
+  if (novosEventos) partes.push(`+${novosEventos} movimento${novosEventos > 1 ? 's' : ''}`);
+  if (camposAtualizados) partes.push(`${camposAtualizados} campo${camposAtualizados > 1 ? 's' : ''} preenchido${camposAtualizados > 1 ? 's' : ''}`);
+  return partes.length ? partes.join(' · ') : 'Nenhuma mudança aplicada — dados já estavam em dia.';
 }
 
 async function setTheme(theme) {
