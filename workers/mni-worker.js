@@ -1,5 +1,5 @@
 // UC Jurídico — MNI Worker genérico (multi-tribunal)
-// Versão: 0.5.0 · sprint MNI.1 (registry expandido)
+// Versão: 0.6.0 · sprint MNI.3 (consultarAvisosPendentes)
 //
 // Roteia chamadas SOAP/MNI 2.2.2 pra múltiplos tribunais via registry interno.
 // Parser validado contra TJGO/Projudi.
@@ -13,6 +13,7 @@
 //
 // Endpoints (POST JSON):
 //   { tribunal: "TJGO", operacao: "consultarProcesso", cnj, cpf, senha, debug?, grau? (1|2) }
+//   { tribunal: "TJGO", operacao: "consultarAvisosPendentes", cpf, senha, dataReferencia? (YYYYMMDD), debug? }
 //   { tribunal: "TRF1", operacao: "health" }
 //   { operacao: "listarTribunais" }
 //   { operacao: "detectarPorCnj", cnj: "0000000-00.0000.0.00.0000" }
@@ -135,10 +136,10 @@ export default {
       const validados = codigos.filter(c => TRIBUNAIS_REGISTRY[c].validado);
       const naoSuportados = codigos.filter(c => TRIBUNAIS_REGISTRY[c].naoSuportado);
       return json({
-        worker: 'uc-mni', versao: '0.5.0',
+        worker: 'uc-mni', versao: '0.6.0',
         total: codigos.length,
         validados, naoSuportados,
-        operacoes: ['consultarProcesso', 'health', 'listarTribunais', 'detectarPorCnj']
+        operacoes: ['consultarProcesso', 'consultarAvisosPendentes', 'health', 'listarTribunais', 'detectarPorCnj']
       }, 200, corsHeaders);
     }
 
@@ -189,6 +190,7 @@ export default {
     const cpf = String(body.cpf || '').replace(/\D/g, '');
     const senha = String(body.senha || '');
     const debug = !!body.debug;
+    const dataReferencia = String(body.dataReferencia || '').replace(/\D/g, ''); // YYYYMMDD opcional
 
     if (!cpf || !senha) return json({ error: 'cpf_senha_obrigatorios' }, 400, corsHeaders);
 
@@ -196,6 +198,12 @@ export default {
       if (operacao === 'consultarProcesso') {
         if (!cnj) return json({ error: 'cnj_obrigatorio' }, 400, corsHeaders);
         const result = await consultarProcesso(conf, endpoint, { cnj, cpf, senha, debug });
+        result.tribunal = codigo;
+        result.grau = grau;
+        return json(result, 200, corsHeaders);
+      }
+      if (operacao === 'consultarAvisosPendentes') {
+        const result = await consultarAvisosPendentes(conf, endpoint, { cpf, senha, debug, dataReferencia });
         result.tribunal = codigo;
         result.grau = grau;
         return json(result, 200, corsHeaders);
@@ -277,6 +285,113 @@ async function consultarProcesso(conf, endpoint, { cnj, cpf, senha, debug }) {
   const result = { sucesso: parsed.sucesso !== false, elapsedMs: elapsed, ...parsed, rawSize: text.length };
   if (debug) result.rawXml = text;
   return result;
+}
+
+// ============================================================
+// consultarAvisosPendentes — intimações pendentes do advogado
+// ============================================================
+// Operação MNI 2.2.2. Não precisa de CNJ — retorna TODOS os avisos
+// pendentes do advogado (CPF) no tribunal. Parser tolerante (schema
+// varia bastante entre tribunais).
+async function consultarAvisosPendentes(conf, endpoint, { cpf, senha, debug, dataReferencia }) {
+  // Parâmetros padrão MNI: idConsultante + senhaConsultante. Alguns
+  // tribunais aceitam dataReferencia (YYYYMMDD) pra filtrar a partir de uma data.
+  const params = `
+    <idConsultante>${escapeXml(cpf)}</idConsultante>
+    <senhaConsultante>${escapeXml(senha)}</senhaConsultante>
+    ${dataReferencia ? `<dataReferencia>${escapeXml(dataReferencia)}</dataReferencia>` : ''}
+  `;
+  const envelope = buildEnvelope(conf.namespace, 'consultarAvisosPendentes', params);
+
+  const t0 = Date.now();
+  const resp = await fetch(endpoint, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'text/xml; charset=utf-8',
+      'SOAPAction': conf.soapAction === '' || conf.soapAction == null ? '""' : `"${conf.soapAction}"`,
+      'User-Agent': 'UC-Juridico-MNI/0.6'
+    },
+    body: envelope
+  });
+  const elapsed = Date.now() - t0;
+  const text = await resp.text();
+
+  if (!resp.ok) {
+    return { sucesso: false, erro: 'http_' + resp.status, httpStatus: resp.status, elapsedMs: elapsed, raw: text.slice(0, 4000) };
+  }
+  const fault = extractFault(text);
+  if (fault) {
+    return { sucesso: false, erro: 'soap_fault', mensagem: fault, elapsedMs: elapsed, raw: text.slice(0, 4000) };
+  }
+  const parsed = parseAvisosPendentes(text);
+  const result = { sucesso: parsed.sucesso !== false, elapsedMs: elapsed, ...parsed, rawSize: text.length };
+  if (debug) result.rawXml = text;
+  return result;
+}
+
+// Parser tolerante de consultarAvisosPendentesResposta. Schema típico:
+//   <aviso>
+//     <numeroProcesso>...</numeroProcesso>
+//     <comunicacao idComunicacao="...">
+//       <siglaOrgao>...</siglaOrgao> <nomeOrgao>...</nomeOrgao>
+//       <tipoComunicacao>...</tipoComunicacao>
+//       <dataDisponibilizacao>YYYYMMDD</dataDisponibilizacao>
+//       <prazo>15</prazo> <destinatario>...</destinatario>
+//       <teor>...</teor>
+//     </comunicacao>
+//   </aviso>
+// Variações: alguns colocam tudo como atributo, outros como tag. Pega o que der.
+function parseAvisosPendentes(xml) {
+  const sucessoTag = tagText(xml, 'sucesso');
+  const mensagem = tagText(xml, 'mensagem');
+  if (sucessoTag.toLowerCase() === 'false') {
+    return { sucesso: false, mensagem: mensagem || '(sem mensagem)', avisos: [], avisosTotal: 0 };
+  }
+  const avisos = [];
+  // Cada <aviso> ... </aviso> (com ou sem prefixo de namespace)
+  const avisoBlocks = xml.match(/<(?:\w+:)?aviso\b(?:[^>]*\/>|[^>]*>[\s\S]*?<\/(?:\w+:)?aviso>)/gi) || [];
+  for (const b of avisoBlocks) {
+    const numeroProcesso = tagText(b, 'numeroProcesso')
+      || (b.match(/\bnumeroProcesso="([^"]*)"/) || [])[1] || '';
+    // Bloco de comunicação (pode estar inline no <aviso> ou aninhado)
+    const comBlock = (b.match(/<(?:\w+:)?comunicacao\b(?:[^>]*\/>|[^>]*>[\s\S]*?<\/(?:\w+:)?comunicacao>)/i) || [b])[0];
+    const idComunicacao = (comBlock.match(/\bidComunicacao="([^"]*)"/) || [])[1]
+      || tagText(comBlock, 'idComunicacao') || '';
+    const siglaOrgao = (comBlock.match(/\bsiglaOrgao="([^"]*)"/) || [])[1] || tagText(comBlock, 'siglaOrgao') || '';
+    const nomeOrgao = (comBlock.match(/\bnomeOrgao="([^"]*)"/) || [])[1] || tagText(comBlock, 'nomeOrgao') || tagText(b, 'nomeOrgao') || '';
+    const tipoComunicacao = (comBlock.match(/\btipoComunicacao="([^"]*)"/) || [])[1]
+      || tagText(comBlock, 'tipoComunicacao') || tagText(b, 'tipoComunicacao') || '';
+    const dataDispRaw = (comBlock.match(/\bdataDisponibilizacao="([^"]*)"/) || [])[1]
+      || tagText(comBlock, 'dataDisponibilizacao') || tagText(b, 'dataDisponibilizacao') || '';
+    const prazoRaw = (comBlock.match(/\bprazo="([^"]*)"/) || [])[1] || tagText(comBlock, 'prazo') || tagText(b, 'prazo') || '';
+    const destinatario = (comBlock.match(/\bdestinatario="([^"]*)"/) || [])[1]
+      || tagText(comBlock, 'destinatario') || tagText(b, 'destinatario') || '';
+    const meio = (comBlock.match(/\bmeio="([^"]*)"/) || [])[1] || tagText(comBlock, 'meio') || '';
+    // Teor: texto, base64 ou referência. Limita pra não estourar resposta.
+    const teorRaw = tagText(comBlock, 'teor') || tagText(comBlock, 'teorComunicacao') || tagText(b, 'teor') || '';
+    const teor = _decodeXmlEntities(teorRaw).slice(0, 4000);
+
+    // Datas
+    const dataDisp = dataDispRaw && /^\d{8}/.test(dataDispRaw.replace(/\D/g, ''))
+      ? (() => { const d = dataDispRaw.replace(/\D/g, ''); return `${d.slice(0,4)}-${d.slice(4,6)}-${d.slice(6,8)}`; })()
+      : dataDispRaw;
+
+    avisos.push({
+      idComunicacao,
+      numeroProcesso,
+      siglaOrgao,
+      nomeOrgao,
+      tipoComunicacao,
+      dataDisponibilizacao: dataDisp,
+      prazo: prazoRaw ? Number(String(prazoRaw).replace(/\D/g, '')) || prazoRaw : '',
+      destinatario,
+      meio,
+      teor
+    });
+  }
+  // Ordena por data desc
+  avisos.sort((a, b) => (b.dataDisponibilizacao || '').localeCompare(a.dataDisponibilizacao || ''));
+  return { sucesso: true, avisos: avisos.slice(0, 200), avisosTotal: avisos.length };
 }
 
 // ============================================================
