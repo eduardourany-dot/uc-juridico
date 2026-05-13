@@ -3387,9 +3387,14 @@ function renderProcessOverview(p, events, deadlines, notes, jurisprudence) {
     <div class="card mb-4">
       <div class="flex justify-between items-center mb-3">
         <h3 class="font-serif text-lg font-semibold smallcaps" style="color: var(--uc-black);">Partes e advogados</h3>
-        <button class="btn btn-ghost btn-sm" onclick="djenReExtractParties('${p.id}')" title="Re-extrair partes e advogados de todas as publicações DJEN já importadas para este processo">🔄 Re-extrair</button>
+        ${p.cnj
+          ? `<button class="btn btn-ghost btn-sm" onclick="mniBuscarProcessoFlow('${p.id}')" title="Atualizar partes, advogados e movimentos consultando o tribunal via SOAP/MNI">🔍 Atualizar via MNI</button>`
+          : `<button class="btn btn-ghost btn-sm" onclick="djenReExtractParties('${p.id}')" title="Re-extrair partes e advogados do texto das publicações DJEN">🔄 Re-extrair (DJEN)</button>`
+        }
       </div>
-      <p class="help-text" style="margin-bottom: 10px;">Extraído automaticamente do texto das publicações DJEN. Pode estar incompleto se nenhuma publicação relevante foi importada ainda.</p>
+      <p class="help-text" style="margin-bottom: 10px;">${p.mniLastSync
+        ? `Trazido do tribunal via MNI em ${formatDate(p.mniLastSync, { relative: true })}.`
+        : 'Extraído automaticamente do texto das publicações DJEN. Pode estar incompleto se nenhuma publicação relevante foi importada ainda.'}</p>
       ${p.partes?.ativo?.length ? `
         <div style="margin-bottom: 10px;">
           <div style="color: var(--uc-warm-gray); font-size: 11px; font-variant: small-caps; letter-spacing: 0.06em; margin-bottom: 4px;">Polo Ativo</div>
@@ -3420,11 +3425,14 @@ function renderProcessOverview(p, events, deadlines, notes, jurisprudence) {
     ` : `
     ${p.cnj ? `
     <div class="card mb-4" style="background: var(--uc-cream); border: 1px dashed var(--uc-line);">
-      <div style="display: flex; align-items: center; justify-content: space-between; gap: 10px;">
-        <div style="font-size: 13px; color: var(--uc-graphite);">
-          <strong>Partes e advogados ainda não extraídos.</strong> Quando uma publicação DJEN deste processo for importada, partes (POLO ATIVO/PASSIVO) e advogados (com OAB) serão extraídos automaticamente do texto.
+      <div style="display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap;">
+        <div style="font-size: 13px; color: var(--uc-graphite); flex: 1; min-width: 240px;">
+          <strong>Partes e advogados ainda não cadastrados.</strong> Busque direto no tribunal via MNI (mais completo) ou aguarde extração automática quando uma publicação DJEN deste processo for importada.
         </div>
-        <button class="btn btn-outline btn-sm" onclick="djenReExtractParties('${p.id}')" style="white-space: nowrap;">🔄 Tentar extrair agora</button>
+        <div class="flex gap-2 flex-wrap">
+          <button class="btn btn-primary btn-sm" onclick="mniBuscarProcessoFlow('${p.id}')" style="white-space: nowrap;">🔍 Buscar via MNI</button>
+          <button class="btn btn-outline btn-sm" onclick="djenReExtractParties('${p.id}')" style="white-space: nowrap;">🔄 Tentar via DJEN</button>
+        </div>
       </div>
     </div>
     ` : ''}
