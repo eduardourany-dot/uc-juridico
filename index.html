@@ -13577,24 +13577,32 @@ async function _mniShowAvisosModal(codigo, advogado, data) {
       const vinculo = proc
         ? `<span class="badge badge-green">vinculável: ${escapeHtml(proc.name.slice(0, 30))}</span>`
         : (cnjNorm ? `<span class="badge badge-amber">processo não cadastrado</span>` : `<span class="badge badge-gray">sem CNJ</span>`);
-      const teorPreview = av.teor ? `<div style="font-size:11px;color:var(--uc-graphite);margin-top:4px;line-height:1.5;">${escapeHtml(av.teor.slice(0, 280))}${av.teor.length > 280 ? '…' : ''}</div>` : '';
+      const assuntoTxt = av.assunto?.descricao || '';
+      const datahora = [av.dataDisponibilizacao, av.horaDisponibilizacao].filter(Boolean).join(' ');
+      const metaLinhas = [];
+      if (assuntoTxt) metaLinhas.push(escapeHtml(assuntoTxt));
+      const linha2 = [av.nomeOrgao, av.processoFase ? 'fase: ' + av.processoFase : '', av.processoStatus ? 'status: ' + av.processoStatus : '']
+        .filter(Boolean).map(escapeHtml).join(' · ');
+      if (linha2) metaLinhas.push(linha2);
+      if (av.magistradoAtuante) metaLinhas.push('<em>' + escapeHtml(av.magistradoAtuante) + '</em>');
+      if (av.destinatario) metaLinhas.push('destinatário: ' + escapeHtml(av.destinatario));
       const acaoBtn = proc
-        ? `<button class="btn btn-primary btn-sm" data-acao="vincular" data-idx="${i}" data-proc="${proc.id}">⏰ Criar prazo</button>`
+        ? `<button class="btn btn-primary btn-sm" data-acao="vincular" data-idx="${i}" data-proc="${proc.id}">⏰ Criar publicação</button>`
         : (cnjNorm ? `<button class="btn btn-outline btn-sm" data-acao="cadastrar" data-idx="${i}">+ Cadastrar processo</button>` : '');
       return `
         <div class="card" style="background:var(--uc-cream);padding:10px;margin-bottom:8px;">
           <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:flex-start;">
-            <div style="flex:1;min-width:200px;">
-              <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:4px;">
+            <div style="flex:1;min-width:240px;">
+              <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:4px;">
                 <span class="process-cnj" style="font-size:11px;font-weight:600;">${escapeHtml(av.numeroProcesso || '(sem CNJ)')}</span>
                 ${vinculo}
                 ${av.tipoComunicacao ? `<span class="badge badge-gray">${escapeHtml(av.tipoComunicacao)}</span>` : ''}
-                ${av.prazo ? `<span class="badge badge-amber">prazo ${escapeHtml(String(av.prazo))} d</span>` : ''}
+                ${datahora ? `<span style="font-size:11px;color:var(--uc-warm-gray);">${escapeHtml(datahora)}</span>` : ''}
+                ${av.valorCausa ? `<span style="font-size:11px;color:var(--uc-warm-gray);">R$ ${escapeHtml(av.valorCausa)}</span>` : ''}
               </div>
-              <div style="font-size:12px;color:var(--uc-warm-gray);">
-                ${av.dataDisponibilizacao ? escapeHtml(av.dataDisponibilizacao) + ' · ' : ''}${escapeHtml(av.nomeOrgao || av.siglaOrgao || '')}${av.destinatario ? ' · ' + escapeHtml(av.destinatario) : ''}
+              <div style="font-size:12px;color:var(--uc-graphite);line-height:1.5;">
+                ${metaLinhas.join('<br>')}
               </div>
-              ${teorPreview}
             </div>
             <div>${acaoBtn}</div>
           </div>
@@ -13608,7 +13616,7 @@ async function _mniShowAvisosModal(codigo, advogado, data) {
       </div>
       ${linhas}
       <p class="help-text" style="margin-top:12px;padding:8px 12px;background:#f4f1e8;border-left:3px solid var(--uc-gold);border-radius:5px;font-size:11px;">
-        ℹ "Criar prazo" calcula a data fatal a partir da disponibilização + dias do prazo (regra da Lei 11.419/2006) e cria uma publicação vinculada ao processo. Tribunal usado pra contagem de dias úteis: ${escapeHtml(codigo)}.
+        ℹ "Criar publicação" abre um formulário com o tipo e a data já preenchidos — você só informa quantos dias é o prazo. O sistema calcula a data fatal (regra da Lei 11.419/2006, dias úteis pelo ${escapeHtml(codigo)}) e cria a publicação vinculada ao processo. O Projudi não envia o prazo nem o teor neste serviço — esses ficam por sua conta (ou consultarTeorComunicacao no futuro).
       </p>
     `;
   }
@@ -13659,58 +13667,76 @@ async function _mniShowAvisosModal(codigo, advogado, data) {
 }
 
 // Cria uma publicação (deadline) vinculada ao processo a partir de um aviso MNI.
+// Como o Projudi não envia o prazo, abre um modal pra o user informar os dias.
 async function _mniCriarPrazoDeAviso(processId, aviso, tribunalCodigo) {
   const p = await DB.getProcess(processId);
   if (!p) { toast('Processo não encontrado', '', 'error'); return; }
-  const desc = aviso.tipoComunicacao || 'Intimação MNI';
-  const prazoDias = Number(aviso.prazo) || 15;
-  let deadlineDate, diario = null;
+
+  // Dedupe por idComunicacao
+  const existentes = await DB.getDeadlinesByProcess(processId);
+  if (aviso.idComunicacao && existentes.some(x => x.mniIdComunicacao === aviso.idComunicacao)) {
+    toast('Publicação já existe', 'Esse aviso já foi importado antes.', 'info');
+    return;
+  }
+
   const dispISO = aviso.dataDisponibilizacao || '';
-  if (dispISO && /^\d{4}-\d{2}-\d{2}$/.test(dispISO) && typeof calcularDataFatal === 'function') {
+  const descSugerida = [aviso.tipoComunicacao, aviso.assunto?.descricao ? '— ' + aviso.assunto.descricao.split(/\s*[→>]\s*/).pop() : '']
+    .filter(Boolean).join(' ').slice(0, 100);
+
+  const r = await showModal('Criar publicação a partir do aviso MNI', [
+    { label: 'Descrição', default: descSugerida, placeholder: 'Ex: Intimação — Procedimento Comum' },
+    { label: 'Data da disponibilização', type: 'date', default: dispISO },
+    { label: 'Prazo (dias)', type: 'number', default: '15', min: '1', max: '365', help: 'O Projudi não envia o prazo — informe conforme a peça intimada.' },
+    { label: 'Unidade do prazo', type: 'select', default: 'UTEIS', options: [
+      { value: 'UTEIS', label: 'Dias úteis' }, { value: 'CORRIDOS', label: 'Dias corridos' }
+    ]},
+    { label: 'Prazo em dobro (Fazenda/MP/Defensoria)', type: 'checkbox', default: false }
+  ], { confirmLabel: 'Criar publicação', intro: `Processo <strong>${escapeHtml(aviso.numeroProcesso || p.cnj)}</strong> · ${escapeHtml(aviso.nomeOrgao || '')}. Tribunal pra contagem de dias úteis: <strong>${escapeHtml(tribunalCodigo)}</strong>.` });
+  if (!r) return;
+  const [desc, dataDisp, diasStr, unidade, emDobro] = r;
+  if (!desc?.trim()) { toast('Descrição obrigatória', '', 'error'); return; }
+  const prazoDias = parseInt(diasStr) || 15;
+  const intDateStr = dataDisp || dispISO;
+
+  let deadlineDate, diario = null;
+  if (intDateStr && /^\d{4}-\d{2}-\d{2}$/.test(intDateStr) && typeof calcularDataFatal === 'function') {
     try {
       const calc = calcularDataFatal({
-        dataPublicacao: new Date(dispISO + 'T12:00:00'),
-        prazoDias,
-        unidade: 'UTEIS',
-        tribunal: tribunalCodigo,
-        emDobro: false
+        dataPublicacao: new Date(intDateStr + 'T12:00:00'),
+        prazoDias, unidade, tribunal: tribunalCodigo, emDobro: !!emDobro
       });
       deadlineDate = calc.dataFatal;
       diario = (typeof gerarDiarioCalculo === 'function') ? gerarDiarioCalculo(calc) : null;
     } catch (e) { console.warn('[MNI.3] calcularDataFatal falhou', e); }
   }
   if (!deadlineDate) {
-    // Fallback simples: disponibilização + prazoDias corridos
-    const base = dispISO ? new Date(dispISO + 'T12:00:00') : new Date();
+    const base = intDateStr ? new Date(intDateStr + 'T12:00:00') : new Date();
     base.setDate(base.getDate() + prazoDias);
     deadlineDate = base;
   }
   const d = {
     id: uid(), processId,
-    description: desc,
+    description: desc.trim(),
     type: 'mni',
-    intimationDate: dispISO ? new Date(dispISO + 'T12:00:00').toISOString() : null,
+    intimationDate: intDateStr ? new Date(intDateStr + 'T12:00:00').toISOString() : null,
     daysAllowed: prazoDias,
-    unidade: 'UTEIS',
-    emDobro: false,
+    unidade,
+    emDobro: !!emDobro,
     tribunal: tribunalCodigo,
     diarioCalculo: diario,
     deadlineDate: deadlineDate.toISOString(),
     status: STATUS_PRAZO.PENDENTE,
     mniIdComunicacao: aviso.idComunicacao || '',
-    mniTeor: aviso.teor || '',
+    mniTipoComunicacao: aviso.tipoComunicacao || '',
+    mniOrgao: aviso.nomeOrgao || '',
+    mniMagistrado: aviso.magistradoAtuante || '',
     logs: [],
     createdAt: Date.now()
   };
-  if (typeof appendLogPrazo === 'function') appendLogPrazo(d, 'criado', { origem: 'mni', deadlineDate: d.deadlineDate, prazoDias, tribunal: tribunalCodigo });
-  // Dedupe por idComunicacao
-  const existentes = await DB.getDeadlinesByProcess(processId);
-  if (aviso.idComunicacao && existentes.some(x => x.mniIdComunicacao === aviso.idComunicacao)) {
-    toast('Prazo já existe', 'Esse aviso já foi importado antes.', 'info');
-    return;
-  }
+  if (typeof appendLogPrazo === 'function') appendLogPrazo(d, 'criado', { origem: 'mni', deadlineDate: d.deadlineDate, prazoDias, unidade, emDobro: !!emDobro, tribunal: tribunalCodigo });
   await DB.saveDeadline(d);
-  toast('✓ Prazo criado', `${desc} · vence ${formatDate(deadlineDate)}`, 'success');
+  toast('✓ Publicação criada', `${desc.trim()} · vence ${formatDate(deadlineDate)}`, 'success');
+  if (state.currentRoute === 'deadlines') renderDeadlines();
 }
 
 async function mniBuscarProcessoFlow(processId) {
