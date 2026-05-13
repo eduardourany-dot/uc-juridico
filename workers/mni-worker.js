@@ -1,5 +1,5 @@
 // UC Jurídico — MNI Worker genérico (multi-tribunal)
-// Versão: 0.6.0 · sprint MNI.3 (consultarAvisosPendentes)
+// Versão: 0.6.1 · sprint MNI.3 (consultarAvisosPendentes — parser Projudi corrigido)
 //
 // Roteia chamadas SOAP/MNI 2.2.2 pra múltiplos tribunais via registry interno.
 // Parser validado contra TJGO/Projudi.
@@ -136,7 +136,7 @@ export default {
       const validados = codigos.filter(c => TRIBUNAIS_REGISTRY[c].validado);
       const naoSuportados = codigos.filter(c => TRIBUNAIS_REGISTRY[c].naoSuportado);
       return json({
-        worker: 'uc-mni', versao: '0.6.0',
+        worker: 'uc-mni', versao: '0.6.1',
         total: codigos.length,
         validados, naoSuportados,
         operacoes: ['consultarProcesso', 'consultarAvisosPendentes', 'health', 'listarTribunais', 'detectarPorCnj']
@@ -329,18 +329,32 @@ async function consultarAvisosPendentes(conf, endpoint, { cpf, senha, debug, dat
   return result;
 }
 
-// Parser tolerante de consultarAvisosPendentesResposta. Schema típico:
-//   <aviso>
-//     <numeroProcesso>...</numeroProcesso>
-//     <comunicacao idComunicacao="...">
-//       <siglaOrgao>...</siglaOrgao> <nomeOrgao>...</nomeOrgao>
-//       <tipoComunicacao>...</tipoComunicacao>
-//       <dataDisponibilizacao>YYYYMMDD</dataDisponibilizacao>
-//       <prazo>15</prazo> <destinatario>...</destinatario>
-//       <teor>...</teor>
-//     </comunicacao>
-//   </aviso>
-// Variações: alguns colocam tudo como atributo, outros como tag. Pega o que der.
+// Mapeia código curto de tipo de comunicação (Projudi) → nome legível.
+function _mapTipoComunicacao(codigo) {
+  const map = {
+    INT: 'Intimação', CIT: 'Citação', VIS: 'Vista', NOT: 'Notificação',
+    OFC: 'Ofício', CAR: 'Carta', MAN: 'Mandado', EDI: 'Edital', COM: 'Comunicação'
+  };
+  return map[String(codigo || '').toUpperCase()] || codigo || 'Comunicação';
+}
+
+// Parser de consultarAvisosPendentesResposta.
+// Schema real do Projudi/TJGO (validado 12/05/2026):
+//   <ns2:aviso idAviso="..." tipoComunicacao="INT">
+//     <ns3:destinatario>...</ns3:destinatario>  (opcional, em VIS)
+//     <ns3:processo numero="..." classeProcessual="..." nivelSigilo="...">
+//       <ns3:polo polo="AT|PA|TC">...</ns3:polo>
+//       <ns3:assunto principal="true"><ns3:assuntoLocal descricao="..."/></ns3:assunto>
+//       <ns3:magistradoAtuante>...</ns3:magistradoAtuante>
+//       <ns3:prioridade>N-Texto</ns3:prioridade>
+//       <ns3:outroParametro nome="Area|Serventia|ProcessoFase|..." valor="..."/>
+//       <ns3:valorCausa>...</ns3:valorCausa>
+//       <ns3:orgaoJulgador nomeOrgao="..." codigoMunicipioIBGE="..."/>
+//     </ns3:processo>
+//     <ns3:dataDisponibilizacao>YYYYMMDDHHMMSS</ns3:dataDisponibilizacao>
+//   </ns2:aviso>
+// NOTA: o Projudi NÃO retorna prazo nem teor aqui — pra ver o teor da
+// comunicação seria preciso consultarTeorComunicacao (operação separada).
 function parseAvisosPendentes(xml) {
   const sucessoTag = tagText(xml, 'sucesso');
   const mensagem = tagText(xml, 'mensagem');
@@ -348,48 +362,85 @@ function parseAvisosPendentes(xml) {
     return { sucesso: false, mensagem: mensagem || '(sem mensagem)', avisos: [], avisosTotal: 0 };
   }
   const avisos = [];
-  // Cada <aviso> ... </aviso> (com ou sem prefixo de namespace)
-  const avisoBlocks = xml.match(/<(?:\w+:)?aviso\b(?:[^>]*\/>|[^>]*>[\s\S]*?<\/(?:\w+:)?aviso>)/gi) || [];
+  const avisoBlocks = xml.match(/<(?:\w+:)?aviso\b[^>]*>[\s\S]*?<\/(?:\w+:)?aviso>/gi) || [];
   for (const b of avisoBlocks) {
-    const numeroProcesso = tagText(b, 'numeroProcesso')
-      || (b.match(/\bnumeroProcesso="([^"]*)"/) || [])[1] || '';
-    // Bloco de comunicação (pode estar inline no <aviso> ou aninhado)
-    const comBlock = (b.match(/<(?:\w+:)?comunicacao\b(?:[^>]*\/>|[^>]*>[\s\S]*?<\/(?:\w+:)?comunicacao>)/i) || [b])[0];
-    const idComunicacao = (comBlock.match(/\bidComunicacao="([^"]*)"/) || [])[1]
-      || tagText(comBlock, 'idComunicacao') || '';
-    const siglaOrgao = (comBlock.match(/\bsiglaOrgao="([^"]*)"/) || [])[1] || tagText(comBlock, 'siglaOrgao') || '';
-    const nomeOrgao = (comBlock.match(/\bnomeOrgao="([^"]*)"/) || [])[1] || tagText(comBlock, 'nomeOrgao') || tagText(b, 'nomeOrgao') || '';
-    const tipoComunicacao = (comBlock.match(/\btipoComunicacao="([^"]*)"/) || [])[1]
-      || tagText(comBlock, 'tipoComunicacao') || tagText(b, 'tipoComunicacao') || '';
-    const dataDispRaw = (comBlock.match(/\bdataDisponibilizacao="([^"]*)"/) || [])[1]
-      || tagText(comBlock, 'dataDisponibilizacao') || tagText(b, 'dataDisponibilizacao') || '';
-    const prazoRaw = (comBlock.match(/\bprazo="([^"]*)"/) || [])[1] || tagText(comBlock, 'prazo') || tagText(b, 'prazo') || '';
-    const destinatario = (comBlock.match(/\bdestinatario="([^"]*)"/) || [])[1]
-      || tagText(comBlock, 'destinatario') || tagText(b, 'destinatario') || '';
-    const meio = (comBlock.match(/\bmeio="([^"]*)"/) || [])[1] || tagText(comBlock, 'meio') || '';
-    // Teor: texto, base64 ou referência. Limita pra não estourar resposta.
-    const teorRaw = tagText(comBlock, 'teor') || tagText(comBlock, 'teorComunicacao') || tagText(b, 'teor') || '';
-    const teor = _decodeXmlEntities(teorRaw).slice(0, 4000);
+    // Atributos do <aviso>
+    const idAviso = (b.match(/<(?:\w+:)?aviso\b[^>]*\bidAviso="([^"]*)"/) || [])[1] || '';
+    const tipoCodigo = (b.match(/<(?:\w+:)?aviso\b[^>]*\btipoComunicacao="([^"]*)"/) || [])[1] || '';
 
-    // Datas
-    const dataDisp = dataDispRaw && /^\d{8}/.test(dataDispRaw.replace(/\D/g, ''))
-      ? (() => { const d = dataDispRaw.replace(/\D/g, ''); return `${d.slice(0,4)}-${d.slice(4,6)}-${d.slice(6,8)}`; })()
-      : dataDispRaw;
+    // Bloco <processo>
+    const procBlock = (b.match(/<(?:\w+:)?processo\b[\s\S]*?<\/(?:\w+:)?processo>/i) || [b])[0];
+    const procOpen = (procBlock.match(/<(?:\w+:)?processo\b[^>]*>/i) || [''])[0];
+    const numeroProcesso = (procOpen.match(/\bnumero="([^"]*)"/) || [])[1] || '';
+    const classeProcessual = (procOpen.match(/\bclasseProcessual="([^"]*)"/) || [])[1] || '';
+    const nivelSigilo = (procOpen.match(/\bnivelSigilo="([^"]*)"/) || [])[1] || '';
+
+    // orgaoJulgador (atributos)
+    const nomeOrgao = tagAttr(procBlock, 'orgaoJulgador', 'nomeOrgao') || '';
+    const codigoMunicipioIBGE = tagAttr(procBlock, 'orgaoJulgador', 'codigoMunicipioIBGE') || '';
+
+    // magistrado, prioridade, valorCausa
+    const magistradoAtuante = tagText(procBlock, 'magistradoAtuante') || '';
+    const prioridade = tagText(procBlock, 'prioridade') || '';
+    const valorCausa = tagText(procBlock, 'valorCausa') || '';
+
+    // assunto principal (descrição do assuntoLocal)
+    const assuntoBlock = (procBlock.match(/<(?:\w+:)?assunto\b[^>]*\bprincipal="true"[\s\S]*?<\/(?:\w+:)?assunto>/i)
+      || procBlock.match(/<(?:\w+:)?assunto\b[\s\S]*?<\/(?:\w+:)?assunto>/i) || [''])[0];
+    const assuntoDescricao = _decodeXmlEntities(tagAttr(assuntoBlock, 'assuntoLocal', 'descricao') || '');
+    const assuntoCodigoNacional = tagText(assuntoBlock, 'codigoNacional') || '';
+
+    // outroParametro
+    const outros = {};
+    const opMatches = procBlock.matchAll(/<(?:\w+:)?outroParametro\b[^>]*\bnome="([^"]*)"[^>]*\bvalor="([^"]*)"[^>]*\/?>/g);
+    for (const m of opMatches) outros[m[1]] = _decodeXmlEntities(m[2]);
+    const area = outros.Area || '';
+    const serventia = outros.Serventia || '';
+    const processoFase = outros.ProcessoFase || '';
+    const processoStatus = outros.ProcessoStatus || '';
+    const processoTipo = outros.ProcessoTipo || '';
+    const dataDistRaw = outros.DataDistribuicao || '';
+
+    // dataDisponibilizacao — elemento dentro de <aviso>, formato YYYYMMDDHHMMSS
+    const dispRaw = (tagText(b, 'dataDisponibilizacao') || '').replace(/\D/g, '');
+    const dataDisp = dispRaw.length >= 8 ? `${dispRaw.slice(0,4)}-${dispRaw.slice(4,6)}-${dispRaw.slice(6,8)}` : '';
+    const horaDisp = dispRaw.length >= 12 ? `${dispRaw.slice(8,10)}:${dispRaw.slice(10,12)}` : '';
+
+    // Destinatário (presente em alguns VIS) — primeira pessoa
+    const destBlock = (b.match(/<(?:\w+:)?destinatario\b[\s\S]*?<\/(?:\w+:)?destinatario>/i) || [''])[0];
+    const destinatario = (destBlock.match(/<(?:\w+:)?pessoa\b[^>]*\bnome="([^"]*)"/) || [])[1] || '';
 
     avisos.push({
-      idComunicacao,
+      idAviso,
+      idComunicacao: idAviso,                  // alias pra compat
+      tipoComunicacao: _mapTipoComunicacao(tipoCodigo),
+      tipoComunicacaoCodigo: tipoCodigo,
       numeroProcesso,
-      siglaOrgao,
+      classeProcessual,
+      nivelSigilo,
       nomeOrgao,
-      tipoComunicacao,
-      dataDisponibilizacao: dataDisp,
-      prazo: prazoRaw ? Number(String(prazoRaw).replace(/\D/g, '')) || prazoRaw : '',
+      codigoMunicipioIBGE,
+      magistradoAtuante,
+      prioridade,
+      valorCausa,
+      assunto: { codigoNacional: assuntoCodigoNacional, descricao: assuntoDescricao },
+      area,
+      serventia,
+      processoFase,
+      processoStatus,
+      processoTipo,
+      dataDistribuicao: dataDistRaw && dataDistRaw.length >= 8
+        ? `${dataDistRaw.slice(0,4)}-${dataDistRaw.slice(4,6)}-${dataDistRaw.slice(6,8)}` : '',
+      dataDisponibilizacao: dataDisp,          // YYYY-MM-DD (date-only — fácil pro cálculo de prazo)
+      horaDisponibilizacao: horaDisp,          // HH:MM
       destinatario,
-      meio,
-      teor
+      // Projudi não retorna estes nesse SOAP:
+      prazo: '',
+      meio: '',
+      teor: ''
     });
   }
-  // Ordena por data desc
+  // Ordena por data disponibilização desc
   avisos.sort((a, b) => (b.dataDisponibilizacao || '').localeCompare(a.dataDisponibilizacao || ''));
   return { sucesso: true, avisos: avisos.slice(0, 200), avisosTotal: avisos.length };
 }
