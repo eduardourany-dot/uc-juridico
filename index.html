@@ -511,6 +511,7 @@ const DB = {
   // Jurisprudence
   async getJurisprudenceByProcess(pid) { return await dbPromise('jurisprudence', 'readonly', s => new Promise(res => { const r = s.index('processId').getAll(pid); r.onsuccess = () => res(r.result); })); },
   async saveJurisprudence(j) { await dbPromise('jurisprudence', 'readwrite', s => s.put(j)); return j; },
+  async deleteJurisprudence(id) { await dbPromise('jurisprudence', 'readwrite', s => s.delete(id)); },
 
   // PDFs (Blob storage)
   async getPdf(id) { return await dbPromise('pdfs', 'readonly', s => new Promise(res => { const r = s.get(id); r.onsuccess = () => res(r.result); })); },
@@ -3449,7 +3450,10 @@ function renderProcessOverview(p, events, deadlines, notes, jurisprudence) {
         <button class="btn btn-outline" onclick="addDeadlineFlow()">⏰ Adicionar publicação</button>
         <button class="btn btn-outline" onclick="copyProcessToClaude()">📋 Copiar contexto p/ Claude</button>
         <button class="btn btn-outline" onclick="generateProcessFiche()">📜 Gerar ficha (Word)</button>
-        <button class="btn btn-danger btn-sm" onclick="archiveProcessFlow()" style="grid-column: 1 / -1;">Arquivar processo</button>
+      </div>
+      <div class="grid gap-2 mt-3" style="grid-template-columns: 1fr 1fr;">
+        <button class="btn btn-outline btn-sm" onclick="archiveProcessFlow()" style="border-color:var(--uc-amber);color:var(--uc-amber);">${p.status === 'archived' ? '↻ Reativar processo' : '📦 Arquivar processo'}</button>
+        <button class="btn btn-danger btn-sm" onclick="deleteProcessFlow()">🗑 Excluir processo</button>
       </div>
     </div>
   `;
@@ -4262,6 +4266,56 @@ async function archiveProcessFlow() {
   await DB.saveProcess(p);
   toast(p.status === 'archived' ? 'Arquivado' : 'Reativado', '', 'success');
   renderProcessDetail();
+}
+
+// EXCLUIR PROCESSO — ação destrutiva irreversível. Apaga o processo +
+// eventos + prazos + notas + jurisprudência + honorários vinculados.
+// Pede confirmação dupla: dialog + digitação do CNJ (ou nome se sem CNJ).
+async function deleteProcessFlow() {
+  const p = state._processView.p;
+  if (!p) return;
+  const eventos = state._processView.events || [];
+  const prazos = state._processView.deadlines || [];
+  const notas = state._processView.notes || [];
+  const jurisp = state._processView.jurisprudence || [];
+  const honors = state._processView.honorarios || [];
+
+  const totalDeps = eventos.length + prazos.length + notas.length + jurisp.length + honors.length;
+  const challenge = p.cnj || p.name;
+  const challengeLabel = p.cnj ? 'CNJ' : 'nome do processo';
+
+  const r = await showModal('⚠ Excluir processo definitivamente', [
+    { label: `Digite o ${challengeLabel} pra confirmar`, placeholder: challenge,
+      help: `Pra evitar exclusão acidental, digite "<strong>${escapeHtml(challenge)}</strong>" exatamente.` }
+  ], {
+    confirmLabel: '🗑 Excluir definitivamente',
+    intro: `<strong style="color:var(--uc-red);">Esta ação não pode ser desfeita.</strong><br><br>Vai apagar do Firestore:<br>• 1 processo (${escapeHtml(p.name)})<br>• ${eventos.length} evento(s)<br>• ${prazos.length} publicaç${prazos.length === 1 ? 'ão' : 'ões'}<br>• ${notas.length} nota(s)<br>• ${jurisp.length} jurisprudência(s)<br>• ${honors.length} honorário(s)<br><br><em>Se só quer tirar da lista ativa, use <strong>Arquivar</strong> em vez.</em>`
+  });
+  if (!r) return;
+  const typed = (r[0] || '').trim();
+  if (typed !== challenge) {
+    toast('Confirmação incorreta', `Digite exatamente "${challenge}"`, 'error');
+    return;
+  }
+
+  // Executa a cascata — cada delete é tolerante (logs e segue se falhar)
+  const removidos = { eventos: 0, prazos: 0, notas: 0, jurisp: 0, honors: 0 };
+  for (const e of eventos) { try { await DB.deleteEvent(e.id); removidos.eventos++; } catch (err) { console.warn('[deleteProcess] evento', err); } }
+  for (const d of prazos) { try { await DB.deleteDeadline(d.id); removidos.prazos++; } catch (err) { console.warn('[deleteProcess] prazo', err); } }
+  for (const n of notas) { try { await DB.deleteNote(n.id); removidos.notas++; } catch (err) { console.warn('[deleteProcess] nota', err); } }
+  for (const j of jurisp) { try { await DB.deleteJurisprudence(j.id); removidos.jurisp++; } catch (err) { console.warn('[deleteProcess] jurisp', err); } }
+  for (const h of honors) { try { await DB.deleteHonorario(h.id); removidos.honors++; } catch (err) { console.warn('[deleteProcess] honor', err); } }
+  try {
+    await DB.deleteProcess(p.id);
+  } catch (e) {
+    console.error('[deleteProcess] falha ao apagar processo', e);
+    toast('Auxiliares apagados, mas falha ao apagar o processo', String(e.message || e), 'error');
+    return;
+  }
+  toast('✓ Processo excluído',
+    `Apagado + ${removidos.eventos + removidos.prazos + removidos.notas + removidos.jurisp + removidos.honors} registros vinculados.`,
+    'success');
+  navigate('processes');
 }
 
 async function addNoteFlow(eventId = null) {
