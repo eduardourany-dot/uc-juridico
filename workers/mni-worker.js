@@ -349,10 +349,21 @@ async function consultarAvisosPendentes(conf, endpoint, { cpf, senha, debug, dat
 // HTML, base64 (PDF/binário) ou referência a documento.
 async function consultarTeorComunicacao(conf, endpoint, { cpf, senha, idAviso, cnjAviso, debug }) {
   // Projudi/TJGO exige parâmetros no namespace tipos-servico-intercomunicacao-2.2.2.
-  // Schema XSD (revelado pela faultstring) aceita:
-  //   <tip:numeroProcesso>, <tip:senhaConsultante>, <tip:idConsultante>,
-  //   <tip:identificadorAviso>  ← 'i' MINÚSCULO no XML (a mensagem de erro
-  //   do business logic mostra com 'I' maiúsculo, mas o schema é minúsculo)
+  // Schema XSD oficial (confirmado pelo WSDL em projudi.tjgo.jus.br/IntercomunicacaoService?WSDL):
+  //   tipoConsultarTeorComunicacao:
+  //     idConsultante (xs:string, qualified)
+  //     senhaConsultante (xs:string, qualified)
+  //     numeroProcesso (tipoNumeroUnico=xs:string, qualified)
+  //     identificadorAviso (identificadorComunicacao=xs:string, qualified)
+  //   Todos minOccurs=0 no XSD MAS o servidor exige TODOS no runtime.
+  //
+  // O identificadorAviso deve ser o atributo idAviso do <aviso> retornado por
+  // consultarAvisosPendentes. Atenção: a mensagem de erro do business logic
+  // do Projudi mostra 'IdentificadorAviso' (I maiúsculo) — bug interno, o
+  // schema XSD é minúsculo.
+  //
+  // Erro "processo não está vinculado à pendência" significa que o aviso já
+  // foi consumido/lido no Projudi web — tratado no final desta função.
   const NS_TIPOS = 'http://www.cnj.jus.br/tipos-servico-intercomunicacao-2.2.2';
   const cnjFormatado = cnjAviso || '';                       // mantém pontuação
   const cnjDigitos = String(cnjAviso || '').replace(/\D/g, ''); // só dígitos
@@ -439,6 +450,25 @@ async function consultarTeorComunicacao(conf, endpoint, { cpf, senha, idAviso, c
 
   // Todas as variantes falharam — retorna detalhes pra debug
   const ultima = tentativas[tentativas.length - 1];
+
+  // Detecta o erro semântico "processo não está vinculado à pendência" —
+  // significa que o request está formato correto MAS o aviso já foi
+  // lido/consumido no Projudi web (some da fila de teor-consultável mas
+  // ainda aparece em consultarAvisosPendentes por buffer interno).
+  const naoVinculado = tentativas.some(t => /n[ãa]o\s+est[áa]\s+vinculad/i.test(t.snippet || ''));
+  if (naoVinculado) {
+    return {
+      sucesso: false,
+      erro: 'aviso_indisponivel',
+      httpStatus: ultima.httpStatus,
+      elapsedMs: ultima.elapsedMs,
+      raw: ultima.snippet,
+      tentativas,
+      mensagem: 'O Projudi rejeitou o identificador do aviso. Possíveis causas: (1) o aviso já foi LIDO no Projudi web antes — o teor sai da fila de consulta mas o aviso pode continuar listado em "pendentes"; (2) o aviso expirou; (3) bug do Projudi/TJGO. Tente com um aviso MUITO recente (últimas horas) que ainda não foi aberto no portal.',
+      dica: 'Se o aviso é recente e ainda dá esse erro, abre uma vez no Projudi web → volta aqui e clica "Ver teor" — às vezes o cache do Projudi se ajusta.'
+    };
+  }
+
   return {
     sucesso: false,
     erro: 'http_' + ultima.httpStatus,

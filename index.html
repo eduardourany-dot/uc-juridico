@@ -13746,7 +13746,8 @@ async function _mniShowAvisosModal(codigo, advogado, data) {
                 <pre style="font-size:10px;background:var(--uc-cream);padding:6px;border-radius:3px;max-height:200px;overflow:auto;white-space:pre-wrap;">${escapeHtml(teor.raw.slice(0, 4000))}</pre>
               </details>
             ` : '';
-            teorBox.innerHTML = `<small style="color:var(--uc-red);">✗ ${escapeHtml(teor.erro || 'falhou')}${teor.mensagem ? '<br>' + escapeHtml(teor.mensagem.slice(0, 500)) : ''}</small>${tentativasHtml}${rawHtml}`;
+            const dicaHtml = teor.dica ? `<div style="margin-top:8px;padding:8px;background:#f5e3c4;border-left:3px solid var(--uc-amber);border-radius:4px;font-size:11px;color:#5a4118;">💡 ${escapeHtml(teor.dica)}</div>` : '';
+            teorBox.innerHTML = `<small style="color:var(--uc-red);">✗ ${escapeHtml(teor.erro || 'falhou')}${teor.mensagem ? '<br>' + escapeHtml(teor.mensagem.slice(0, 500)) : ''}</small>${dicaHtml}${tentativasHtml}${rawHtml}`;
           }
         } catch (e) {
           btn.disabled = false;
