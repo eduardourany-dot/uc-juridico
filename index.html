@@ -3073,8 +3073,8 @@ async function renderProcessDetail() {
         ${/* DataJud desabilitado — funções permanecem no código. */ ''}
         <button class="btn btn-outline btn-sm" onclick="editProcessFlow()">Editar</button>
         <button class="btn btn-secondary btn-sm" onclick="generateProcessFiche()">Gerar ficha</button>
-        <button class="btn btn-primary btn-sm" onclick="gerarPeticaoFlow()" title="Gerar petição a partir de modelo cadastrado">📝 Gerar petição</button>
-        <button class="btn btn-primary btn-sm" onclick="gerarPeticaoIAFlow()" title="Gerar com Claude API (cobrança no seu Anthropic)" style="background:#8a6f3d;border-color:#8a6f3d;">🤖 Gerar com IA</button>
+        <button class="btn btn-secondary btn-sm" onclick="setProcessTab('analysis')" title="Abre análise IA do processo">🧠 Análise IA</button>
+        <button class="btn btn-primary btn-sm" onclick="gerarPeticaoEscolhaFlow()" title="Gerar petição — escolha entre modelo cadastrado ou geração via IA">📝 Gerar petição</button>
       </div>
     </div>
 
@@ -3088,7 +3088,7 @@ async function renderProcessDetail() {
       <button class="detail-tab ${state._processView.activeTab === 'honorarios' ? 'active' : ''}" onclick="setProcessTab('honorarios')">Honorários · ${honorarios.length}</button>
       <button class="detail-tab ${state._processView.activeTab === 'compromissos' ? 'active' : ''}" onclick="setProcessTab('compromissos')">Compromissos · ${compromissos.length}</button>
       <button class="detail-tab ${state._processView.activeTab === 'peticoes' ? 'active' : ''}" onclick="setProcessTab('peticoes')">Petições · ${peticoes.length}</button>
-      <button class="detail-tab ${state._processView.activeTab === 'analysis' ? 'active' : ''}" onclick="setProcessTab('analysis')">Análise IA</button>
+      ${state._processView.activeTab === 'analysis' ? `<button class="detail-tab active" onclick="setProcessTab('analysis')">Análise IA</button>` : ''}
     </div>
 
     <div id="processTabContent"></div>
@@ -9965,6 +9965,40 @@ async function previewModeloPeticao(id) {
 
 // Botão "Gerar petição" no processo — escolhe modelo, gera com substituição,
 // abre preview com ações de cópia / download .md.
+// Modal de escolha: gerar petição por modelo cadastrado OU via IA (Claude).
+// Substitui os 2 botões antigos por 1 só, mantendo as duas funções existentes
+// (gerarPeticaoFlow e gerarPeticaoIAFlow) intactas.
+async function gerarPeticaoEscolhaFlow() {
+  return new Promise(resolve => {
+    const modal = document.createElement('div');
+    modal.className = 'modal-backdrop';
+    modal.innerHTML = `
+      <div class="modal" style="max-width: 500px;">
+        <h3 class="modal-title">Como gerar a petição?</h3>
+        <p class="help-text" style="margin-bottom: 20px;">
+          Escolha o caminho: modelo já cadastrado (rápido, previsível) ou
+          geração via Claude API (mais adaptável, cobrança no seu Anthropic).
+        </p>
+        <div class="flex flex-col gap-2">
+          <button class="btn btn-primary" id="_gpModelo" style="text-align:left;padding:14px 16px;">
+            <div style="font-weight:600;">📝 A partir de modelo cadastrado</div>
+            <div style="font-size:12px;opacity:0.85;margin-top:2px;font-weight:normal;">Usa templates em Modelos → preenche placeholders com dados do processo</div>
+          </button>
+          <button class="btn btn-primary" id="_gpIA" style="text-align:left;padding:14px 16px;background:#8a6f3d;border-color:#8a6f3d;">
+            <div style="font-weight:600;">🤖 Geração com IA (Claude)</div>
+            <div style="font-size:12px;opacity:0.85;margin-top:2px;font-weight:normal;">Claude API gera texto adaptado · requer CLAUDE_API_KEY em Configurações</div>
+          </button>
+          <button class="btn btn-ghost" id="_gpCancel" style="margin-top:8px;">Cancelar</button>
+        </div>
+      </div>`;
+    $('modalContainer').appendChild(modal);
+    const cleanup = () => modal.remove();
+    document.getElementById('_gpModelo').onclick = () => { cleanup(); gerarPeticaoFlow(); resolve('modelo'); };
+    document.getElementById('_gpIA').onclick = () => { cleanup(); gerarPeticaoIAFlow(); resolve('ia'); };
+    document.getElementById('_gpCancel').onclick = () => { cleanup(); resolve(null); };
+  });
+}
+
 async function gerarPeticaoFlow() {
   const proc = state._processView?.p;
   if (!proc) { toast('Abra um processo primeiro', '', 'error'); return; }
