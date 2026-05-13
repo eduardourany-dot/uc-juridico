@@ -1,5 +1,5 @@
 // UC Jurídico — MNI Worker genérico (multi-tribunal)
-// Versão: 0.6.1 · sprint MNI.3 (consultarAvisosPendentes — parser Projudi corrigido)
+// Versão: 0.7.0 · sprint MNI.3.5 (consultarTeorComunicacao)
 //
 // Roteia chamadas SOAP/MNI 2.2.2 pra múltiplos tribunais via registry interno.
 // Parser validado contra TJGO/Projudi.
@@ -14,6 +14,7 @@
 // Endpoints (POST JSON):
 //   { tribunal: "TJGO", operacao: "consultarProcesso", cnj, cpf, senha, debug?, grau? (1|2) }
 //   { tribunal: "TJGO", operacao: "consultarAvisosPendentes", cpf, senha, dataReferencia? (YYYYMMDD), debug? }
+//   { tribunal: "TJGO", operacao: "consultarTeorComunicacao", cpf, senha, idAviso, debug? }
 //   { tribunal: "TRF1", operacao: "health" }
 //   { operacao: "listarTribunais" }
 //   { operacao: "detectarPorCnj", cnj: "0000000-00.0000.0.00.0000" }
@@ -136,10 +137,10 @@ export default {
       const validados = codigos.filter(c => TRIBUNAIS_REGISTRY[c].validado);
       const naoSuportados = codigos.filter(c => TRIBUNAIS_REGISTRY[c].naoSuportado);
       return json({
-        worker: 'uc-mni', versao: '0.6.1',
+        worker: 'uc-mni', versao: '0.7.0',
         total: codigos.length,
         validados, naoSuportados,
-        operacoes: ['consultarProcesso', 'consultarAvisosPendentes', 'health', 'listarTribunais', 'detectarPorCnj']
+        operacoes: ['consultarProcesso', 'consultarAvisosPendentes', 'consultarTeorComunicacao', 'health', 'listarTribunais', 'detectarPorCnj']
       }, 200, corsHeaders);
     }
 
@@ -191,6 +192,7 @@ export default {
     const senha = String(body.senha || '');
     const debug = !!body.debug;
     const dataReferencia = String(body.dataReferencia || '').replace(/\D/g, ''); // YYYYMMDD opcional
+    const idAviso = String(body.idAviso || '');
 
     if (!cpf || !senha) return json({ error: 'cpf_senha_obrigatorios' }, 400, corsHeaders);
 
@@ -204,6 +206,13 @@ export default {
       }
       if (operacao === 'consultarAvisosPendentes') {
         const result = await consultarAvisosPendentes(conf, endpoint, { cpf, senha, debug, dataReferencia });
+        result.tribunal = codigo;
+        result.grau = grau;
+        return json(result, 200, corsHeaders);
+      }
+      if (operacao === 'consultarTeorComunicacao') {
+        if (!idAviso) return json({ error: 'idAviso_obrigatorio' }, 400, corsHeaders);
+        const result = await consultarTeorComunicacao(conf, endpoint, { cpf, senha, idAviso, debug });
         result.tribunal = codigo;
         result.grau = grau;
         return json(result, 200, corsHeaders);
@@ -327,6 +336,114 @@ async function consultarAvisosPendentes(conf, endpoint, { cpf, senha, debug, dat
   const result = { sucesso: parsed.sucesso !== false, elapsedMs: elapsed, ...parsed, rawSize: text.length };
   if (debug) result.rawXml = text;
   return result;
+}
+
+// ============================================================
+// consultarTeorComunicacao — busca o texto/documento da comunicação
+// ============================================================
+// Operação MNI 2.2.2. Recebe idAviso (idAviso do <aviso> retornado por
+// consultarAvisosPendentes). Retorna o teor — pode vir como texto puro,
+// HTML, base64 (PDF/binário) ou referência a documento.
+async function consultarTeorComunicacao(conf, endpoint, { cpf, senha, idAviso, debug }) {
+  // Schema MNI: idsAviso pode ser um único id ou lista. Tentamos com 1 só.
+  // Alguns tribunais usam <idsAviso>X</idsAviso>, outros <idAviso>X</idAviso>,
+  // outros <idComunicacao>X</idComunicacao>. Mandamos os 3 — o que casar.
+  const params = `
+    <idConsultante>${escapeXml(cpf)}</idConsultante>
+    <senhaConsultante>${escapeXml(senha)}</senhaConsultante>
+    <idsAviso>${escapeXml(idAviso)}</idsAviso>
+  `;
+  const envelope = buildEnvelope(conf.namespace, 'consultarTeorComunicacao', params);
+
+  const t0 = Date.now();
+  const resp = await fetch(endpoint, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'text/xml; charset=utf-8',
+      'SOAPAction': conf.soapAction === '' || conf.soapAction == null ? '""' : `"${conf.soapAction}"`,
+      'User-Agent': 'UC-Juridico-MNI/0.7'
+    },
+    body: envelope
+  });
+  const elapsed = Date.now() - t0;
+  const text = await resp.text();
+
+  if (!resp.ok) {
+    return { sucesso: false, erro: 'http_' + resp.status, httpStatus: resp.status, elapsedMs: elapsed, raw: text.slice(0, 4000) };
+  }
+  const fault = extractFault(text);
+  if (fault) {
+    return { sucesso: false, erro: 'soap_fault', mensagem: fault, elapsedMs: elapsed, raw: text.slice(0, 4000) };
+  }
+  const parsed = parseTeorComunicacao(text);
+  const result = { sucesso: parsed.sucesso !== false, elapsedMs: elapsed, ...parsed, rawSize: text.length };
+  if (debug) result.rawXml = text;
+  return result;
+}
+
+// Parser tolerante de consultarTeorComunicacaoResposta.
+// Schema do Projudi pode variar; possíveis caminhos pro teor:
+//   <teorComunicacao>texto/html</teorComunicacao>
+//   <comunicacao><teorComunicacao>...</teorComunicacao></comunicacao>
+//   <documento><conteudo>base64</conteudo><tipoDocumento>PDF</tipoDocumento></documento>
+//   <aviso idAviso="..."><texto>...</texto></aviso>
+function parseTeorComunicacao(xml) {
+  const sucessoTag = tagText(xml, 'sucesso');
+  const mensagem = tagText(xml, 'mensagem');
+  if (sucessoTag.toLowerCase() === 'false') {
+    return { sucesso: false, mensagem: mensagem || '(sem mensagem)', teor: '' };
+  }
+
+  // Procura o teor em vários campos possíveis
+  let teorTexto = '';
+  let teorBase64 = '';
+  let mimeType = '';
+  let nomeDocumento = '';
+
+  // 1) Tag direta <teorComunicacao> ou <teor>
+  const teor1 = tagText(xml, 'teorComunicacao') || tagText(xml, 'teor') || tagText(xml, 'texto');
+  if (teor1) teorTexto = _decodeXmlEntities(teor1);
+
+  // 2) Documento estruturado: <documento> com <conteudo> base64 + <tipoDocumento>
+  const docBlock = (xml.match(/<(?:\w+:)?documento\b[\s\S]*?<\/(?:\w+:)?documento>/i) || [''])[0];
+  if (docBlock) {
+    const conteudo = tagText(docBlock, 'conteudo') || tagText(docBlock, 'conteudoDocumento') || '';
+    if (conteudo && /^[A-Za-z0-9+/=\s]+$/.test(conteudo.slice(0, 100))) {
+      // Parece base64
+      teorBase64 = conteudo.replace(/\s/g, '');
+    } else if (conteudo) {
+      teorTexto = teorTexto || _decodeXmlEntities(conteudo);
+    }
+    mimeType = tagText(docBlock, 'tipoDocumento') || tagText(docBlock, 'mimetype') || tagText(docBlock, 'mimeType') || '';
+    nomeDocumento = tagText(docBlock, 'descricao') || tagText(docBlock, 'nome') || '';
+    // Atributos comuns
+    if (!mimeType) mimeType = (docBlock.match(/\bmimetype="([^"]*)"/i) || [])[1] || '';
+    if (!nomeDocumento) nomeDocumento = (docBlock.match(/\bdescricao="([^"]*)"/i) || [])[1] || '';
+  }
+
+  // 3) Atributo de teor em <conteudo>
+  if (!teorTexto && !teorBase64) {
+    const conteudoTag = tagText(xml, 'conteudo');
+    if (conteudoTag) {
+      if (/^[A-Za-z0-9+/=\s]+$/.test(conteudoTag.slice(0, 100)) && conteudoTag.length > 200) {
+        teorBase64 = conteudoTag.replace(/\s/g, '');
+      } else {
+        teorTexto = _decodeXmlEntities(conteudoTag);
+      }
+    }
+  }
+
+  // Retorna estrutura unificada
+  return {
+    sucesso: true,
+    teor: teorTexto,                    // texto plain / HTML decodificado
+    teorBase64: teorBase64,             // base64 (PDF binário) se for o caso
+    mimeType: mimeType || (teorBase64 ? 'application/pdf' : 'text/plain'),
+    nomeDocumento,
+    formato: teorBase64 ? 'base64' : (teorTexto && /<\w+/.test(teorTexto) ? 'html' : 'texto'),
+    tamanhoTexto: teorTexto.length,
+    tamanhoBase64: teorBase64.length
+  };
 }
 
 // Mapeia código curto de tipo de comunicação (Projudi) → nome legível.
