@@ -1,9 +1,10 @@
 // UC Jurídico — MNI Worker genérico (multi-tribunal)
-// Versão: 0.9.1 · parser de documentos mais permissivo
-//   - extrai <documento> aninhados em <movimento> (não só top-level)
-//   - tenta múltiplas tags de conteúdo: conteudo, conteudoDocumento,
-//     documentoBase64, binario
-//   - retorna xmlSnippetDocumentos quando 0 conteúdos vieram (debug)
+// Versão: 0.9.2 · parser de documentos calibrado pro TJGO Projudi
+//   - <documento> usa atributo `movimento="ID"` (não <vinculacaoDocumento>)
+//   - <outroParametro nome="NomeArquivo"> tem o filename real
+//   - <outroParametro nome="ArquivoTipo"> tem o tipo legível
+//   - Projudi NÃO devolve <conteudo> via consultarProcesso — só metadata
+//   - mantém cascata de tags de conteúdo pra outros sistemas (PJe, eSAJ)
 //
 // Roteia chamadas SOAP/MNI 2.2.2 pra múltiplos tribunais via registry interno.
 // Parser validado contra TJGO/Projudi.
@@ -143,7 +144,7 @@ export default {
       const validados = codigos.filter(c => TRIBUNAIS_REGISTRY[c].validado);
       const naoSuportados = codigos.filter(c => TRIBUNAIS_REGISTRY[c].naoSuportado);
       return json({
-        worker: 'uc-mni', versao: '0.9.1',
+        worker: 'uc-mni', versao: '0.9.2',
         total: codigos.length,
         validados, naoSuportados,
         operacoes: ['consultarProcesso', 'health', 'listarTribunais', 'detectarPorCnj']
@@ -406,8 +407,17 @@ function parseConsultarProcesso(xml) {
   }
 
   // Helper pra extrair metadata + conteúdo de um <documento> XML qualquer.
-  // Tenta múltiplas tags de conteúdo (Projudi usa <conteudo>; outros
-  // sistemas podem usar <conteudoDocumento>, <binario>, <documentoBase64>).
+  //
+  // Estrutura real do TJGO Projudi (confirmada via amostra Eduardo 2026-05):
+  //   <documento idDocumento="525597370" tipoDocumento="16"
+  //              dataHora="20260512202332" mimetype="application/pdf"
+  //              nivelSigilo="0" movimento="476235048"  ← linkagem aqui
+  //              hash="..." descricao="Petição">
+  //     <outroParametro nome="NomeArquivo" valor="bmbxsamir.pdf"/>
+  //     <outroParametro nome="ArquivoTipo" valor="Petição"/>
+  //   </documento>
+  // OBS: Projudi TJGO NÃO devolve <conteudo> base64 via consultarProcesso
+  // (limitação da implementação). Parser captura metadata pra exibição.
   function _parseDocumentoBlock(dXml) {
     const openTag = (dXml.match(/<(?:\w+:)?documento\b[^>]*>/) || [''])[0];
     const idDocumento = (openTag.match(/\bidDocumento="([^"]*)"/) || [])[1] || '';
@@ -419,6 +429,17 @@ function parseConsultarProcesso(xml) {
     const nivelSigilo = (openTag.match(/\bnivelSigilo="([^"]*)"/) || [])[1] || '0';
     const hash = (openTag.match(/\bhash="([^"]*)"/) || [])[1] || '';
     const tipoDocumentoLocal = (openTag.match(/\btipoDocumentoLocal="([^"]*)"/) || [])[1] || '';
+    // Atributo `movimento`: alguns sistemas (Projudi TJGO) linkam doc ao
+    // movimento via atributo direto, não via <vinculacaoDocumento> filha.
+    const movimentoAttr = (openTag.match(/\bmovimento="([^"]*)"/) || [])[1] || '';
+
+    // outroParametro: NomeArquivo + ArquivoTipo + outros campos custom
+    const outroParams = {};
+    const opMatches = dXml.matchAll(/<(?:\w+:)?outroParametro\b[^>]*\bnome="([^"]*)"[^>]*\bvalor="([^"]*)"[^>]*\/?>/g);
+    for (const m of opMatches) outroParams[m[1]] = _decodeXmlEntities(m[2]);
+    const nomeArquivo = outroParams.NomeArquivo || '';
+    const arquivoTipo = outroParams.ArquivoTipo || '';
+
     // Conteúdo: tenta múltiplas variantes de tag — sistemas diferentes usam
     // nomes distintos. Pega texto BRUTO (espaços removidos pra base64 limpo).
     let conteudoB64 = '';
@@ -432,6 +453,9 @@ function parseConsultarProcesso(xml) {
       idDocumento, tipoDocumento, tipoDocumentoLocal, dataHora,
       dataIso: _parseDataHoraMni(dataHora),
       mimetype, descricao, nivelSigilo, hash,
+      movimentoAttr,
+      nomeArquivo, arquivoTipo,
+      outroParametros: outroParams,
       conteudoB64,
       tamanhoB64: conteudoB64.length
     };
@@ -482,23 +506,35 @@ function parseConsultarProcesso(xml) {
   }
   movimentos.sort((a, b) => (b.dataHora || '').localeCompare(a.dataHora || ''));
 
-  // Estratégia 2 — docs órfãos no nível de <processo>: para sistemas que
-  // declaram docs separados dos movimentos. Só adiciona se ainda não foi
-  // capturado pelos movimentos (dedup por idDocumento).
+  // Estratégia 2 — docs no nível de <processo> com atributo `movimento="ID"`:
+  // o padrão TJGO Projudi. Cada <documento> top-level tem movimento="..."
+  // apontando pro identificadorMovimento do <movimento>. Vincula assim.
   const docsXmlOuter = procBlock.match(/<(?:\w+:)?documento\b[^>]*>[\s\S]*?<\/(?:\w+:)?documento>/gi) || [];
+  const movByIdentificador = new Map();
+  for (const m of movimentos) {
+    if (m.identificador) movByIdentificador.set(m.identificador, m);
+  }
   for (const dXml of docsXmlOuter) {
     const doc = _parseDocumentoBlock(dXml);
     if (!doc) continue;
     if (docsById.has(doc.idDocumento)) continue; // já capturado nos movimentos
     docsById.set(doc.idDocumento, doc);
     documentos.push(doc);
+    // Linkagem via atributo `movimento` → adiciona aos docsVinculados do
+    // movimento correspondente
+    if (doc.movimentoAttr) {
+      const m = movByIdentificador.get(doc.movimentoAttr);
+      if (m) m.docsVinculados.push(doc.idDocumento);
+    }
   }
 
-  // Linka movimentos.documentos[] com metadata dos docs achados
+  // Linka movimentos.documentos[] com metadata dos docs achados.
+  // Nome do arquivo: prefere NomeArquivo (Projudi) > descricao > fallback.
   for (const m of movimentos) {
     m.documentos = (m.docsVinculados || []).map(id => docsById.get(id)).filter(Boolean).map(d => ({
       idDocumento: d.idDocumento,
-      nome: d.descricao || `documento_${d.idDocumento}`,
+      nome: d.nomeArquivo || d.descricao || `documento_${d.idDocumento}`,
+      tituloLegivel: d.arquivoTipo || d.descricao || 'Documento',
       mimetype: d.mimetype,
       dataHora: d.dataHora,
       tipoDocumento: d.tipoDocumento,

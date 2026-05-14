@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.46.3 (MNI docs: parser mais permissivo + modal diagnóstico do XML cru)
-const CACHE_NAME = 'uc-juridico-v6-46-3';
+// Service Worker — UC Jurídico v6.47.0 (MNI docs: parser calibrado pro TJGO Projudi + metadata por evento)
+const CACHE_NAME = 'uc-juridico-v6-47-0';
 const APP_SHELL = [
   './',
   './index.html',

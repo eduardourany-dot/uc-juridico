@@ -3628,11 +3628,21 @@ function _renderEventoTimeline(e, notesCount) {
   // o onclick do timeline-event (que abriria o openEventDetail).
   const docsHtml = (e.mniDocs && e.mniDocs.length > 0) ? `
     <div style="margin-top: 8px; display: flex; gap: 6px; flex-wrap: wrap;" onclick="event.stopPropagation();">
-      ${e.mniDocs.map(d => `
-        <button class="btn btn-ghost btn-sm" style="padding: 3px 8px; font-size: 11px; border: 1px solid var(--uc-line); background: #fff;"
+      ${e.mniDocs.map(d => {
+        const icon = d.hasContent ? '⬇' : '📄';
+        const titleParts = [
+          d.tituloLegivel || d.tipoDocumento || '',
+          d.mimetype || '',
+          d.dataHora ? _formatEventoData(d.dataHora) : '',
+          d.hash ? 'hash ' + String(d.hash).slice(0, 12) : '',
+          d.hasContent ? 'clique pra baixar' : 'só metadata (clique pra ver info)'
+        ].filter(Boolean).join(' · ');
+        const bg = d.hasContent ? '#fff' : 'var(--uc-cream)';
+        const opacity = d.hasContent ? '1' : '0.85';
+        return `<button class="btn btn-ghost btn-sm" style="padding: 3px 8px; font-size: 11px; border: 1px solid var(--uc-line); background: ${bg}; opacity: ${opacity};"
                 onclick="event.stopPropagation(); _mniDocDownload('${e.processId}', '${escapeHtml(d.idDocumento)}')"
-                title="${escapeHtml(d.tipoDocumento || '')} · ${escapeHtml(d.mimetype || '')}${d.dataHora ? ' · ' + escapeHtml(_formatEventoData(d.dataHora)) : ''}${d.hash ? ' · hash ' + escapeHtml(String(d.hash).slice(0, 12)) : ''}">📄 ${escapeHtml((d.nome || 'documento').slice(0, 60))}</button>
-      `).join('')}
+                title="${escapeHtml(titleParts)}">${icon} ${escapeHtml((d.nome || 'documento').slice(0, 60))}</button>`;
+      }).join('')}
     </div>
   ` : '';
   return `
@@ -4993,18 +5003,23 @@ async function openEventDetail(eventId) {
   const docsHtml = (e.mniDocs && e.mniDocs.length > 0) ? `
     <h4 class="font-serif font-semibold smallcaps mb-2" style="color: var(--uc-black);">📎 Documentos vinculados (${e.mniDocs.length})</h4>
     <div style="display: flex; flex-direction: column; gap: 6px; margin-bottom: 16px;">
-      ${e.mniDocs.map(d => `
+      ${e.mniDocs.map(d => {
+        const btnLabel = d.hasContent ? '⬇ Baixar' : '📄 Info';
+        const btnClass = d.hasContent ? 'btn-secondary' : 'btn-outline';
+        const tituloLeg = d.tituloLegivel ? `${escapeHtml(d.tituloLegivel)} · ` : '';
+        return `
         <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 8px 10px; background: var(--uc-cream); border-radius: 5px; border: 1px solid var(--uc-line);">
           <div style="flex: 1; min-width: 0; font-size: 12px;">
             <div style="font-weight: 500; color: var(--uc-black);">${escapeHtml(d.nome || 'documento')}</div>
             <div style="font-size: 11px; color: var(--uc-warm-gray); margin-top: 2px;">
-              ${escapeHtml(d.tipoDocumento || '—')} · ${escapeHtml(d.mimetype || '')}${d.dataHora ? ' · ' + escapeHtml(_formatEventoData(d.dataHora)) : ''}${d.hash ? ' · hash <code style="font-size: 10px;">' + escapeHtml(String(d.hash).slice(0, 16)) + '…</code>' : ''}
+              ${tituloLeg}${escapeHtml(d.mimetype || '')}${d.dataHora ? ' · ' + escapeHtml(_formatEventoData(d.dataHora)) : ''}${d.hash ? ' · hash <code style="font-size: 10px;">' + escapeHtml(String(d.hash).slice(0, 16)) + '…</code>' : ''}${!d.hasContent ? ' · <em style="color: var(--uc-amber);">só metadata</em>' : ''}
             </div>
           </div>
-          <button class="btn btn-secondary btn-sm" style="padding: 3px 10px; font-size: 11px; white-space: nowrap;"
-                  onclick="_mniDocDownload('${e.processId}', '${escapeHtml(d.idDocumento)}')">⬇ Baixar</button>
+          <button class="btn ${btnClass} btn-sm" style="padding: 3px 10px; font-size: 11px; white-space: nowrap;"
+                  onclick="_mniDocDownload('${e.processId}', '${escapeHtml(d.idDocumento)}')">${btnLabel}</button>
         </div>
-      `).join('')}
+      `;
+      }).join('')}
     </div>
   ` : '';
   modal.innerHTML = `
@@ -14271,18 +14286,76 @@ function _mniBase64ToBlob(b64, mimetype = 'application/pdf') {
 
 // Baixa um documento já cacheado no store 'pdfs' (chave mni_PID_IDDOC) e
 // dispara download no browser via URL.createObjectURL + <a download>.
+// Se o blob não existe (Projudi não devolveu conteúdo via MNI — comum no
+// TJGO), abre modal informativo com a metadata pra o usuário cruzar com
+// o Projudi web e baixar manualmente.
 async function _mniDocDownload(processId, idDocumento) {
   const pdfId = `mni_${processId}_${idDocumento}`;
   const rec = await DB.getPdf(pdfId);
-  if (!rec) { toast('Documento não encontrado', 'O cache local pode ter sido limpo. Re-execute "Baixar documentos".', 'error'); return; }
-  const blob = rec.blob;
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = rec.name || `documento_${idDocumento}.pdf`;
-  document.body.appendChild(a);
-  a.click();
-  setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 100);
+  if (rec) {
+    // Cache local existe — download direto
+    const blob = rec.blob;
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = rec.name || `documento_${idDocumento}.pdf`;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 100);
+    return;
+  }
+  // Sem blob: olha se temos metadata no evento pra mostrar info útil
+  const eventos = await DB.getEventsByProcess(processId);
+  let docMeta = null;
+  for (const e of eventos) {
+    const found = (e.mniDocs || []).find(d => String(d.idDocumento) === String(idDocumento));
+    if (found) { docMeta = found; break; }
+  }
+  _mniMostrarInfoDocSemConteudo(processId, idDocumento, docMeta);
+}
+
+// Modal informativo quando o usuário tenta abrir um doc cujo conteúdo
+// não veio do tribunal (limitação do TJGO Projudi e similares).
+function _mniMostrarInfoDocSemConteudo(processId, idDocumento, meta) {
+  const modal = document.createElement('div');
+  modal.className = 'modal-backdrop';
+  const linhas = [];
+  if (meta) {
+    if (meta.nome) linhas.push(['Arquivo', escapeHtml(meta.nome)]);
+    if (meta.tituloLegivel || meta.tipoDocumento) linhas.push(['Tipo', escapeHtml(meta.tituloLegivel || `código ${meta.tipoDocumento}`)]);
+    if (meta.dataHora) linhas.push(['Data', escapeHtml(_formatEventoData(meta.dataHora))]);
+    linhas.push(['idDocumento', `<code>${escapeHtml(idDocumento)}</code>`]);
+    if (meta.hash) linhas.push(['Hash', `<code style="font-size: 10px; word-break: break-all;">${escapeHtml(meta.hash)}</code>`]);
+    if (meta.mimetype) linhas.push(['MIME', escapeHtml(meta.mimetype)]);
+  } else {
+    linhas.push(['idDocumento', `<code>${escapeHtml(idDocumento)}</code>`]);
+  }
+  modal.innerHTML = `
+    <div class="modal scroll-thin" style="max-width: 560px;">
+      <h3 class="modal-title">📄 Documento sem conteúdo local</h3>
+      <div style="background:#f5e3c4;border-left:3px solid var(--uc-amber);padding:12px;border-radius:5px;margin-bottom:14px;font-size:13px;line-height:1.5;color:#5a4118;">
+        O <strong>TJGO Projudi não devolve o PDF</strong> via SOAP/MNI — só metadata.
+        Pra baixar o arquivo:
+        <ol style="margin:8px 0 0 18px;padding:0;">
+          <li>Abra <a href="https://projudi.tjgo.jus.br" target="_blank" rel="noopener" style="color:var(--uc-gold);font-weight:600;">projudi.tjgo.jus.br</a> em outra aba</li>
+          <li>Localize o processo + movimento correspondente</li>
+          <li>Cruze pelo <strong>idDocumento</strong> ou <strong>hash</strong> abaixo</li>
+        </ol>
+      </div>
+      <div style="display: grid; grid-template-columns: 120px 1fr; gap: 6px 12px; padding: 12px; background: var(--uc-cream); border-radius: 5px; font-size: 12px;">
+        ${linhas.map(([k, v]) => `<span style="color: var(--uc-warm-gray); font-weight: 500;">${k}:</span><span>${v}</span>`).join('')}
+      </div>
+      <div class="flex gap-2" style="margin-top: 16px;">
+        <button class="btn btn-outline" id="_mniInfoCopyId" style="flex:1;">📋 Copiar idDocumento</button>
+        <button class="btn btn-primary" id="_mniInfoClose" style="flex:1;">Fechar</button>
+      </div>
+    </div>`;
+  $('modalContainer').appendChild(modal);
+  document.getElementById('_mniInfoClose').onclick = () => modal.remove();
+  document.getElementById('_mniInfoCopyId').onclick = async () => {
+    try { await navigator.clipboard.writeText(String(idDocumento)); toast('idDocumento copiado', '', 'info'); }
+    catch (e) { toast('Falha ao copiar', '', 'error'); }
+  };
 }
 
 // Flow: busca todos os documentos do processo via MNI (incluirDocumentos=true)
@@ -14368,7 +14441,9 @@ async function mniBaixarDocumentosFlow(processId) {
     return;
   }
 
-  // 6. Salva cada documento como blob no store 'pdfs' (prefixo mni_PID_IDDOC)
+  // 6. Salva cada documento como blob no store 'pdfs' (quando o tribunal
+  // devolveu conteúdo base64). TJGO Projudi não devolve — então o loop
+  // de salvar blob fica vazio e a gente só popula metadata nos eventos.
   const docsComConteudo = (data.documentos || []).filter(d => data.documentosConteudo?.[d.idDocumento]);
   const docsSemConteudo = (data.documentos || []).length - docsComConteudo.length;
   let salvos = 0;
@@ -14377,7 +14452,7 @@ async function mniBaixarDocumentosFlow(processId) {
       const b64 = data.documentosConteudo[d.idDocumento];
       const blob = _mniBase64ToBlob(b64, d.mimetype);
       const ext = d.mimetype === 'application/pdf' ? 'pdf' : (d.mimetype?.split('/')[1] || 'bin');
-      const nome = (d.descricao || `documento_${d.idDocumento}`).replace(/[<>:"/\\|?*]/g, '_').slice(0, 100);
+      const nome = (d.nomeArquivo || d.descricao || `documento_${d.idDocumento}`).replace(/[<>:"/\\|?*]/g, '_').slice(0, 100);
       await DB.savePdf({
         id: `mni_${p.id}_${d.idDocumento}`,
         processId: p.id,
@@ -14399,9 +14474,9 @@ async function mniBaixarDocumentosFlow(processId) {
     }
   }
 
-  // 7. Atualiza eventos: pra cada movimento.identificador, popula mniDocs
-  // no event correspondente. Os docs são guardados como metadata (sem blob)
-  // — o blob fica no store 'pdfs' e é acessado por _mniDocDownload.
+  // 7. Atualiza eventos com mniDocs (metadata SEMPRE — independente de ter
+  // conteúdo). Isso permite o user enxergar quais docs existem em cada
+  // movimento mesmo quando o sistema (Projudi TJGO) só devolve metadata.
   const eventosAtuais = await DB.getEventsByProcess(p.id);
   const eventByIdent = new Map();
   for (const ev of eventosAtuais) {
@@ -14414,12 +14489,14 @@ async function mniBaixarDocumentosFlow(processId) {
     if (!ev) continue;
     ev.mniDocs = mov.documentos.map(d => ({
       idDocumento: d.idDocumento,
-      nome: d.nome || d.descricao || `documento_${d.idDocumento}`,
+      nome: d.nome || `documento_${d.idDocumento}`,
+      tituloLegivel: d.tituloLegivel || '',
       mimetype: d.mimetype,
       dataHora: d.dataHora,
       tipoDocumento: d.tipoDocumento,
       hash: d.hash,
-      nivelSigilo: d.nivelSigilo
+      nivelSigilo: d.nivelSigilo,
+      hasContent: !!data.documentosConteudo?.[d.idDocumento]
     }));
     await DB.saveEvent(ev);
     eventosAtualizados++;
@@ -14428,14 +14505,18 @@ async function mniBaixarDocumentosFlow(processId) {
   const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
   const orfaos = data.documentosOrfaos || 0;
   const docsTotal = data.documentosTotal || 0;
-  // Quando nada foi salvo mas docs apareceram, o tribunal devolveu só
-  // metadata (sem <conteudo> base64). Abre modal de diagnóstico com o
-  // snippet do XML pra o usuário copiar e mandar pra investigação.
-  if (salvos === 0 && docsTotal > 0 && data.xmlSnippetDocumentos) {
-    _mniMostrarDiagnosticoDocs(data, codigo, p.cnj, elapsed);
-    return;
+  // Mensagem clara conforme o cenário:
+  //   - tudo salvo: PDFs disponíveis pra download local
+  //   - só metadata: toast neutro + dica de abrir Projudi (mas eventos JÁ ganharam mniDocs)
+  //   - nada veio: erro
+  if (docsTotal === 0) {
+    toast('Nenhum documento encontrado', 'O tribunal não devolveu documentos vinculados a este processo.', 'info');
+  } else if (salvos > 0) {
+    toast('Documentos baixados', `${salvos} PDF(s) salvos localmente · ${eventosAtualizados} eventos atualizados${orfaos > 0 ? ` · ${orfaos} órfãos` : ''} · ${elapsed}s`, 'success');
+  } else {
+    // Só metadata veio (caso TJGO Projudi). Eventos ATUALIZADOS com mniDocs.
+    toast('Apenas metadados', `${docsTotal} documento(s) catalogado(s) · ${eventosAtualizados} eventos atualizados em ${elapsed}s. Conteúdo não vem via MNI no ${codigo} — abra cada arquivo no Projudi web.`, 'info');
   }
-  toast('Documentos baixados', `${salvos} arquivos salvos · ${eventosAtualizados} eventos atualizados${orfaos > 0 ? ` · ${orfaos} órfãos` : ''}${docsSemConteudo > 0 ? ` · ${docsSemConteudo} sem conteúdo` : ''} · ${elapsed}s`, 'success');
   if (state.currentRoute === 'process' && state.currentProcessId === processId) {
     renderProcessDetail();
   }
