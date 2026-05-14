@@ -3525,6 +3525,7 @@ function renderProcessEvents(p, events, notes) {
       <p class="text-sm" style="color: var(--uc-warm-gray);">${events.length} evento(s) · clique em um evento para ver detalhes ou adicionar nota</p>
       <div class="flex gap-2 flex-wrap">
         ${events.some(e => e.type === 'movimento_mni') ? `<button class="btn btn-ghost btn-sm" onclick="mniLimparMovimentosFlow('${p.id}')" title="Apaga todos os eventos vindos do MNI (mantém PDF importado e eventos manuais). Útil pra remover duplicatas antigas antes de re-importar.">🧹 Limpar movimentos MNI</button>` : ''}
+        ${p.cnj && events.some(e => e.type === 'movimento_mni') ? `<button class="btn btn-secondary btn-sm" onclick="mniBaixarDocumentosFlow('${p.id}')" title="Busca os PDFs dos despachos/decisões/petições vinculados aos movimentos MNI. Resposta pode ser pesada (vários MB) e demorar — confirma antes de disparar.">📎 Baixar documentos</button>` : ''}
         ${p.cnj ? `<button class="btn btn-secondary btn-sm" onclick="mniBuscarProcessoFlow('${p.id}')">🔍 Atualizar via MNI</button>` : ''}
         <button class="btn btn-outline btn-sm" onclick="importPdfToProcess()">+ Importar peças</button>
       </div>
@@ -3561,6 +3562,18 @@ function _renderEventoTimeline(e, notesCount) {
   const detalhesPreview = isMni && e.details
     ? `<div style="font-size:12px;color:var(--uc-graphite);margin-top:4px;line-height:1.5;">${escapeHtml(e.details.slice(0, 240))}${e.details.length > 240 ? '…' : ''}</div>`
     : '';
+  // Docs MNI vinculados a este evento (populados por mniBaixarDocumentosFlow).
+  // Click no botão chama _mniDocDownload(processId, idDoc) sem propagar pra
+  // o onclick do timeline-event (que abriria o openEventDetail).
+  const docsHtml = (e.mniDocs && e.mniDocs.length > 0) ? `
+    <div style="margin-top: 8px; display: flex; gap: 6px; flex-wrap: wrap;" onclick="event.stopPropagation();">
+      ${e.mniDocs.map(d => `
+        <button class="btn btn-ghost btn-sm" style="padding: 3px 8px; font-size: 11px; border: 1px solid var(--uc-line); background: #fff;"
+                onclick="event.stopPropagation(); _mniDocDownload('${e.processId}', '${escapeHtml(d.idDocumento)}')"
+                title="${escapeHtml(d.tipoDocumento || '')} · ${escapeHtml(d.mimetype || '')}${d.dataHora ? ' · ' + escapeHtml(d.dataHora) : ''}${d.hash ? ' · hash ' + escapeHtml(String(d.hash).slice(0, 12)) : ''}">📄 ${escapeHtml((d.nome || 'documento').slice(0, 60))}</button>
+      `).join('')}
+    </div>
+  ` : '';
   return `
     <div class="timeline-event ${notesCount > 0 ? 'has-note' : ''}" onclick="openEventDetail('${e.id}')">
       <div style="font-family: 'EB Garamond', serif; font-weight: 600; color: var(--uc-black); font-size: 16px;">
@@ -3569,8 +3582,10 @@ function _renderEventoTimeline(e, notesCount) {
       <div style="font-size: 12px; color: var(--uc-warm-gray); margin-top: 2px;">
         ${escapeHtml(subtitulo)}
         ${notesCount > 0 ? ` · 📝 ${notesCount} nota(s)` : ''}
+        ${e.mniDocs?.length > 0 ? ` · 📎 ${e.mniDocs.length} documento(s)` : ''}
       </div>
       ${detalhesPreview}
+      ${docsHtml}
     </div>
   `;
 }
@@ -4913,10 +4928,29 @@ async function openEventDetail(eventId) {
       ${(e.startPage != null && e.endPage != null) ? `<p><strong>Páginas:</strong> ${e.startPage}–${e.endPage}${e.pageCount ? ` (${e.pageCount} pgs)` : ''}</p>` : ''}
     </div>
   `;
+  // Seção de documentos MNI (se baixados via "📎 Baixar documentos")
+  const docsHtml = (e.mniDocs && e.mniDocs.length > 0) ? `
+    <h4 class="font-serif font-semibold smallcaps mb-2" style="color: var(--uc-black);">📎 Documentos vinculados (${e.mniDocs.length})</h4>
+    <div style="display: flex; flex-direction: column; gap: 6px; margin-bottom: 16px;">
+      ${e.mniDocs.map(d => `
+        <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 8px 10px; background: var(--uc-cream); border-radius: 5px; border: 1px solid var(--uc-line);">
+          <div style="flex: 1; min-width: 0; font-size: 12px;">
+            <div style="font-weight: 500; color: var(--uc-black);">${escapeHtml(d.nome || 'documento')}</div>
+            <div style="font-size: 11px; color: var(--uc-warm-gray); margin-top: 2px;">
+              ${escapeHtml(d.tipoDocumento || '—')} · ${escapeHtml(d.mimetype || '')}${d.dataHora ? ' · ' + escapeHtml(d.dataHora.slice(0, 12)) : ''}${d.hash ? ' · hash <code style="font-size: 10px;">' + escapeHtml(String(d.hash).slice(0, 16)) + '…</code>' : ''}
+            </div>
+          </div>
+          <button class="btn btn-secondary btn-sm" style="padding: 3px 10px; font-size: 11px; white-space: nowrap;"
+                  onclick="_mniDocDownload('${e.processId}', '${escapeHtml(d.idDocumento)}')">⬇ Baixar</button>
+        </div>
+      `).join('')}
+    </div>
+  ` : '';
   modal.innerHTML = `
     <div class="modal scroll-thin" style="max-width: 600px;">
       <h3 class="modal-title">${escapeHtml(titulo)}</h3>
       ${headerHtml}
+      ${docsHtml}
       <h4 class="font-serif font-semibold smallcaps mb-2" style="color: var(--uc-black);">Notas vinculadas</h4>
       ${evNotes.length === 0 ? `<p style="color: var(--uc-warm-gray); font-size: 13px;">Sem notas.</p>` :
         evNotes.map(n => `<div class="note-item"><div class="note-meta">${formatDateTime(n.createdAt)}</div><div style="white-space: pre-wrap;">${escapeHtml(n.text)}</div></div>`).join('')}
@@ -14162,6 +14196,180 @@ function _mniShowResultModal(p, codigo, advogadoUsado, data, elapsedTotal) {
       toast('Falha ao aplicar', String(e.message || e), 'error');
     }
   };
+}
+
+// Converte string base64 → Blob (usado pra reconstruir PDFs vindos do MNI).
+function _mniBase64ToBlob(b64, mimetype = 'application/pdf') {
+  // atob não tolera espaços; o parser do worker já remove, mas defensive
+  const clean = String(b64 || '').replace(/\s+/g, '');
+  const bin = atob(clean);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return new Blob([bytes], { type: mimetype || 'application/pdf' });
+}
+
+// Baixa um documento já cacheado no store 'pdfs' (chave mni_PID_IDDOC) e
+// dispara download no browser via URL.createObjectURL + <a download>.
+async function _mniDocDownload(processId, idDocumento) {
+  const pdfId = `mni_${processId}_${idDocumento}`;
+  const rec = await DB.getPdf(pdfId);
+  if (!rec) { toast('Documento não encontrado', 'O cache local pode ter sido limpo. Re-execute "Baixar documentos".', 'error'); return; }
+  const blob = rec.blob;
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = rec.name || `documento_${idDocumento}.pdf`;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 100);
+}
+
+// Flow: busca todos os documentos do processo via MNI (incluirDocumentos=true)
+// e salva localmente em IndexedDB store 'pdfs' com IDs prefixados 'mni_PID_IDDOC'.
+// Atualiza os eventos (movimentos) com `mniDocs: [...]` listando metadata pra
+// renderização dos botões de download. Confirma antes (pode ser pesado).
+async function mniBaixarDocumentosFlow(processId) {
+  const p = await DB.getProcess(processId);
+  if (!p) { toast('Processo não encontrado', '', 'error'); return; }
+  if (!p.cnj) { toast('Processo sem CNJ', 'CNJ é obrigatório pra buscar via MNI.', 'error'); return; }
+
+  // Aviso prévio — fetch pode ser pesado
+  const ok = await confirmDialog('Baixar documentos via MNI?',
+    `Vai buscar TODOS os documentos do processo ${p.cnj} no tribunal de origem. Resposta pode ser pesada (vários MB) e demorar 10-60s. Os PDFs ficam salvos LOCALMENTE no seu navegador pra abrir depois sem nova consulta.`,
+    false);
+  if (!ok) return;
+
+  // 1. Detecta tribunal
+  const detect = await _mniDetectarTribunal(p);
+  if (!detect) { toast('Tribunal não identificado', 'Sem mapeamento pelo CNJ.', 'error'); return; }
+  const { codigo, conf } = detect;
+  if (conf?.naoSuportado) { toast(`${codigo} não suporta MNI`, conf.motivo || '', 'error'); return; }
+
+  // 2. Worker URL
+  const config = await _mniGetConfig();
+  if (!config.workerUrl) { toast('Worker MNI não configurada', 'Configurações → MNI.', 'error'); return; }
+
+  // 3. Destrava cofre
+  if (!window.MniCrypto.isUnlocked()) {
+    if (!config.salt || !config.canary) { toast('Cofre MNI não configurado', '', 'error'); return; }
+    const r = await showModal(`Destravar cofre pra consultar ${codigo}`, [
+      { label: 'Chave mestra MNI', type: 'password' }
+    ], { confirmLabel: 'Destravar e buscar' });
+    if (!r) return;
+    const okUnlock = await window.MniCrypto.unlock(r[0], config.salt, config.canary);
+    if (!okUnlock) { toast('Chave mestra incorreta', '', 'error'); return; }
+  }
+
+  // 4. Credencial
+  const meEmail = (window.UC_Auth?.getUser?.() || {}).email || '';
+  const meuNome = (typeof defaultAdvogado === 'function' ? defaultAdvogado(meEmail) : '') || '';
+  const candidatos = [p.advogadoResponsavel, p.advogadoSuplente, meuNome].filter(Boolean);
+  let cred = null;
+  for (const adv of candidatos) {
+    cred = await _mniBuscarCredencial(adv, codigo);
+    if (cred) break;
+  }
+  if (!cred) { toast('Sem credencial cadastrada', `Configure pra ${codigo}.`, 'error'); return; }
+
+  let senha;
+  try { senha = await window.MniCrypto.decrypt(cred.senhaCifrada); }
+  catch { toast('Falha ao decifrar credencial', '', 'error'); return; }
+
+  // 5. Loading modal (mesma estética do mniBuscarProcessoFlow mas com aviso de docs)
+  const loadingModal = _mniMakeLoadingModal(codigo, p.cnj + ' · com documentos (pode demorar)');
+  $('modalContainer').appendChild(loadingModal);
+
+  const t0 = Date.now();
+  let data;
+  try {
+    const resp = await fetch(config.workerUrl.replace(/\/$/, ''), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        tribunal: codigo,
+        operacao: 'consultarProcesso',
+        cnj: p.cnj,
+        cpf: cred.cpf,
+        senha,
+        incluirDocumentos: true
+      })
+    });
+    data = await resp.json();
+  } catch (e) {
+    loadingModal.remove();
+    toast('Falha de rede', String(e.message || e), 'error');
+    return;
+  } finally { senha = null; }
+  loadingModal.remove();
+
+  if (!data.sucesso) {
+    toast('Worker falhou', data.erro || data.mensagem || 'erro desconhecido', 'error');
+    return;
+  }
+
+  // 6. Salva cada documento como blob no store 'pdfs' (prefixo mni_PID_IDDOC)
+  const docsComConteudo = (data.documentos || []).filter(d => data.documentosConteudo?.[d.idDocumento]);
+  const docsSemConteudo = (data.documentos || []).length - docsComConteudo.length;
+  let salvos = 0;
+  for (const d of docsComConteudo) {
+    try {
+      const b64 = data.documentosConteudo[d.idDocumento];
+      const blob = _mniBase64ToBlob(b64, d.mimetype);
+      const ext = d.mimetype === 'application/pdf' ? 'pdf' : (d.mimetype?.split('/')[1] || 'bin');
+      const nome = (d.descricao || `documento_${d.idDocumento}`).replace(/[<>:"/\\|?*]/g, '_').slice(0, 100);
+      await DB.savePdf({
+        id: `mni_${p.id}_${d.idDocumento}`,
+        processId: p.id,
+        idDocumento: d.idDocumento,
+        blob,
+        name: nome.endsWith(`.${ext}`) ? nome : `${nome}.${ext}`,
+        mimetype: d.mimetype,
+        tipoDocumento: d.tipoDocumento || '',
+        nivelSigilo: d.nivelSigilo || '0',
+        hash: d.hash || '',
+        dataHora: d.dataHora || '',
+        size: blob.size,
+        addedAt: Date.now(),
+        source: 'mni'
+      });
+      salvos++;
+    } catch (err) {
+      console.warn('[MNI docs] falha ao salvar doc', d.idDocumento, err);
+    }
+  }
+
+  // 7. Atualiza eventos: pra cada movimento.identificador, popula mniDocs
+  // no event correspondente. Os docs são guardados como metadata (sem blob)
+  // — o blob fica no store 'pdfs' e é acessado por _mniDocDownload.
+  const eventosAtuais = await DB.getEventsByProcess(p.id);
+  const eventByIdent = new Map();
+  for (const ev of eventosAtuais) {
+    if (ev.mniIdentificador) eventByIdent.set(ev.mniIdentificador, ev);
+  }
+  let eventosAtualizados = 0;
+  for (const mov of (data.movimentos || [])) {
+    if (!mov.identificador || !mov.documentos?.length) continue;
+    const ev = eventByIdent.get(mov.identificador);
+    if (!ev) continue;
+    ev.mniDocs = mov.documentos.map(d => ({
+      idDocumento: d.idDocumento,
+      nome: d.nome || d.descricao || `documento_${d.idDocumento}`,
+      mimetype: d.mimetype,
+      dataHora: d.dataHora,
+      tipoDocumento: d.tipoDocumento,
+      hash: d.hash,
+      nivelSigilo: d.nivelSigilo
+    }));
+    await DB.saveEvent(ev);
+    eventosAtualizados++;
+  }
+
+  const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
+  const orfaos = data.documentosOrfaos || 0;
+  toast('Documentos baixados', `${salvos} arquivos salvos · ${eventosAtualizados} eventos atualizados${orfaos > 0 ? ` · ${orfaos} órfãos` : ''}${docsSemConteudo > 0 ? ` · ${docsSemConteudo} sem conteúdo` : ''} · ${elapsed}s`, 'success');
+  if (state.currentRoute === 'process' && state.currentProcessId === processId) {
+    renderProcessDetail();
+  }
 }
 
 // Apaga TODOS os eventos do tipo 'movimento_mni' do processo.

@@ -1,5 +1,6 @@
 // UC Jurídico — MNI Worker genérico (multi-tribunal)
-// Versão: 0.8.0 · MNI avisos migrado pro DJEN (publicações = fonte única)
+// Versão: 0.9.0 · consultarProcesso ganha flag incluirDocumentos
+//   (parser extrai <documento> + base64 quando flag true)
 //
 // Roteia chamadas SOAP/MNI 2.2.2 pra múltiplos tribunais via registry interno.
 // Parser validado contra TJGO/Projudi.
@@ -139,7 +140,7 @@ export default {
       const validados = codigos.filter(c => TRIBUNAIS_REGISTRY[c].validado);
       const naoSuportados = codigos.filter(c => TRIBUNAIS_REGISTRY[c].naoSuportado);
       return json({
-        worker: 'uc-mni', versao: '0.8.0',
+        worker: 'uc-mni', versao: '0.9.0',
         total: codigos.length,
         validados, naoSuportados,
         operacoes: ['consultarProcesso', 'health', 'listarTribunais', 'detectarPorCnj']
@@ -193,13 +194,14 @@ export default {
     const cpf = String(body.cpf || '').replace(/\D/g, '');
     const senha = String(body.senha || '');
     const debug = !!body.debug;
+    const incluirDocumentos = body.incluirDocumentos === true;
 
     if (!cpf || !senha) return json({ error: 'cpf_senha_obrigatorios' }, 400, corsHeaders);
 
     try {
       if (operacao === 'consultarProcesso') {
         if (!cnj) return json({ error: 'cnj_obrigatorio' }, 400, corsHeaders);
-        const result = await consultarProcesso(conf, endpoint, { cnj, cpf, senha, debug });
+        const result = await consultarProcesso(conf, endpoint, { cnj, cpf, senha, debug, incluirDocumentos });
         result.tribunal = codigo;
         result.grau = grau;
         return json(result, 200, corsHeaders);
@@ -245,14 +247,20 @@ async function healthCheck(conf) {
 // ============================================================
 // consultarProcesso
 // ============================================================
-async function consultarProcesso(conf, endpoint, { cnj, cpf, senha, debug }) {
+async function consultarProcesso(conf, endpoint, { cnj, cpf, senha, debug, incluirDocumentos }) {
+  // incluirDocumentos = true → resposta vem com <documento> elements
+  // contendo metadata + <conteudo> em base64. Atenção: response pode crescer
+  // muito (PDFs em base64), 30s+ de timeout e MB-de-resposta são comuns.
+  // Default false pra manter "Buscar MNI" rápido — só ativar quando o
+  // usuário pede docs explicitamente via "Baixar documentos".
+  const flagDocs = incluirDocumentos === true ? 'true' : 'false';
   const envelope = buildEnvelope(conf.namespace, 'consultarProcesso', `
     <idConsultante>${escapeXml(cpf)}</idConsultante>
     <senhaConsultante>${escapeXml(senha)}</senhaConsultante>
     <numeroProcesso>${escapeXml(cnj)}</numeroProcesso>
     <movimentos>true</movimentos>
     <incluirCabecalho>true</incluirCabecalho>
-    <incluirDocumentos>false</incluirDocumentos>
+    <incluirDocumentos>${flagDocs}</incluirDocumentos>
   `);
 
   const t0 = Date.now();
@@ -403,13 +411,78 @@ function parseConsultarProcesso(xml) {
     const codigoLocal = (m.match(/<(?:\w+:)?movimentoLocal\b[^>]*\bcodigoMovimento="([^"]*)"/) || [])[1] || '';
     const descricao = _decodeXmlEntities((m.match(/<(?:\w+:)?movimentoLocal\b[^>]*\bdescricao="([^"]*)"/) || [])[1] || '');
     const complemento = _decodeXmlEntities(tagText(m, 'complemento') || '');
+    // Documentos vinculados ao movimento: pode vir como <vinculacaoDocumento idDocumento="X"/>
+    // OU <documentoVinculado idDocumento="X"/> — coleta ambos.
+    const docsVinculados = [];
+    const vinculacoes = m.matchAll(/<(?:\w+:)?(?:vinculacao|documento)Documento\b[^>]*\bidDocumento="([^"]*)"/g);
+    for (const v of vinculacoes) docsVinculados.push(v[1]);
     movimentos.push({
       dataHora,
       dataIso: _parseDataHoraMni(dataHora),
-      codigoNacional, codigoLocal, descricao, complemento, identificador
+      codigoNacional, codigoLocal, descricao, complemento, identificador,
+      docsVinculados
     });
   }
   movimentos.sort((a, b) => (b.dataHora || '').localeCompare(a.dataHora || ''));
+
+  // Documentos: extrai TODOS os <documento> dentro de <processo> com
+  // metadata + conteúdo base64 (se incluirDocumentos=true foi passado
+  // na request). Estrutura típica TJGO/Projudi:
+  //   <documento idDocumento="..." tipoDocumento="..." dataHora="..."
+  //              mimetype="application/pdf" descricao="..." nivelSigilo="0"
+  //              hash="...">
+  //     <conteudo>base64...</conteudo>
+  //     <assinatura>...</assinatura>
+  //   </documento>
+  // Se conteudo estiver vazio, ainda devolvemos metadata pro user ver
+  // o que existe (útil quando incluirDocumentos=false).
+  const documentos = [];
+  const docsXml = procBlock.match(/<(?:\w+:)?documento\b(?:[^>]*\/>|[^>]*>[\s\S]*?<\/(?:\w+:)?documento>)/gi) || [];
+  for (const dXml of docsXml) {
+    const openTag = (dXml.match(/<(?:\w+:)?documento\b[^>]*>/) || [''])[0];
+    const idDocumento = (openTag.match(/\bidDocumento="([^"]*)"/) || [])[1] || '';
+    if (!idDocumento) continue;
+    const tipoDocumento = (openTag.match(/\btipoDocumento="([^"]*)"/) || [])[1] || '';
+    const dataHora = (openTag.match(/\bdataHora="([^"]*)"/) || [])[1] || '';
+    const mimetype = (openTag.match(/\bmimetype="([^"]*)"/) || [])[1] || 'application/pdf';
+    const descricao = _decodeXmlEntities((openTag.match(/\bdescricao="([^"]*)"/) || [])[1] || '');
+    const nivelSigilo = (openTag.match(/\bnivelSigilo="([^"]*)"/) || [])[1] || '0';
+    const hash = (openTag.match(/\bhash="([^"]*)"/) || [])[1] || '';
+    const tipoDocumentoLocal = (openTag.match(/\btipoDocumentoLocal="([^"]*)"/) || [])[1] || '';
+    // Conteúdo: pega texto BRUTO da tag <conteudo>, removendo apenas
+    // espaços em volta (mantém o base64 inteiro).
+    const conteudoMatch = dXml.match(/<(?:\w+:)?conteudo\b[^>]*>([\s\S]*?)<\/(?:\w+:)?conteudo>/);
+    const conteudoB64 = conteudoMatch ? conteudoMatch[1].replace(/\s+/g, '') : '';
+    documentos.push({
+      idDocumento, tipoDocumento, tipoDocumentoLocal, dataHora,
+      dataIso: _parseDataHoraMni(dataHora),
+      mimetype, descricao, nivelSigilo, hash,
+      conteudoB64,
+      tamanhoB64: conteudoB64.length
+    });
+  }
+
+  // Linka cada movimento aos seus docs por idDocumento via docsVinculados;
+  // pra docs órfãos sem vinculação explícita, tenta empate por dataHora
+  // (mesmo segundo) com o movimento mais próximo.
+  const docsById = new Map(documentos.map(d => [d.idDocumento, d]));
+  for (const m of movimentos) {
+    m.documentos = (m.docsVinculados || []).map(id => docsById.get(id)).filter(Boolean).map(d => ({
+      idDocumento: d.idDocumento,
+      nome: d.descricao || `documento_${d.idDocumento}`,
+      mimetype: d.mimetype,
+      dataHora: d.dataHora,
+      tipoDocumento: d.tipoDocumento,
+      nivelSigilo: d.nivelSigilo,
+      hash: d.hash,
+      tamanhoB64: d.tamanhoB64
+    }));
+  }
+  // Fallback por dataHora: docs sem vinculação explícita ficam em
+  // unsigned bucket pra app decidir como mostrar.
+  const usedIds = new Set();
+  for (const m of movimentos) for (const d of (m.documentos || [])) usedIds.add(d.idDocumento);
+  const docsOrfaos = documentos.filter(d => !usedIds.has(d.idDocumento));
 
   return {
     sucesso: true,
@@ -422,7 +495,13 @@ function parseConsultarProcesso(xml) {
     outrosParametros: outrosParams,
     partes,
     movimentos: movimentos.slice(0, 100),
-    movimentosTotal: movimentos.length
+    movimentosTotal: movimentos.length,
+    // Documentos: incluídos só quando incluirDocumentos=true foi passado
+    // na request. Conteúdo em base64 separado pra o cliente decidir cachear.
+    documentos: documentos.map(d => ({ ...d, conteudoB64: undefined, hasConteudo: !!d.conteudoB64 })),
+    documentosConteudo: Object.fromEntries(documentos.filter(d => d.conteudoB64).map(d => [d.idDocumento, d.conteudoB64])),
+    documentosTotal: documentos.length,
+    documentosOrfaos: docsOrfaos.length
   };
 }
 
