@@ -15302,14 +15302,94 @@ function _djenBuildRecursoOptions(parsed) {
 
 // Handler do change no <select data-djen-tipo-ato>. Sincroniza os inputs
 // de prazo/unidade e a base legal exibida no badge.
+// Constrói as <options> pra um slot "adicional" — sem otimizações do parser,
+// só a lista completa de recursos comuns + ciência.
+function _djenBuildRecursoOptionsAll() {
+  let html = `<option value="" selected disabled>— escolha recurso/ato —</option>`;
+  html += `<optgroup label="Recursos/atos comuns">`;
+  for (const code of _DJEN_RECURSOS_OUTROS) {
+    html += _djenFmtRecursoOption(code, false);
+  }
+  html += `</optgroup>`;
+  html += `<option value="CIENCIA" data-prazo="" data-unidade="UTEIS" data-baselegal="" data-label="Ciência (sem prazo)">⊙ Ciência (sem prazo)</option>`;
+  return html;
+}
+
+// Renderiza UM slot de recurso (dropdown + prazo + unidade + dobro + remover).
+// O 1º slot (isFirst=true) usa o parser pra pré-selecionar; slots adicionais
+// (isFirst=false) começam vazios com lista completa de recursos.
+function _djenBuildSlot(parsed, isFirst) {
+  const hasPrazo = isFirst && parsed?.prazoDias != null && parsed.prazoDias > 0;
+  const recursosCabiveis = isFirst ? (parsed?.recursosCabiveis || []) : [];
+  const precisaEscolher = isFirst && !hasPrazo && recursosCabiveis.length > 0;
+  const prazoDefault = hasPrazo ? String(parsed.prazoDias) : '';
+  const unidadeDefault = (isFirst && parsed?.unidade) || 'UTEIS';
+  const emDobroDefault = isFirst && parsed?.emDobro;
+  const optionsHtml = isFirst ? _djenBuildRecursoOptions(parsed) : _djenBuildRecursoOptionsAll();
+  const bg = precisaEscolher ? '#fff8e8' : 'rgba(244,241,232,0.4)';
+  const border = precisaEscolher ? 'var(--uc-amber)' : 'var(--uc-line)';
+
+  return `
+    <div class="djen-recurso-slot" style="display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; background: ${bg}; border: 1px solid ${border}; border-radius: 4px; margin-bottom: 6px;">
+      <div style="display: flex; gap: 6px; align-items: center;">
+        <select data-djen-tipo-ato onchange="_djenRecursoChange(this)" style="flex: 1; padding: 4px 8px; border: 1px solid var(--uc-line); border-radius: 3px; font-size: 11px;">
+          ${optionsHtml}
+        </select>
+        ${isFirst ? '' : `<button type="button" onclick="_djenRemoveSlot(this)" title="Remover este recurso" style="border: 1px solid var(--uc-red); background: #fff; color: var(--uc-red); cursor: pointer; padding: 2px 8px; border-radius: 3px; font-size: 11px;">✕</button>`}
+      </div>
+      <label style="display: inline-flex; align-items: center; gap: 6px; font-size: 11px;">
+        Prazo:
+        <input type="number" data-djen-prazo value="${prazoDefault}" min="1" max="365" placeholder="—" style="width: 65px; padding: 2px 6px; border: 1px solid var(--uc-line); border-radius: 4px; ${precisaEscolher ? 'opacity: 0.5;' : ''}" ${precisaEscolher ? 'disabled' : ''}>
+        <select data-djen-unidade style="padding: 2px 4px; border: 1px solid var(--uc-line); border-radius: 4px; font-size: 11px;">
+          <option value="UTEIS" ${unidadeDefault === 'UTEIS' ? 'selected' : ''}>úteis</option>
+          <option value="CORRIDOS" ${unidadeDefault === 'CORRIDOS' ? 'selected' : ''}>corridos</option>
+        </select>
+        <label style="display: inline-flex; align-items: center; gap: 3px; margin-left: 6px;">
+          <input type="checkbox" data-djen-dobro ${emDobroDefault ? 'checked' : ''}>
+          <span style="font-size: 10px;">em dobro</span>
+        </label>
+      </label>
+    </div>
+  `;
+}
+
+// Adiciona um novo slot (vazio) ao container de recursos da publicação.
+// Aceita um botão clicado ("+ Adicionar outro recurso") OU o próprio container.
+function _djenAddRecursoSlot(triggerOrContainer) {
+  let container;
+  if (triggerOrContainer.classList?.contains('djen-recursos-container')) {
+    container = triggerOrContainer;
+  } else {
+    const card = triggerOrContainer.closest?.('[data-djen-id]');
+    container = card?.querySelector('.djen-recursos-container');
+  }
+  if (!container) return;
+  container.insertAdjacentHTML('beforeend', _djenBuildSlot(null, false));
+}
+
+// Remove um slot. Mantém ao menos 1 (mostra toast se tentar apagar o último).
+function _djenRemoveSlot(btn) {
+  const slot = btn.closest('.djen-recurso-slot');
+  if (!slot) return;
+  const container = slot.parentElement;
+  if (!container || container.querySelectorAll('.djen-recurso-slot').length <= 1) {
+    if (typeof toast === 'function') toast('Mantém ao menos um recurso', 'Use "Ciência" se não quer agendar prazo.', 'info');
+    return;
+  }
+  slot.remove();
+}
+
+// Handler do <select> de recurso. Sincroniza prazo/unidade no MESMO slot
+// e, se for o último slot E o user escolheu um recurso real (não ciência),
+// auto-adiciona um próximo slot — assim a sentença que gera embargos +
+// apelação flui sem precisar clicar "+ adicionar".
 function _djenRecursoChange(select) {
   const opt = select.options[select.selectedIndex];
   if (!opt) return;
-  const card = select.closest('[data-djen-id]');
-  if (!card) return;
-  const prazoInput = card.querySelector('[data-djen-prazo]');
-  const unidadeSelect = card.querySelector('[data-djen-unidade]');
-  const baseLegalStatic = card.querySelector('[data-djen-baselegal-static]');
+  const slot = select.closest('.djen-recurso-slot');
+  if (!slot) return;
+  const prazoInput = slot.querySelector('[data-djen-prazo]');
+  const unidadeSelect = slot.querySelector('[data-djen-unidade]');
   const prazoVal = opt.dataset.prazo || '';
   const unidadeVal = opt.dataset.unidade || 'UTEIS';
   if (prazoInput) {
@@ -15318,13 +15398,24 @@ function _djenRecursoChange(select) {
     prazoInput.style.opacity = prazoVal ? '1' : '0.5';
   }
   if (unidadeSelect) unidadeSelect.value = unidadeVal;
-  if (baseLegalStatic) baseLegalStatic.textContent = opt.dataset.baselegal || '';
-  // Reset visual do warning border (escolha foi feita)
-  select.style.borderColor = 'var(--uc-line)';
-  select.style.background = '';
-  // Esconde o "escolha um recurso ↓" hint
-  const hint = select.parentElement?.querySelector('span[style*="amber"]');
-  if (hint) hint.remove();
+
+  // Reset visual de warning (escolha foi feita)
+  slot.style.background = 'rgba(244,241,232,0.4)';
+  slot.style.borderColor = 'var(--uc-line)';
+
+  // Atualiza badge "base legal" do parser estático no card (se for 1º slot)
+  const card = slot.closest('[data-djen-id]');
+  const baseLegalStatic = card?.querySelector('[data-djen-baselegal-static]');
+  if (baseLegalStatic && opt.dataset.baselegal) baseLegalStatic.textContent = opt.dataset.baselegal;
+
+  // Auto-add: se este é o último slot E user escolheu recurso real, abre o próximo.
+  const container = slot.parentElement;
+  const slots = [...container.querySelectorAll('.djen-recurso-slot')];
+  const isLast = slots[slots.length - 1] === slot;
+  const realPicked = select.value && select.value !== 'CIENCIA';
+  if (isLast && realPicked) {
+    _djenAddRecursoSlot(container);
+  }
 }
 
 // Tenta vários nomes de campo até achar valor não-vazio.
@@ -15453,36 +15544,21 @@ function djenRenderPubRow(pub, kind, idx) {
             pub._parsed = parsed; // disponível pra djenImportSelected
             const hasPrazo = parsed.prazoDias != null && parsed.prazoDias > 0;
             const recursosCabiveis = parsed.recursosCabiveis || [];
-            const precisaEscolher = !hasPrazo && recursosCabiveis.length > 0; // ato detectado mas sem recurso escolhido
-            const prazoDefault = hasPrazo ? String(parsed.prazoDias) : '';
-            const unidadeDefault = parsed.unidade || 'UTEIS';
+            const precisaEscolher = !hasPrazo && recursosCabiveis.length > 0;
             const confColor = parsed.confianca >= 0.85 ? 'badge-green'
                             : parsed.confianca >= 0.60 ? 'badge-amber'
                             : 'badge-gray';
             return `
               <div style="margin-top: 8px; font-size: 11px;">
-                <div style="display:flex; flex-direction: column; gap: 4px; margin-bottom: 6px;">
-                  <span style="color: var(--uc-warm-gray); text-transform: uppercase; letter-spacing: 0.04em; font-size: 10px;">Recurso/ato a agendar${precisaEscolher ? ' <span style="color: var(--uc-amber); font-weight: 600;">— escolha um recurso ↓</span>' : ''}</span>
-                  <select data-djen-tipo-ato onchange="_djenRecursoChange(this)" style="padding: 4px 8px; border: 1px solid ${precisaEscolher ? 'var(--uc-amber)' : 'var(--uc-line)'}; border-radius: 4px; font-size: 11px; ${precisaEscolher ? 'background: #fff8e8;' : ''}">
-                    ${_djenBuildRecursoOptions(parsed)}
-                  </select>
+                <div style="color: var(--uc-warm-gray); text-transform: uppercase; letter-spacing: 0.04em; font-size: 10px; margin-bottom: 4px;">Recursos/atos a agendar${precisaEscolher ? ' <span style="color: var(--uc-amber); font-weight: 600;">— escolha o 1º ↓</span>' : ' <span style="opacity: 0.6; text-transform: none; letter-spacing: 0;">(pode adicionar múltiplos — ex: embargos + apelação)</span>'}</div>
+                <div class="djen-recursos-container">
+                  ${_djenBuildSlot(parsed, true)}
                 </div>
-                <label style="display:inline-flex; align-items:center; gap:6px;">
-                  Prazo (dias):
-                  <input type="number" data-djen-prazo value="${prazoDefault}" min="1" max="365" placeholder="—" style="width: 70px; padding: 2px 6px; border: 1px solid var(--uc-line); border-radius: 4px; ${precisaEscolher ? 'opacity: 0.5;' : ''}" ${precisaEscolher ? 'disabled' : ''}>
-                  <select data-djen-unidade style="padding: 2px 4px; border: 1px solid var(--uc-line); border-radius: 4px; font-size: 11px;">
-                    <option value="UTEIS" ${unidadeDefault === 'UTEIS' ? 'selected' : ''}>úteis</option>
-                    <option value="CORRIDOS" ${unidadeDefault === 'CORRIDOS' ? 'selected' : ''}>corridos</option>
-                  </select>
-                  <label style="display:inline-flex; align-items:center; gap:3px; margin-left: 8px;">
-                    <input type="checkbox" data-djen-dobro ${parsed.emDobro ? 'checked' : ''}>
-                    <span style="font-size: 10px;">em dobro</span>
-                  </label>
-                </label>
-                <div style="margin-top: 6px; display:flex; gap:6px; flex-wrap: wrap; align-items:center;">
-                  <span class="badge ${confColor}" style="font-size: 10px;" title="Confiança ${(parsed.confianca*100).toFixed(0)}% · fonte: ${escapeHtml(parsed.fonte)}${parsed.evidencia ? ' · trecho: "' + escapeHtml(String(parsed.evidencia).slice(0, 80)) + '"' : ''}">⚙ parser: ${escapeHtml(parsed.label)}</span>
+                <button type="button" class="btn btn-ghost btn-sm" onclick="_djenAddRecursoSlot(this)" style="padding: 3px 10px; font-size: 11px; margin-top: 2px;" title="Adicionar outro recurso/ato pra agendar a partir desta mesma publicação (cria um prazo adicional)">+ Adicionar outro recurso</button>
+                <div style="margin-top: 8px; display:flex; gap:6px; flex-wrap: wrap; align-items:center;">
+                  <span class="badge ${confColor}" style="font-size: 10px;" title="Confiança ${(parsed.confianca*100).toFixed(0)}% · fonte: ${escapeHtml(parsed.fonte)}${parsed.evidencia ? ' · trecho: &quot;' + escapeHtml(String(parsed.evidencia).slice(0, 80)) + '&quot;' : ''}">⚙ parser: ${escapeHtml(parsed.label)}</span>
                   ${parsed.baseLegal ? `<span style="font-size: 10px; color: var(--uc-warm-gray);" data-djen-baselegal-static>${escapeHtml(parsed.baseLegal)}</span>` : ''}
-                  ${parsed.fonte === 'ato_detectado' ? `<span class="badge badge-amber" style="font-size: 10px;" title="Parser identificou o ato mas o prazo depende de qual recurso você optar por interpor. Escolha no menu acima.">⚠ escolha recurso</span>` : (parsed.requerRevisao ? `<span class="badge badge-amber" style="font-size: 10px;" title="Confiança baixa — revisar manualmente">⚠ revisar</span>` : '')}
+                  ${parsed.fonte === 'ato_detectado' ? `<span class="badge badge-amber" style="font-size: 10px;" title="Parser identificou o ato mas o prazo depende de qual recurso você optar por interpor. Você pode marcar mais de um (ex: embargos declaração + apelação).">⚠ escolha recurso(s)</span>` : (parsed.requerRevisao ? `<span class="badge badge-amber" style="font-size: 10px;" title="Confiança baixa — revisar manualmente">⚠ revisar</span>` : '')}
                 </div>
               </div>
             `;
@@ -15772,28 +15848,35 @@ async function djenImportSelected(modal) {
   const allPubs = [...classified.matched, ...classified.unmatched];
   let imported = 0, processosCriados = 0, prazosCriados = 0;
 
-  // Collect selected hashes + per-row config (Fase 3: unidade + dobro do parser)
+  // Collect selected hashes + per-row config. Agora cada card tem N slots
+  // de recurso (1 ou mais) — vamos coletar todos pra criar 1 prazo por slot.
   const rowSettings = {};
   modal.querySelectorAll('[data-djen-id]').forEach(card => {
     const hash = card.dataset.djenId;
     const checkbox = card.querySelector('[data-djen-row]');
-    const prazoInput = card.querySelector('[data-djen-prazo]');
-    const unidadeSelect = card.querySelector('[data-djen-unidade]');
-    const dobroCheckbox = card.querySelector('[data-djen-dobro]');
     const createProcCheckbox = card.querySelector('[data-djen-create-process]');
-    const tipoAtoSelect = card.querySelector('[data-djen-tipo-ato]');
-    const tipoAto = tipoAtoSelect?.value || '';
-    const prazoRaw = prazoInput?.value || '';
-    const prazoParsed = parseInt(prazoRaw);
+    const slots = [...card.querySelectorAll('.djen-recurso-slot')];
+    const recursos = slots.map(slot => {
+      const tipoAtoSelect = slot.querySelector('[data-djen-tipo-ato]');
+      const prazoInput = slot.querySelector('[data-djen-prazo]');
+      const unidadeSelect = slot.querySelector('[data-djen-unidade]');
+      const dobroCheckbox = slot.querySelector('[data-djen-dobro]');
+      const tipoAto = tipoAtoSelect?.value || '';
+      const prazoRaw = prazoInput?.value || '';
+      const prazoParsed = parseInt(prazoRaw);
+      return {
+        tipoAto,
+        tipoAtoLabel: TIPOS_ATO[tipoAto]?.label || '',
+        tipoAtoBaseLegal: TIPOS_ATO[tipoAto]?.baseLegal || '',
+        prazo: Number.isFinite(prazoParsed) && prazoParsed > 0 ? prazoParsed : null,
+        unidade: unidadeSelect?.value || 'UTEIS',
+        emDobro: !!dobroCheckbox?.checked
+      };
+    }).filter(r => r.tipoAto && r.tipoAto !== 'CIENCIA' && r.prazo); // só slots válidos
     rowSettings[hash] = {
       selected: checkbox?.checked,
-      prazo: Number.isFinite(prazoParsed) && prazoParsed > 0 ? prazoParsed : null,
-      unidade: unidadeSelect?.value || 'UTEIS',
-      emDobro: !!dobroCheckbox?.checked,
       createProcess: createProcCheckbox?.checked ?? false,
-      tipoAto,                                              // código selecionado no dropdown
-      tipoAtoLabel: TIPOS_ATO[tipoAto]?.label || '',
-      tipoAtoBaseLegal: TIPOS_ATO[tipoAto]?.baseLegal || ''
+      recursos
     };
   });
 
@@ -15835,43 +15918,44 @@ async function djenImportSelected(modal) {
       await djenEnrichProcessFromPublication(processId, pub);
     }
 
-    // Create deadline + event if linked to process — dedupe por djenHash.
-    // Pula criação de prazo quando user escolheu "Ciência" ou não escolheu
-    // recurso (cfg.prazo será null) — a publicação fica salva, mas sem
-    // prazo agendado (correto pra ciências e despachos irrecorríveis).
-    if (processId && dataDispo && cfg.prazo) {
+    // Cria UM prazo por recurso escolhido (N slots → N prazos). Dedup por
+    // (djenHash, tipoEscolhido) — assim a mesma publicação pode gerar
+    // embargos + apelação como dois prazos distintos, mas uma reimportação
+    // não cria duplicatas. Sem recursos válidos (CIENCIA/sem prazo) → só
+    // a publicação é salva, sem prazo agendado.
+    if (processId && dataDispo && cfg.recursos && cfg.recursos.length > 0) {
       const proc = pub._proc || await DB.getProcess(processId);
       const tribunal = inferirTribunal(proc?.court || pub.tribunal || pub.nomeOrgao);
-      const calc = calcDjenDeadline(dataDispo, cfg.prazo, tribunal, cfg.unidade || 'UTEIS', !!cfg.emDobro);
       const existingDeadlines = await DB.getDeadlinesByProcess(processId);
-      const dupDeadline = existingDeadlines.some(x => x.djenHash === pub.hash);
-      if (!dupDeadline) {
-        // Descrição: prefere o tipo escolhido pelo user no dropdown (cfg.tipoAto)
-        // sobre o que o parser detectou. Fallback pro tipoComunicacao do DJEN.
+      let calcAlgum = null; // pra reusar calc.publication no event abaixo
+
+      for (const r of cfg.recursos) {
+        const calc = calcDjenDeadline(dataDispo, r.prazo, tribunal, r.unidade, r.emDobro);
+        if (!calcAlgum) calcAlgum = calc;
+        const dup = existingDeadlines.some(x => x.djenHash === pub.hash && x.tipoEscolhido === r.tipoAto);
+        if (dup) continue;
         const parsed = pub._parsed || null;
-        const baseDesc = cfg.tipoAtoLabel
-          || (parsed && parsed.tipo !== 'CIENCIA' ? parsed.label : '')
-          || (pub.tipoComunicacao || 'Intimação');
+        const baseDesc = r.tipoAtoLabel || pub.tipoComunicacao || 'Intimação';
         const deadline = {
           id: uid(),
           processId,
           description: `[DJEN] ${baseDesc} · ${pub.nomeOrgao || pub.orgao || ''}`.slice(0, 200),
           type: 'djen',
           intimationDate: calc.publication.toISOString(),
-          daysAllowed: cfg.prazo,
-          unidade: cfg.unidade || 'UTEIS',
-          emDobro: !!cfg.emDobro,
+          daysAllowed: r.prazo,
+          unidade: r.unidade,
+          emDobro: r.emDobro,
           deadlineDate: calc.deadline.toISOString(),
           status: STATUS_PRAZO.PENDENTE,
           logs: [],
           djenHash: pub.hash,
           tribunal,
           diarioCalculo: calc.diario,
-          // Fase 3: persiste tipo escolhido pelo user + diagnóstico do parser.
-          // `tipoEscolhido` é o que o user decidiu; `parser` é o que o
-          // sistema sugeriu — guarda os dois pra auditoria futura.
-          tipoEscolhido: cfg.tipoAto || null,
-          tipoEscolhidoBaseLegal: cfg.tipoAtoBaseLegal || null,
+          // Trilha de auditoria: tipo escolhido pelo user (decisão atual)
+          // + parser (sugestão original do sistema). Permite ver depois se
+          // o user concordou ou divergiu do que foi sugerido.
+          tipoEscolhido: r.tipoAto,
+          tipoEscolhidoBaseLegal: r.tipoAtoBaseLegal,
           parser: parsed ? {
             tipo: parsed.tipo,
             label: parsed.label,
@@ -15882,20 +15966,22 @@ async function djenImportSelected(modal) {
           } : null,
           createdAt: Date.now()
         };
-        appendLogPrazo(deadline, 'criado', { origem: 'djen', djenHash: pub.hash, deadlineDate: deadline.deadlineDate, parserConfianca: parsed?.confianca, parserFonte: parsed?.fonte });
+        appendLogPrazo(deadline, 'criado', { origem: 'djen', djenHash: pub.hash, tipoEscolhido: r.tipoAto, deadlineDate: deadline.deadlineDate, parserConfianca: parsed?.confianca, parserFonte: parsed?.fonte });
         await DB.saveDeadline(deadline);
         prazosCriados++;
       }
 
+      // 1 evento por publicação (não por recurso) — representa a intimação
+      // no diário. Os prazos são contas separadas linkadas pelo djenHash.
       const existingEvents = await DB.getEventsByProcess(processId);
       const dupEvent = existingEvents.some(x => x.djenHash === pub.hash);
-      if (!dupEvent) {
+      if (!dupEvent && calcAlgum) {
         const event = {
           id: uid(),
           processId,
           eventNumber: 'DJEN-' + dataDispo,
           type: pub.tipoComunicacao || 'Intimação DJEN',
-          date: formatDate(calc.publication),
+          date: formatDate(calcAlgum.publication),
           startPage: 0, endPage: 0, pageCount: 0,
           sourceFile: 'DJEN',
           djenHash: pub.hash,

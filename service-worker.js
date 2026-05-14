@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.40.0 (Parser detecta ato + dropdown de recursos cabíveis no card DJEN)
-const CACHE_NAME = 'uc-juridico-v6-40-0';
+// Service Worker — UC Jurídico v6.41.0 (DJEN: múltiplos recursos por publicação — auto-add no card)
+const CACHE_NAME = 'uc-juridico-v6-41-0';
 const APP_SHELL = [
   './',
   './index.html',
