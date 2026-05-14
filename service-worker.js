@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.47.0 (MNI docs: parser calibrado pro TJGO Projudi + metadata por evento)
-const CACHE_NAME = 'uc-juridico-v6-47-0';
+// Service Worker — UC Jurídico v6.47.1 (MNI docs: botão 🔗 abre Projudi web direto pelo hash)
+const CACHE_NAME = 'uc-juridico-v6-47-1';
 const APP_SHELL = [
   './',
   './index.html',

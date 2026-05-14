@@ -3629,13 +3629,18 @@ function _renderEventoTimeline(e, notesCount) {
   const docsHtml = (e.mniDocs && e.mniDocs.length > 0) ? `
     <div style="margin-top: 8px; display: flex; gap: 6px; flex-wrap: wrap;" onclick="event.stopPropagation();">
       ${e.mniDocs.map(d => {
-        const icon = d.hasContent ? '⬇' : '📄';
+        // Ícone reflete o caminho de acesso:
+        //   ⬇ blob local (download direto)
+        //   🔗 hash presente — abrirá no Projudi web
+        //   📄 só metadata, sem hash → modal info
+        const icon = d.hasContent ? '⬇' : (d.hash ? '🔗' : '📄');
+        const acao = d.hasContent ? 'baixar' : (d.hash ? 'abrir no Projudi (precisa estar logado)' : 'ver metadata');
         const titleParts = [
           d.tituloLegivel || d.tipoDocumento || '',
           d.mimetype || '',
           d.dataHora ? _formatEventoData(d.dataHora) : '',
           d.hash ? 'hash ' + String(d.hash).slice(0, 12) : '',
-          d.hasContent ? 'clique pra baixar' : 'só metadata (clique pra ver info)'
+          'clique pra ' + acao
         ].filter(Boolean).join(' · ');
         const bg = d.hasContent ? '#fff' : 'var(--uc-cream)';
         const opacity = d.hasContent ? '1' : '0.85';
@@ -5004,8 +5009,8 @@ async function openEventDetail(eventId) {
     <h4 class="font-serif font-semibold smallcaps mb-2" style="color: var(--uc-black);">📎 Documentos vinculados (${e.mniDocs.length})</h4>
     <div style="display: flex; flex-direction: column; gap: 6px; margin-bottom: 16px;">
       ${e.mniDocs.map(d => {
-        const btnLabel = d.hasContent ? '⬇ Baixar' : '📄 Info';
-        const btnClass = d.hasContent ? 'btn-secondary' : 'btn-outline';
+        const btnLabel = d.hasContent ? '⬇ Baixar' : (d.hash ? '🔗 Abrir no Projudi' : '📄 Info');
+        const btnClass = d.hasContent ? 'btn-secondary' : (d.hash ? 'btn-primary' : 'btn-outline');
         const tituloLeg = d.tituloLegivel ? `${escapeHtml(d.tituloLegivel)} · ` : '';
         return `
         <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 8px 10px; background: var(--uc-cream); border-radius: 5px; border: 1px solid var(--uc-line);">
@@ -14284,16 +14289,37 @@ function _mniBase64ToBlob(b64, mimetype = 'application/pdf') {
   return new Blob([bytes], { type: mimetype || 'application/pdf' });
 }
 
-// Baixa um documento já cacheado no store 'pdfs' (chave mni_PID_IDDOC) e
-// dispara download no browser via URL.createObjectURL + <a download>.
-// Se o blob não existe (Projudi não devolveu conteúdo via MNI — comum no
-// TJGO), abre modal informativo com a metadata pra o usuário cruzar com
-// o Projudi web e baixar manualmente.
+// Compõe URL direta pro visualizador do Projudi a partir do hash do
+// documento. Cada Projudi de tribunal estadual usa o mesmo domínio
+// prefixado por `projudi.${dominio}.jus.br`. Pattern confirmado pelo
+// TJGO (Eduardo 2026-05): /BuscaProcesso?PaginaAtual=6&hash=...&id_proc=undefined.
+// id_proc=undefined é literal — bug na origem do Projudi mas funciona.
+function _mniProjudiDocUrl(tribunalCode, hash) {
+  if (!hash) return null;
+  const tcode = String(tribunalCode || '').toUpperCase();
+  // Map tribunal MNI → base host do Projudi web
+  const baseMap = {
+    'TJGO': 'https://projudi.tjgo.jus.br',
+    'TJPR': 'https://projudi.tjpr.jus.br',
+    'TJPA': 'https://projudi.tjpa.jus.br',
+    'TJAM': 'https://projudi.tjam.jus.br',
+    'TJRR': 'https://projudi.tjrr.jus.br'
+  };
+  const base = baseMap[tcode];
+  if (!base) return null;
+  return `${base}/BuscaProcesso?PaginaAtual=6&hash=${encodeURIComponent(hash)}&id_proc=undefined`;
+}
+
+// Baixa/abre um documento. Ordem de tentativa:
+//   1. Blob cacheado localmente (quando o tribunal devolve conteúdo via MNI)
+//      → download direto via URL.createObjectURL + <a download>
+//   2. URL composta do Projudi web (TJGO/TJPR/TJPA/TJAM/TJRR) usando o hash
+//      → abre em nova aba; user precisa estar logado no Projudi
+//   3. Fallback: modal informativo com metadata pra o user cruzar manualmente
 async function _mniDocDownload(processId, idDocumento) {
   const pdfId = `mni_${processId}_${idDocumento}`;
   const rec = await DB.getPdf(pdfId);
   if (rec) {
-    // Cache local existe — download direto
     const blob = rec.blob;
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -14304,13 +14330,21 @@ async function _mniDocDownload(processId, idDocumento) {
     setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 100);
     return;
   }
-  // Sem blob: olha se temos metadata no evento pra mostrar info útil
+  // Sem blob: tenta URL direta pro Projudi web
+  const proc = await DB.getProcess(processId);
+  const tribunalCode = proc?.tribunal || proc?.mniData?.tribunal || '';
   const eventos = await DB.getEventsByProcess(processId);
   let docMeta = null;
   for (const e of eventos) {
     const found = (e.mniDocs || []).find(d => String(d.idDocumento) === String(idDocumento));
     if (found) { docMeta = found; break; }
   }
+  const projudiUrl = _mniProjudiDocUrl(tribunalCode, docMeta?.hash);
+  if (projudiUrl) {
+    window.open(projudiUrl, '_blank', 'noopener,noreferrer');
+    return;
+  }
+  // Sem URL composable: fallback pra modal info
   _mniMostrarInfoDocSemConteudo(processId, idDocumento, docMeta);
 }
 
@@ -14347,6 +14381,7 @@ function _mniMostrarInfoDocSemConteudo(processId, idDocumento, meta) {
       </div>
       <div class="flex gap-2" style="margin-top: 16px;">
         <button class="btn btn-outline" id="_mniInfoCopyId" style="flex:1;">📋 Copiar idDocumento</button>
+        ${meta?.hash ? `<button class="btn btn-outline" id="_mniInfoCopyHash">📋 Copiar hash</button>` : ''}
         <button class="btn btn-primary" id="_mniInfoClose" style="flex:1;">Fechar</button>
       </div>
     </div>`;
@@ -14356,6 +14391,13 @@ function _mniMostrarInfoDocSemConteudo(processId, idDocumento, meta) {
     try { await navigator.clipboard.writeText(String(idDocumento)); toast('idDocumento copiado', '', 'info'); }
     catch (e) { toast('Falha ao copiar', '', 'error'); }
   };
+  const copyHashBtn = document.getElementById('_mniInfoCopyHash');
+  if (copyHashBtn && meta?.hash) {
+    copyHashBtn.onclick = async () => {
+      try { await navigator.clipboard.writeText(String(meta.hash)); toast('Hash copiado', '', 'info'); }
+      catch (e) { toast('Falha ao copiar', '', 'error'); }
+    };
+  }
 }
 
 // Flow: busca todos os documentos do processo via MNI (incluirDocumentos=true)
