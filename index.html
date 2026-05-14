@@ -846,6 +846,13 @@ function _parseDateSafe(d) {
     const x = new Date(s);
     return isNaN(x) ? null : x;
   }
+  // BR display: DD/MM/YYYY [HH:MM] — alguns events DJEN antigos foram salvos
+  // com formatDate() (formato BR) ao invés de ISO. Pra back-compat.
+  m = s.match(/^(\d{2})\/(\d{2})\/(\d{4})(?:\s+(\d{2}):(\d{2}))?/);
+  if (m) {
+    const [, dd, mo, y, hh, mm] = m;
+    return new Date(Number(y), Number(mo) - 1, Number(dd), Number(hh || 12), Number(mm || 0), 0);
+  }
   // MNI raw: YYYYMMDD[HHMMSS] sem separadores
   m = s.match(/^(\d{4})(\d{2})(\d{2})(?:(\d{2})(\d{2})(\d{2})?)?$/);
   if (m) {
@@ -15003,18 +15010,45 @@ th { background: #f4f1e8; font-variant: small-caps; }
 
 <h2>Identificação</h2>
 <table>
-${p.cnj ? `<tr><th width="180">Número CNJ</th><td class="cnj">${escapeHtml(p.cnj)}</td></tr>` : ''}
-${p.client ? `<tr><th>Cliente</th><td>${escapeHtml(p.client)}</td></tr>` : ''}
-${p.court ? `<tr><th>Tribunal</th><td>${escapeHtml(p.court)}</td></tr>` : ''}
+${p.name ? `<tr><th width="180">Processo</th><td>${escapeHtml(p.name)}</td></tr>` : ''}
+${p.cnj ? `<tr><th>Número CNJ</th><td class="cnj">${escapeHtml(p.cnj)}</td></tr>` : ''}
+${p.client ? `<tr><th>Cliente</th><td>${escapeHtml(String(p.client).replace(/^\s*(?:inclui|incluir|representado\s+por|na\s+pessoa\s+de)\s+/i, '').trim())}</td></tr>` : ''}
+${p.court ? `<tr><th>Tribunal/Vara</th><td>${escapeHtml(p.court)}</td></tr>` : ''}
+${p.comarca ? `<tr><th>Comarca</th><td>${escapeHtml(p.comarca)}</td></tr>` : ''}
 ${p.type ? `<tr><th>Tipo de ação</th><td>${escapeHtml(p.type)}</td></tr>` : ''}
 ${p.area ? `<tr><th>Área</th><td>${escapeHtml(p.area)}</td></tr>` : ''}
 ${p.polo ? `<tr><th>Polo</th><td>${escapeHtml(p.polo)}</td></tr>` : ''}
+${p.valorCausa ? `<tr><th>Valor da causa</th><td>${escapeHtml(formatBRL(p.valorCausa))}</td></tr>` : ''}
+${p.dataDistribuicao ? `<tr><th>Distribuição</th><td>${escapeHtml(formatDate(p.dataDistribuicao))}</td></tr>` : ''}
 </table>
 
 ${events.length > 0 ? `<h2>Cronologia processual</h2>
 <table>
-<tr><th>Evento</th><th>Data</th><th>Tipo</th><th>Páginas</th></tr>
-${[...events].sort((a,b) => parseInt(a.eventNumber) - parseInt(b.eventNumber)).map(e => `<tr><td>${escapeHtml(e.eventNumber)}</td><td>${escapeHtml(formatDate(e.date))}</td><td>${escapeHtml(e.type)}</td><td>${e.startPage}–${e.endPage}</td></tr>`).join('')}
+<tr><th width="100">Data</th><th>Descrição</th><th width="160">Origem</th></tr>
+${[...events]
+  .map(e => ({ e, d: _parseDateSafe(e.date) || _parseDateSafe(e.addedAt) || new Date(0) }))
+  .sort((a, b) => b.d - a.d)  // mais recente primeiro (top of table = head do processo)
+  .map(({ e }) => {
+    const isMni = e.type === 'movimento_mni';
+    const isDjen = String(e.eventNumber || '').startsWith('DJEN-');
+    const dataFmt = formatDate(e.date) || '—';
+    let descricao, origem;
+    if (isMni) {
+      descricao = e.description || '(movimento sem descrição)';
+      const code = String(e.eventNumber || '').replace(/^MNI-/, '');
+      origem = `MNI${code ? ' · cód. ' + escapeHtml(code) : ''}`;
+    } else if (isDjen) {
+      descricao = e.type || 'Intimação';
+      origem = 'DJEN';
+    } else {
+      // PDF indexado (eventos antigos com páginas)
+      descricao = `${escapeHtml(e.type || 'Evento')}${e.eventNumber ? ' · ev. ' + escapeHtml(e.eventNumber) : ''}`;
+      const pgs = (Number.isFinite(e.startPage) && Number.isFinite(e.endPage))
+        ? `PDF pgs ${e.startPage}–${e.endPage}` : 'Manual';
+      origem = pgs;
+    }
+    return `<tr><td>${escapeHtml(dataFmt)}</td><td>${escapeHtml(descricao)}</td><td>${origem}</td></tr>`;
+  }).join('')}
 </table>` : ''}
 
 ${deadlines.filter(d => prazoEstaAtivo(d)).length > 0 ? `<h2>Prazos pendentes</h2>
@@ -17023,7 +17057,14 @@ function djenInferProcessFromPublication(pub) {
   // Extract polo ativo from text if possible
   let cliente = '';
   const m = (pub.texto || '').match(/POLO\s+ATIVO\s*:?\s*([^\n]+?)(?:\s+REPRESENTANTES|\s+POLO\s+PASSIVO|$)/i);
-  if (m) cliente = m[1].trim().replace(/\s{2,}/g, ' ').slice(0, 80);
+  if (m) {
+    cliente = m[1].trim().replace(/\s{2,}/g, ' ');
+    // Limpa continuações comuns que vazam do texto da publicação e poluem o
+    // campo cliente (ex: "X, inclui Y" → quer só X; "X representado por..." → só X)
+    cliente = cliente.replace(/\s*[,;]\s*(?:inclui|incluir|representado\s+por|na\s+pessoa\s+de|por\s+seu).*$/i, '').trim();
+    cliente = cliente.replace(/^(?:inclui|incluir|representado\s+por|na\s+pessoa\s+de|por\s+seu)\s+/i, '').trim();
+    cliente = cliente.slice(0, 80);
+  }
   // Try to detect area from tribunal
   let area = 'Outros';
   if (/TRF|JF/i.test(tribunal)) area = 'Tributário';

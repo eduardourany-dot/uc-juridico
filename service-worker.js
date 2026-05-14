@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.47.2 (MNI docs: pivot pra modal "copia CNJ + abre Projudi" — hash sozinho dá Acesso negado)
-const CACHE_NAME = 'uc-juridico-v6-47-2';
+// Service Worker — UC Jurídico v6.48.0 (Ficha processual: cronologia inteligente + identificação completa + datas BR)
+const CACHE_NAME = 'uc-juridico-v6-48-0';
 const APP_SHELL = [
   './',
   './index.html',
