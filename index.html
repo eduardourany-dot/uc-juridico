@@ -5256,7 +5256,18 @@ function inferirTribunal(court) {
 const _DIAS_SEMANA = ['domingo', 'segunda', 'terça', 'quarta', 'quinta', 'sexta', 'sábado'];
 function diaSemana(d) { return _DIAS_SEMANA[d.getDay()]; }
 
-// Cálculo completo aplicando art. 219 e 224 CPC
+// Cálculo completo aplicando art. 219 e 224 CPC.
+//
+// Doutrina e jurisprudência prevalentes (STJ AgInt no REsp 1.876.495/SP):
+//   1. Lei 11.419/2006 art. 4º §3º: data da publicação = 1º dia útil
+//      seguinte à disponibilização.
+//   2. CPC art. 224 caput: "exclui o dia do começo" → o "dia do começo"
+//      é o dia da PUBLICAÇÃO (que é também o dia da intimação ficta).
+//   3. O 1º dia útil seguinte à publicação é o TERMO INICIAL da contagem
+//      e JÁ É O DIA 1 — incluído, NÃO excluído.
+//
+// Ex: pub 13/05 (qua) → marco 14/05 (qui) = dia 1.
+//     Prazo 5 d.ú.: 14=1, 15=2, 18=3, 19=4, 20=5 → vence 20/05.
 function calcularDataFatal(opts) {
   const dataPublicacao = opts.dataPublicacao instanceof Date ? new Date(opts.dataPublicacao) : new Date(opts.dataPublicacao);
   dataPublicacao.setHours(12, 0, 0, 0);
@@ -5264,22 +5275,23 @@ function calcularDataFatal(opts) {
   const unidade = opts.unidade || 'UTEIS';
   const tribunal = opts.tribunal || 'NACIONAL';
 
-  // Marco inicial = "dia do começo" no art. 224 CPC: primeiro dia útil seguinte
-  // à publicação. ESSE DIA É EXCLUÍDO da contagem (art. 224 caput).
+  // Marco inicial = 1º dia útil seguinte à publicação. É o termo a quo da
+  // contagem — INCLUÍDO como dia 1 do prazo (STJ AgInt REsp 1.876.495/SP).
   const marcoInicial = proximoDiaUtil(_addDays(dataPublicacao, 1), tribunal);
 
   const exclusoes = [];
   let dataFatal;
 
   if (unidade === 'CORRIDOS') {
-    // dias corridos: marco excluído → data fatal = marco + prazoDias dias corridos
-    dataFatal = _addDays(marcoInicial, prazoDias);
+    // dias corridos: marco = dia 1; prazo N termina em marco + (N-1).
+    dataFatal = _addDays(marcoInicial, prazoDias - 1);
     // se cair em dia não útil, prorroga (art. 224 §1º CPC)
     while (!isDiaUtil(dataFatal, tribunal)) dataFatal = _addDays(dataFatal, 1);
   } else {
-    // dias úteis: marco excluído → contar prazoDias dias úteis a partir do dia seguinte
+    // dias úteis: marco já é dia 1 (sempre útil — proximoDiaUtil garante).
+    // Contar prazoDias-1 dias úteis adicionais a partir do dia seguinte.
     dataFatal = new Date(marcoInicial);
-    let contados = 0;
+    let contados = 1; // marco conta como dia 1
     while (contados < prazoDias) {
       dataFatal = _addDays(dataFatal, 1);
       if (isDiaUtil(dataFatal, tribunal)) {
@@ -5339,21 +5351,26 @@ function addBusinessDays(date, days) {
 // criaremos flag por tipo de ato.
 function __testarCalculo() {
   const casos = [
+    // Esperados recomputados em 2026-05-13 após fix do off-by-one
+    // (marco inicial agora INCLUÍDO como dia 1 do prazo, conforme STJ
+    // AgInt REsp 1.876.495/SP). Todos os esperados são 1 dia útil antes
+    // do que estavam — exceto onde a prorrogação absorvia a diferença
+    // (testes 3 e 14: CORRIDOS que caíam em dia não útil).
     {
       n: 1,
       desc: 'CPC 15 d.ú. — caso clássico (publicação numa segunda)',
       input: { dataPublicacao: '2026-05-04', prazoDias: 15, unidade: 'UTEIS', tribunal: 'TJGO' },
-      esperado: '2026-05-26'
+      esperado: '2026-05-25'
     },
     {
       n: 2,
       desc: 'CPC 15 d.ú. + dobro Fazenda → 30 d.ú. (cruza Corpus Christi 04/06/2026)',
       input: { dataPublicacao: '2026-05-04', prazoDias: 15, unidade: 'UTEIS', tribunal: 'TJGO', emDobro: true },
-      esperado: '2026-06-17'
+      esperado: '2026-06-16'
     },
     {
       n: 3,
-      desc: 'Tributário 30 d.c. cruzando recesso (data fatal cairia em 15/01/2027 → prorroga)',
+      desc: 'Tributário 30 d.c. cruzando recesso (cai dentro do recesso → prorroga p/ 21/01)',
       input: { dataPublicacao: '2026-12-15', prazoDias: 30, unidade: 'CORRIDOS', tribunal: 'NACIONAL' },
       esperado: '2027-01-21'
     },
@@ -5361,65 +5378,65 @@ function __testarCalculo() {
       n: 4,
       desc: 'Cruza Corpus Christi (UTEIS, publicação 28/05/2026)',
       input: { dataPublicacao: '2026-05-28', prazoDias: 15, unidade: 'UTEIS', tribunal: 'TJGO' },
-      esperado: '2026-06-22'
+      esperado: '2026-06-19'
     },
     {
       n: 5,
       desc: 'Cruza Carnaval 2026 (16-17/02), prazo 5 d.ú. publicado 12/02',
       input: { dataPublicacao: '2026-02-12', prazoDias: 5, unidade: 'UTEIS', tribunal: 'TJGO' },
-      esperado: '2026-02-24'
+      esperado: '2026-02-23'
     },
     {
       n: 6,
       desc: 'Trabalhista 8 d.ú. (Recurso Ordinário)',
       input: { dataPublicacao: '2026-05-04', prazoDias: 8, unidade: 'UTEIS', tribunal: 'TRT18' },
-      esperado: '2026-05-15'
+      esperado: '2026-05-14'
     },
     {
       n: 7,
       desc: 'Apelação 15 d.ú. publicada numa sexta (08/05/2026)',
       input: { dataPublicacao: '2026-05-08', prazoDias: 15, unidade: 'UTEIS', tribunal: 'TJGO' },
-      esperado: '2026-06-01'
+      esperado: '2026-05-29'
     },
     {
       n: 8,
-      desc: 'Marco atravessa recesso E Carnaval 2027 (08-09/02): pub 15/12/2026, prazo 15 d.ú.',
+      desc: 'Marco atravessa recesso (pub 15/12/2026, 15 d.ú.)',
       input: { dataPublicacao: '2026-12-15', prazoDias: 15, unidade: 'UTEIS', tribunal: 'TJGO' },
-      esperado: '2027-02-10'
+      esperado: '2027-02-05'
     },
     {
       n: 9,
-      desc: 'Art. 224 §1º — CORRIDO 1 dia: marco numa sexta, +1 cai no sábado → prorroga p/ segunda',
+      desc: 'CORRIDO 1 dia: marco numa sexta (08/05) → conta como dia 1 → vence sexta',
       input: { dataPublicacao: '2026-05-07', prazoDias: 1, unidade: 'CORRIDOS', tribunal: 'NACIONAL' },
-      esperado: '2026-05-11'
+      esperado: '2026-05-08'
     },
     {
       n: 10,
       desc: 'Feriado nacional fixo no meio (Tiradentes 21/04/2026), prazo 5 d.ú.',
       input: { dataPublicacao: '2026-04-16', prazoDias: 5, unidade: 'UTEIS', tribunal: 'TJGO' },
-      esperado: '2026-04-27'
+      esperado: '2026-04-24'
     },
     {
       n: 11,
       desc: 'Embargos de declaração trabalhistas — 5 d.ú. CLT art. 897-A',
       input: { dataPublicacao: '2026-05-04', prazoDias: 5, unidade: 'UTEIS', tribunal: 'TRT18' },
-      esperado: '2026-05-12'
+      esperado: '2026-05-11'
     },
     {
       n: 12,
       desc: 'Pub na sexta antes do recesso (18/12/2026), 5 d.ú. → marco salta para 21/01/2027',
       input: { dataPublicacao: '2026-12-18', prazoDias: 5, unidade: 'UTEIS', tribunal: 'TJGO' },
-      esperado: '2027-01-28'
+      esperado: '2027-01-27'
     },
     {
       n: 13,
-      desc: 'Pub dentro do recesso (28/12/2026), 15 d.ú. → cruza Carnaval 2027 (08-09/02)',
+      desc: 'Pub dentro do recesso (28/12/2026), 15 d.ú. → vence em fev/2027',
       input: { dataPublicacao: '2026-12-28', prazoDias: 15, unidade: 'UTEIS', tribunal: 'TJGO' },
-      esperado: '2027-02-15'
+      esperado: '2027-02-12'
     },
     {
       n: 14,
-      desc: 'CORRIDO cruzando recesso — 30 d.c. de 11/12/2026 cai 10/01/2027 (dom, recesso) → prorroga 21/01',
+      desc: 'CORRIDO cruzando recesso — 30 d.c. de 11/12/2026 cai dentro do recesso → prorroga 21/01',
       input: { dataPublicacao: '2026-12-10', prazoDias: 30, unidade: 'CORRIDOS', tribunal: 'NACIONAL' },
       esperado: '2027-01-21'
     },
@@ -5427,7 +5444,19 @@ function __testarCalculo() {
       n: 15,
       desc: 'Dobro Defensoria + Carnaval 2026: 5 d.ú. × 2 = 10, pub 02/02/2026',
       input: { dataPublicacao: '2026-02-02', prazoDias: 5, unidade: 'UTEIS', tribunal: 'TJGO', emDobro: true },
-      esperado: '2026-02-19'
+      esperado: '2026-02-18'
+    },
+    {
+      n: 16,
+      desc: 'Caso DJEN típico — pub 13/05/2026 (qua), 5 d.ú. → vence 20/05',
+      input: { dataPublicacao: '2026-05-13', prazoDias: 5, unidade: 'UTEIS', tribunal: 'TJGO' },
+      esperado: '2026-05-20'
+    },
+    {
+      n: 17,
+      desc: 'Caso DJEN típico — pub 13/05/2026 (qua), 15 d.ú. → vence 03/06',
+      input: { dataPublicacao: '2026-05-13', prazoDias: 15, unidade: 'UTEIS', tribunal: 'TJGO' },
+      esperado: '2026-06-03'
     }
   ];
 

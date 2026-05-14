@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.41.1 (DJEN: remove "em dobro" do slot + mostra data final do prazo no card)
-const CACHE_NAME = 'uc-juridico-v6-41-1';
+// Service Worker — UC Jurídico v6.42.0 (FIX off-by-one no cálculo de prazo — marco inicial incluído como dia 1)
+const CACHE_NAME = 'uc-juridico-v6-42-0';
 const APP_SHELL = [
   './',
   './index.html',
