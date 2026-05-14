@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.39.5 (DJEN: "Criar processo na importação" também desmarcado por padrão)
-const CACHE_NAME = 'uc-juridico-v6-39-5';
+// Service Worker — UC Jurídico v6.40.0 (Parser detecta ato + dropdown de recursos cabíveis no card DJEN)
+const CACHE_NAME = 'uc-juridico-v6-40-0';
 const APP_SHELL = [
   './',
   './index.html',

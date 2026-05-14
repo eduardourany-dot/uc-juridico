@@ -5952,6 +5952,28 @@ const TIPOS_ATO = {
   EMB_DECL_TRAB:      { prazo: 5,  unidade: 'UTEIS',    baseLegal: 'CLT art. 897-A',   label: 'Embargos de declaração trabalhistas' },
   CONTRARRAZOES_TRAB: { prazo: 8,  unidade: 'UTEIS',    baseLegal: 'CLT art. 900',     label: 'Contrarrazões trabalhista' },
 
+  // Atos do juiz (CPC art. 203) — não trazem prazo próprio, mas habilitam
+  // recursos cujos prazos são fixados em lei. `recursosCabiveis` lista os
+  // recursos típicos pra exibir como sugestão no card DJEN.
+  DECISAO_INTERLOCUTORIA: {
+    prazo: null, unidade: null,
+    baseLegal: 'CPC art. 203 §2º',
+    label: 'Decisão interlocutória',
+    recursosCabiveis: ['EMBARGOS_DECL', 'AGRAVO_INSTR']
+  },
+  SENTENCA: {
+    prazo: null, unidade: null,
+    baseLegal: 'CPC art. 203 §1º',
+    label: 'Sentença',
+    recursosCabiveis: ['EMBARGOS_DECL', 'APELACAO']
+  },
+  DESPACHO: {
+    prazo: null, unidade: null,
+    baseLegal: 'CPC art. 203 §3º',
+    label: 'Despacho de mero expediente',
+    recursosCabiveis: [] // CPC art. 1.001: dos despachos não cabe recurso
+  },
+
   // Fallback
   CIENCIA:            { prazo: null, unidade: null,    baseLegal: null,              label: 'Ciência (sem prazo)' }
 };
@@ -6038,6 +6060,54 @@ function _refinarTipo(teor) {
   return 'MANIFESTACAO'; // default conservador
 }
 
+// Tier 2.5 — detecção de tipo de ATO (decisão/sentença/despacho).
+// Usado quando o texto não menciona prazo nem nome de recurso explícitos,
+// mas dá pra inferir o que o juiz fez. Devolve o tipo do ATO + recursos
+// cabíveis pra o usuário escolher no card. Ordem importa: sentença mais
+// específica antes da decisão (que tem padrões mais genéricos como "defiro").
+const ATOS_KEYWORDS = [
+  { tipo: 'SENTENCA', keywords: [
+    'sentença', 'sentenca',
+    'julgo procedente', 'julgo improcedente', 'julgo parcialmente procedente',
+    'julgo extinto', 'julgo extinta', 'extingo o processo', 'extingo o feito',
+    'homologo o acordo', 'homologo a transação', 'homologo a transacao',
+    'resolução do mérito', 'resolucao do merito',
+    'condeno o réu', 'condeno o reu', 'condeno a parte',
+    'sentencio'
+  ]},
+  { tipo: 'DECISAO_INTERLOCUTORIA', keywords: [
+    'decisão interlocutória', 'decisao interlocutoria',
+    'decisão saneadora', 'decisao saneadora',
+    'saneamento do processo', 'saneamento e organização',
+    'concedo a tutela', 'denego a tutela',
+    'concedo a liminar', 'indefiro a liminar',
+    'recebo o recurso', 'não recebo o recurso',
+    'defiro o pedido', 'indefiro o pedido',
+    'defiro parcialmente', 'indefiro parcialmente',
+    'aceito a denúncia', 'rejeito a denúncia',
+    'decreto a indisponibilidade', 'decreto o bloqueio',
+    // padrões formais ("DECISÃO" em caixa alta como cabeçalho)
+    'decisão:', 'decisao:', 'decido:'
+  ]},
+  { tipo: 'DESPACHO', keywords: [
+    'despacho de mero expediente', 'mero expediente',
+    'designo audiência', 'designo audiencia',
+    'venham os autos conclusos', 'voltem os autos conclusos',
+    'abra-se vista', 'abra vista',
+    'à conclusão', 'a conclusao', 'remetam-se ao cartório',
+    'cumpra-se', 'oficie-se'
+  ]}
+];
+
+function _detectarTipoAto(teor) {
+  const t = String(teor || '').toLowerCase();
+  for (const ato of ATOS_KEYWORDS) {
+    const hit = ato.keywords.find(kw => t.includes(kw.toLowerCase()));
+    if (hit) return { tipo: ato.tipo, evidencia: hit };
+  }
+  return null;
+}
+
 /**
  * Recebe o teor de uma publicação e devolve estrutura PrazoExtraido.
  * Nunca lança — em caso de erro, retorna confianca baixa + requerRevisao.
@@ -6095,6 +6165,27 @@ function parsearPublicacao(teor) {
       confianca: 0.70,
       fonte: 'keywords',
       evidencia: hits[0],
+      requerRevisao: true
+    };
+  }
+
+  // Tier 2.5 — detecção de ato (decisão/sentença/despacho) sem prazo explícito.
+  // Quando bate, retornamos o tipo do ato + recursos cabíveis pra o usuário
+  // escolher no card. `prazoDias=null` força escolha consciente.
+  const ato = _detectarTipoAto(teorOriginal);
+  if (ato) {
+    const tipoData = TIPOS_ATO[ato.tipo];
+    return {
+      tipo: ato.tipo,
+      label: tipoData.label,
+      prazoDias: null,
+      unidade: null,
+      baseLegal: tipoData.baseLegal,
+      recursosCabiveis: tipoData.recursosCabiveis || [],
+      emDobro,
+      confianca: 0.65,
+      fonte: 'ato_detectado',
+      evidencia: ato.evidencia,
       requerRevisao: true
     };
   }
@@ -15128,6 +15219,114 @@ async function djenShowResultsModal(classified, oabs, dataInicio, dataFim) {
 // dando ao advogado prova material da data de publicação e localização
 // no DJ pra defesa em caso de discussão sobre marco inicial do prazo.
 
+// ====================================================================
+// Recurso/ato selector — escolha consciente do prazo (sprint DJEN.recurso)
+// ====================================================================
+// Quando o parser identifica um ATO (decisão/sentença) mas não consegue
+// extrair prazo (porque depende de qual recurso o advogado vai interpor),
+// expomos um <select> no card listando os recursos cabíveis no topo +
+// outros recursos comuns em optgroup. Trocar no select auto-preenche os
+// inputs de prazo/unidade com os valores legais de cada recurso.
+
+// Lista de recursos/atos pra "Outros" no dropdown (ordem de exibição).
+const _DJEN_RECURSOS_OUTROS = [
+  // Cível CPC
+  'CONTESTACAO', 'REPLICA', 'MANIFESTACAO',
+  'APELACAO', 'CONTRARRAZOES_APEL',
+  'AGRAVO_INSTR', 'AGRAVO_INTERNO',
+  'EMBARGOS_DECL',
+  'RESP', 'RE', 'AGRAVO_RESP_RE', 'EMB_DIVERGENCIA',
+  'EMB_EXECUCAO', 'EMB_EXEC_FISCAL', 'IMPUGNACAO_CUMPR',
+  // Tributário
+  'DEFESA_AI_FEDERAL', 'REC_VOL_CARF', 'MANIF_INCONFORM',
+  // Trabalhista
+  'DEFESA_TRAB', 'REC_ORDINARIO', 'AGRAVO_INSTR_TRAB', 'REC_REVISTA',
+  'EMB_DECL_TRAB', 'CONTRARRAZOES_TRAB'
+];
+
+// Formata uma <option> de recurso. data-* attrs guardam prazo/unidade/base
+// pro change handler popular os outros inputs sem precisar voltar no JS.
+function _djenFmtRecursoOption(code, selected = false) {
+  const t = TIPOS_ATO[code];
+  if (!t) return '';
+  const prazoStr = t.prazo
+    ? `${t.prazo}d ${t.unidade === 'CORRIDOS' ? 'corridos' : 'úteis'}`
+    : '—';
+  const baseLegal = t.baseLegal || '';
+  const sufixo = baseLegal ? ` · ${baseLegal}` : '';
+  return `<option value="${code}" data-prazo="${t.prazo || ''}" data-unidade="${t.unidade || 'UTEIS'}" data-baselegal="${escapeHtml(baseLegal)}" data-label="${escapeHtml(t.label)}"${selected ? ' selected' : ''}>${escapeHtml(t.label)} (${escapeHtml(prazoStr)}${escapeHtml(sufixo)})</option>`;
+}
+
+// Constrói as <options> do dropdown a partir do resultado do parser.
+function _djenBuildRecursoOptions(parsed) {
+  const hasPrazo = parsed.prazoDias != null && parsed.prazoDias > 0;
+  const recursosCabiveis = parsed.recursosCabiveis || [];
+  const detectedTipo = parsed.tipo;
+  let html = '';
+
+  // Placeholder no topo quando user precisa escolher
+  if (!hasPrazo && recursosCabiveis.length > 0) {
+    html += `<option value="" selected disabled>⚠ ${escapeHtml(parsed.label)} — escolha recurso ↓</option>`;
+  } else if (!hasPrazo && detectedTipo !== 'CIENCIA') {
+    html += `<option value="" selected disabled>— escolha recurso/ato —</option>`;
+  }
+
+  // Recursos cabíveis ao topo (quando ato foi detectado)
+  if (recursosCabiveis.length > 0) {
+    html += `<optgroup label="Recursos cabíveis (${escapeHtml(TIPOS_ATO[detectedTipo]?.label || 'ato detectado')})">`;
+    for (const code of recursosCabiveis) html += _djenFmtRecursoOption(code, false);
+    html += `</optgroup>`;
+  }
+
+  // Tipo detectado pelo parser com prazo (Tier 1/2) — pré-selecionado
+  if (hasPrazo && detectedTipo && !recursosCabiveis.includes(detectedTipo) && detectedTipo !== 'CIENCIA') {
+    html += `<optgroup label="Detectado pelo parser">`;
+    html += _djenFmtRecursoOption(detectedTipo, true);
+    html += `</optgroup>`;
+  }
+
+  // Outros recursos
+  const jaListados = new Set([...recursosCabiveis, detectedTipo]);
+  html += `<optgroup label="Outros recursos/atos">`;
+  for (const code of _DJEN_RECURSOS_OUTROS) {
+    if (jaListados.has(code)) continue;
+    html += _djenFmtRecursoOption(code, false);
+  }
+  html += `</optgroup>`;
+
+  // Ciência ao final (sempre disponível)
+  html += `<option value="CIENCIA" data-prazo="" data-unidade="UTEIS" data-baselegal="" data-label="Ciência (sem prazo)"${detectedTipo === 'CIENCIA' ? ' selected' : ''}>⊙ Ciência (sem prazo)</option>`;
+
+  return html;
+}
+
+// Handler do change no <select data-djen-tipo-ato>. Sincroniza os inputs
+// de prazo/unidade e a base legal exibida no badge.
+function _djenRecursoChange(select) {
+  const opt = select.options[select.selectedIndex];
+  if (!opt) return;
+  const card = select.closest('[data-djen-id]');
+  if (!card) return;
+  const prazoInput = card.querySelector('[data-djen-prazo]');
+  const unidadeSelect = card.querySelector('[data-djen-unidade]');
+  const baseLegalStatic = card.querySelector('[data-djen-baselegal-static]');
+  const prazoVal = opt.dataset.prazo || '';
+  const unidadeVal = opt.dataset.unidade || 'UTEIS';
+  if (prazoInput) {
+    prazoInput.value = prazoVal;
+    prazoInput.disabled = !prazoVal;
+    prazoInput.style.opacity = prazoVal ? '1' : '0.5';
+  }
+  if (unidadeSelect) unidadeSelect.value = unidadeVal;
+  if (baseLegalStatic) baseLegalStatic.textContent = opt.dataset.baselegal || '';
+  // Reset visual do warning border (escolha foi feita)
+  select.style.borderColor = 'var(--uc-line)';
+  select.style.background = '';
+  // Esconde o "escolha um recurso ↓" hint
+  const hint = select.parentElement?.querySelector('span[style*="amber"]');
+  if (hint) hint.remove();
+}
+
 // Tenta vários nomes de campo até achar valor não-vazio.
 function _djenGet(pub, ...keys) {
   for (const k of keys) {
@@ -15252,37 +15451,39 @@ function djenRenderPubRow(pub, kind, idx) {
           ${(() => {
             const parsed = parsearPublicacao(pub.texto || '');
             pub._parsed = parsed; // disponível pra djenImportSelected
-            const isCiencia = parsed.tipo === 'CIENCIA';
-            const prazoDefault = parsed.prazoDias || 15;
-            const unidLabel = parsed.unidade === 'CORRIDOS' ? 'corridos' : 'úteis';
+            const hasPrazo = parsed.prazoDias != null && parsed.prazoDias > 0;
+            const recursosCabiveis = parsed.recursosCabiveis || [];
+            const precisaEscolher = !hasPrazo && recursosCabiveis.length > 0; // ato detectado mas sem recurso escolhido
+            const prazoDefault = hasPrazo ? String(parsed.prazoDias) : '';
+            const unidadeDefault = parsed.unidade || 'UTEIS';
             const confColor = parsed.confianca >= 0.85 ? 'badge-green'
                             : parsed.confianca >= 0.60 ? 'badge-amber'
                             : 'badge-gray';
             return `
-              <div style="margin-top: 6px; font-size: 11px;">
+              <div style="margin-top: 8px; font-size: 11px;">
+                <div style="display:flex; flex-direction: column; gap: 4px; margin-bottom: 6px;">
+                  <span style="color: var(--uc-warm-gray); text-transform: uppercase; letter-spacing: 0.04em; font-size: 10px;">Recurso/ato a agendar${precisaEscolher ? ' <span style="color: var(--uc-amber); font-weight: 600;">— escolha um recurso ↓</span>' : ''}</span>
+                  <select data-djen-tipo-ato onchange="_djenRecursoChange(this)" style="padding: 4px 8px; border: 1px solid ${precisaEscolher ? 'var(--uc-amber)' : 'var(--uc-line)'}; border-radius: 4px; font-size: 11px; ${precisaEscolher ? 'background: #fff8e8;' : ''}">
+                    ${_djenBuildRecursoOptions(parsed)}
+                  </select>
+                </div>
                 <label style="display:inline-flex; align-items:center; gap:6px;">
                   Prazo (dias):
-                  <input type="number" data-djen-prazo value="${prazoDefault}" min="1" max="365" style="width: 60px; padding: 2px 6px; border: 1px solid var(--uc-line); border-radius: 4px;">
+                  <input type="number" data-djen-prazo value="${prazoDefault}" min="1" max="365" placeholder="—" style="width: 70px; padding: 2px 6px; border: 1px solid var(--uc-line); border-radius: 4px; ${precisaEscolher ? 'opacity: 0.5;' : ''}" ${precisaEscolher ? 'disabled' : ''}>
                   <select data-djen-unidade style="padding: 2px 4px; border: 1px solid var(--uc-line); border-radius: 4px; font-size: 11px;">
-                    <option value="UTEIS" ${parsed.unidade === 'UTEIS' || !parsed.unidade ? 'selected' : ''}>úteis</option>
-                    <option value="CORRIDOS" ${parsed.unidade === 'CORRIDOS' ? 'selected' : ''}>corridos</option>
+                    <option value="UTEIS" ${unidadeDefault === 'UTEIS' ? 'selected' : ''}>úteis</option>
+                    <option value="CORRIDOS" ${unidadeDefault === 'CORRIDOS' ? 'selected' : ''}>corridos</option>
                   </select>
                   <label style="display:inline-flex; align-items:center; gap:3px; margin-left: 8px;">
                     <input type="checkbox" data-djen-dobro ${parsed.emDobro ? 'checked' : ''}>
                     <span style="font-size: 10px;">em dobro</span>
                   </label>
                 </label>
-                ${!isCiencia ? `
-                  <div style="margin-top: 4px; display:flex; gap:6px; flex-wrap: wrap; align-items:center;">
-                    <span class="badge ${confColor}" style="font-size: 10px;" title="Confiança ${(parsed.confianca*100).toFixed(0)}% · ${parsed.fonte}">⚙ ${escapeHtml(parsed.label)}</span>
-                    ${parsed.baseLegal ? `<span style="font-size: 10px; color: var(--uc-warm-gray);">${escapeHtml(parsed.baseLegal)}</span>` : ''}
-                    ${parsed.requerRevisao ? `<span class="badge badge-amber" style="font-size: 10px;" title="Confiança baixa — revisar manualmente">⚠ revisar</span>` : ''}
-                  </div>
-                ` : `
-                  <div style="margin-top: 4px;">
-                    <span class="badge badge-gray" style="font-size: 10px;">parser: ciência (sem prazo identificado)</span>
-                  </div>
-                `}
+                <div style="margin-top: 6px; display:flex; gap:6px; flex-wrap: wrap; align-items:center;">
+                  <span class="badge ${confColor}" style="font-size: 10px;" title="Confiança ${(parsed.confianca*100).toFixed(0)}% · fonte: ${escapeHtml(parsed.fonte)}${parsed.evidencia ? ' · trecho: "' + escapeHtml(String(parsed.evidencia).slice(0, 80)) + '"' : ''}">⚙ parser: ${escapeHtml(parsed.label)}</span>
+                  ${parsed.baseLegal ? `<span style="font-size: 10px; color: var(--uc-warm-gray);" data-djen-baselegal-static>${escapeHtml(parsed.baseLegal)}</span>` : ''}
+                  ${parsed.fonte === 'ato_detectado' ? `<span class="badge badge-amber" style="font-size: 10px;" title="Parser identificou o ato mas o prazo depende de qual recurso você optar por interpor. Escolha no menu acima.">⚠ escolha recurso</span>` : (parsed.requerRevisao ? `<span class="badge badge-amber" style="font-size: 10px;" title="Confiança baixa — revisar manualmente">⚠ revisar</span>` : '')}
+                </div>
               </div>
             `;
           })()}
@@ -15580,12 +15781,19 @@ async function djenImportSelected(modal) {
     const unidadeSelect = card.querySelector('[data-djen-unidade]');
     const dobroCheckbox = card.querySelector('[data-djen-dobro]');
     const createProcCheckbox = card.querySelector('[data-djen-create-process]');
+    const tipoAtoSelect = card.querySelector('[data-djen-tipo-ato]');
+    const tipoAto = tipoAtoSelect?.value || '';
+    const prazoRaw = prazoInput?.value || '';
+    const prazoParsed = parseInt(prazoRaw);
     rowSettings[hash] = {
       selected: checkbox?.checked,
-      prazo: parseInt(prazoInput?.value || '15'),
+      prazo: Number.isFinite(prazoParsed) && prazoParsed > 0 ? prazoParsed : null,
       unidade: unidadeSelect?.value || 'UTEIS',
       emDobro: !!dobroCheckbox?.checked,
-      createProcess: createProcCheckbox?.checked ?? false
+      createProcess: createProcCheckbox?.checked ?? false,
+      tipoAto,                                              // código selecionado no dropdown
+      tipoAtoLabel: TIPOS_ATO[tipoAto]?.label || '',
+      tipoAtoBaseLegal: TIPOS_ATO[tipoAto]?.baseLegal || ''
     };
   });
 
@@ -15627,20 +15835,23 @@ async function djenImportSelected(modal) {
       await djenEnrichProcessFromPublication(processId, pub);
     }
 
-    // Create deadline + event if linked to process — dedupe por djenHash
-    if (processId && dataDispo) {
+    // Create deadline + event if linked to process — dedupe por djenHash.
+    // Pula criação de prazo quando user escolheu "Ciência" ou não escolheu
+    // recurso (cfg.prazo será null) — a publicação fica salva, mas sem
+    // prazo agendado (correto pra ciências e despachos irrecorríveis).
+    if (processId && dataDispo && cfg.prazo) {
       const proc = pub._proc || await DB.getProcess(processId);
       const tribunal = inferirTribunal(proc?.court || pub.tribunal || pub.nomeOrgao);
       const calc = calcDjenDeadline(dataDispo, cfg.prazo, tribunal, cfg.unidade || 'UTEIS', !!cfg.emDobro);
       const existingDeadlines = await DB.getDeadlinesByProcess(processId);
       const dupDeadline = existingDeadlines.some(x => x.djenHash === pub.hash);
       if (!dupDeadline) {
-        // Descrição: prefere o tipo extraído pelo parser quando confiança >= 0.85
+        // Descrição: prefere o tipo escolhido pelo user no dropdown (cfg.tipoAto)
+        // sobre o que o parser detectou. Fallback pro tipoComunicacao do DJEN.
         const parsed = pub._parsed || null;
-        const useParserLabel = parsed && parsed.confianca >= 0.85 && parsed.tipo !== 'CIENCIA';
-        const baseDesc = useParserLabel
-          ? parsed.label
-          : `${pub.tipoComunicacao || 'Intimação'}`;
+        const baseDesc = cfg.tipoAtoLabel
+          || (parsed && parsed.tipo !== 'CIENCIA' ? parsed.label : '')
+          || (pub.tipoComunicacao || 'Intimação');
         const deadline = {
           id: uid(),
           processId,
@@ -15656,7 +15867,11 @@ async function djenImportSelected(modal) {
           djenHash: pub.hash,
           tribunal,
           diarioCalculo: calc.diario,
-          // Fase 3: persiste resultado do parser pra auditoria/análise futura
+          // Fase 3: persiste tipo escolhido pelo user + diagnóstico do parser.
+          // `tipoEscolhido` é o que o user decidiu; `parser` é o que o
+          // sistema sugeriu — guarda os dois pra auditoria futura.
+          tipoEscolhido: cfg.tipoAto || null,
+          tipoEscolhidoBaseLegal: cfg.tipoAtoBaseLegal || null,
           parser: parsed ? {
             tipo: parsed.tipo,
             label: parsed.label,
