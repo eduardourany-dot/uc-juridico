@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.46.2 (Datas: formatDate timezone-safe + audit BR em todo o projeto)
-const CACHE_NAME = 'uc-juridico-v6-46-2';
+// Service Worker — UC Jurídico v6.46.3 (MNI docs: parser mais permissivo + modal diagnóstico do XML cru)
+const CACHE_NAME = 'uc-juridico-v6-46-3';
 const APP_SHELL = [
   './',
   './index.html',

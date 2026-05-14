@@ -1,6 +1,9 @@
 // UC Jurídico — MNI Worker genérico (multi-tribunal)
-// Versão: 0.9.0 · consultarProcesso ganha flag incluirDocumentos
-//   (parser extrai <documento> + base64 quando flag true)
+// Versão: 0.9.1 · parser de documentos mais permissivo
+//   - extrai <documento> aninhados em <movimento> (não só top-level)
+//   - tenta múltiplas tags de conteúdo: conteudo, conteudoDocumento,
+//     documentoBase64, binario
+//   - retorna xmlSnippetDocumentos quando 0 conteúdos vieram (debug)
 //
 // Roteia chamadas SOAP/MNI 2.2.2 pra múltiplos tribunais via registry interno.
 // Parser validado contra TJGO/Projudi.
@@ -140,7 +143,7 @@ export default {
       const validados = codigos.filter(c => TRIBUNAIS_REGISTRY[c].validado);
       const naoSuportados = codigos.filter(c => TRIBUNAIS_REGISTRY[c].naoSuportado);
       return json({
-        worker: 'uc-mni', versao: '0.9.0',
+        worker: 'uc-mni', versao: '0.9.1',
         total: codigos.length,
         validados, naoSuportados,
         operacoes: ['consultarProcesso', 'health', 'listarTribunais', 'detectarPorCnj']
@@ -402,7 +405,45 @@ function parseConsultarProcesso(xml) {
     }
   }
 
+  // Helper pra extrair metadata + conteúdo de um <documento> XML qualquer.
+  // Tenta múltiplas tags de conteúdo (Projudi usa <conteudo>; outros
+  // sistemas podem usar <conteudoDocumento>, <binario>, <documentoBase64>).
+  function _parseDocumentoBlock(dXml) {
+    const openTag = (dXml.match(/<(?:\w+:)?documento\b[^>]*>/) || [''])[0];
+    const idDocumento = (openTag.match(/\bidDocumento="([^"]*)"/) || [])[1] || '';
+    if (!idDocumento) return null;
+    const tipoDocumento = (openTag.match(/\btipoDocumento="([^"]*)"/) || [])[1] || '';
+    const dataHora = (openTag.match(/\bdataHora="([^"]*)"/) || [])[1] || '';
+    const mimetype = (openTag.match(/\bmimetype="([^"]*)"/) || [])[1] || 'application/pdf';
+    const descricao = _decodeXmlEntities((openTag.match(/\bdescricao="([^"]*)"/) || [])[1] || '');
+    const nivelSigilo = (openTag.match(/\bnivelSigilo="([^"]*)"/) || [])[1] || '0';
+    const hash = (openTag.match(/\bhash="([^"]*)"/) || [])[1] || '';
+    const tipoDocumentoLocal = (openTag.match(/\btipoDocumentoLocal="([^"]*)"/) || [])[1] || '';
+    // Conteúdo: tenta múltiplas variantes de tag — sistemas diferentes usam
+    // nomes distintos. Pega texto BRUTO (espaços removidos pra base64 limpo).
+    let conteudoB64 = '';
+    const variantes = ['conteudo', 'conteudoDocumento', 'documentoBase64', 'binario'];
+    for (const tag of variantes) {
+      const re = new RegExp(`<(?:\\w+:)?${tag}\\b[^>]*>([\\s\\S]*?)<\\/(?:\\w+:)?${tag}>`, 'i');
+      const m = dXml.match(re);
+      if (m && m[1].trim()) { conteudoB64 = m[1].replace(/\s+/g, ''); break; }
+    }
+    return {
+      idDocumento, tipoDocumento, tipoDocumentoLocal, dataHora,
+      dataIso: _parseDataHoraMni(dataHora),
+      mimetype, descricao, nivelSigilo, hash,
+      conteudoB64,
+      tamanhoB64: conteudoB64.length
+    };
+  }
+
   const movimentos = [];
+  const documentos = [];
+  const docsById = new Map(); // idDocumento → doc (preenchido conforme acha)
+
+  // Estratégia 1 — docs aninhados em <movimento>: Projudi tipicamente põe
+  // <documento> direto dentro de cada movimento. Vamos descer no
+  // movimento, extrair os documentos LÁ DENTRO e linkar imediatamente.
   const movsXml = procBlock.match(/<(?:\w+:)?movimento\b(?:[^>]*\/>|[^>]*>[\s\S]*?<\/(?:\w+:)?movimento>)/gi) || [];
   for (const m of movsXml) {
     const dataHora = (m.match(/<(?:\w+:)?movimento\b[^>]*\bdataHora="([^"]*)"/) || [])[1] || '';
@@ -411,61 +452,49 @@ function parseConsultarProcesso(xml) {
     const codigoLocal = (m.match(/<(?:\w+:)?movimentoLocal\b[^>]*\bcodigoMovimento="([^"]*)"/) || [])[1] || '';
     const descricao = _decodeXmlEntities((m.match(/<(?:\w+:)?movimentoLocal\b[^>]*\bdescricao="([^"]*)"/) || [])[1] || '');
     const complemento = _decodeXmlEntities(tagText(m, 'complemento') || '');
-    // Documentos vinculados ao movimento: pode vir como <vinculacaoDocumento idDocumento="X"/>
-    // OU <documentoVinculado idDocumento="X"/> — coleta ambos.
-    const docsVinculados = [];
+
+    // Documentos VINCULADOS via referência: <vinculacaoDocumento> ou
+    // <documentoVinculado> apontando pra um doc declarado em outro lugar
+    const docsVinculadosIds = [];
     const vinculacoes = m.matchAll(/<(?:\w+:)?(?:vinculacao|documento)Documento\b[^>]*\bidDocumento="([^"]*)"/g);
-    for (const v of vinculacoes) docsVinculados.push(v[1]);
+    for (const v of vinculacoes) docsVinculadosIds.push(v[1]);
+
+    // Documentos ANINHADOS direto neste movimento: extrai e linka aqui mesmo.
+    // Important: usa expressão pra ignorar self-closing tags falsas (<docu... />)
+    const movDocsXml = m.match(/<(?:\w+:)?documento\b[^>]*>[\s\S]*?<\/(?:\w+:)?documento>/gi) || [];
+    const movDocsIds = [];
+    for (const dXml of movDocsXml) {
+      const doc = _parseDocumentoBlock(dXml);
+      if (!doc) continue;
+      if (!docsById.has(doc.idDocumento)) {
+        docsById.set(doc.idDocumento, doc);
+        documentos.push(doc);
+      }
+      movDocsIds.push(doc.idDocumento);
+    }
+
     movimentos.push({
       dataHora,
       dataIso: _parseDataHoraMni(dataHora),
       codigoNacional, codigoLocal, descricao, complemento, identificador,
-      docsVinculados
+      docsVinculados: [...docsVinculadosIds, ...movDocsIds]
     });
   }
   movimentos.sort((a, b) => (b.dataHora || '').localeCompare(a.dataHora || ''));
 
-  // Documentos: extrai TODOS os <documento> dentro de <processo> com
-  // metadata + conteúdo base64 (se incluirDocumentos=true foi passado
-  // na request). Estrutura típica TJGO/Projudi:
-  //   <documento idDocumento="..." tipoDocumento="..." dataHora="..."
-  //              mimetype="application/pdf" descricao="..." nivelSigilo="0"
-  //              hash="...">
-  //     <conteudo>base64...</conteudo>
-  //     <assinatura>...</assinatura>
-  //   </documento>
-  // Se conteudo estiver vazio, ainda devolvemos metadata pro user ver
-  // o que existe (útil quando incluirDocumentos=false).
-  const documentos = [];
-  const docsXml = procBlock.match(/<(?:\w+:)?documento\b(?:[^>]*\/>|[^>]*>[\s\S]*?<\/(?:\w+:)?documento>)/gi) || [];
-  for (const dXml of docsXml) {
-    const openTag = (dXml.match(/<(?:\w+:)?documento\b[^>]*>/) || [''])[0];
-    const idDocumento = (openTag.match(/\bidDocumento="([^"]*)"/) || [])[1] || '';
-    if (!idDocumento) continue;
-    const tipoDocumento = (openTag.match(/\btipoDocumento="([^"]*)"/) || [])[1] || '';
-    const dataHora = (openTag.match(/\bdataHora="([^"]*)"/) || [])[1] || '';
-    const mimetype = (openTag.match(/\bmimetype="([^"]*)"/) || [])[1] || 'application/pdf';
-    const descricao = _decodeXmlEntities((openTag.match(/\bdescricao="([^"]*)"/) || [])[1] || '');
-    const nivelSigilo = (openTag.match(/\bnivelSigilo="([^"]*)"/) || [])[1] || '0';
-    const hash = (openTag.match(/\bhash="([^"]*)"/) || [])[1] || '';
-    const tipoDocumentoLocal = (openTag.match(/\btipoDocumentoLocal="([^"]*)"/) || [])[1] || '';
-    // Conteúdo: pega texto BRUTO da tag <conteudo>, removendo apenas
-    // espaços em volta (mantém o base64 inteiro).
-    const conteudoMatch = dXml.match(/<(?:\w+:)?conteudo\b[^>]*>([\s\S]*?)<\/(?:\w+:)?conteudo>/);
-    const conteudoB64 = conteudoMatch ? conteudoMatch[1].replace(/\s+/g, '') : '';
-    documentos.push({
-      idDocumento, tipoDocumento, tipoDocumentoLocal, dataHora,
-      dataIso: _parseDataHoraMni(dataHora),
-      mimetype, descricao, nivelSigilo, hash,
-      conteudoB64,
-      tamanhoB64: conteudoB64.length
-    });
+  // Estratégia 2 — docs órfãos no nível de <processo>: para sistemas que
+  // declaram docs separados dos movimentos. Só adiciona se ainda não foi
+  // capturado pelos movimentos (dedup por idDocumento).
+  const docsXmlOuter = procBlock.match(/<(?:\w+:)?documento\b[^>]*>[\s\S]*?<\/(?:\w+:)?documento>/gi) || [];
+  for (const dXml of docsXmlOuter) {
+    const doc = _parseDocumentoBlock(dXml);
+    if (!doc) continue;
+    if (docsById.has(doc.idDocumento)) continue; // já capturado nos movimentos
+    docsById.set(doc.idDocumento, doc);
+    documentos.push(doc);
   }
 
-  // Linka cada movimento aos seus docs por idDocumento via docsVinculados;
-  // pra docs órfãos sem vinculação explícita, tenta empate por dataHora
-  // (mesmo segundo) com o movimento mais próximo.
-  const docsById = new Map(documentos.map(d => [d.idDocumento, d]));
+  // Linka movimentos.documentos[] com metadata dos docs achados
   for (const m of movimentos) {
     m.documentos = (m.docsVinculados || []).map(id => docsById.get(id)).filter(Boolean).map(d => ({
       idDocumento: d.idDocumento,
@@ -478,11 +507,21 @@ function parseConsultarProcesso(xml) {
       tamanhoB64: d.tamanhoB64
     }));
   }
-  // Fallback por dataHora: docs sem vinculação explícita ficam em
-  // unsigned bucket pra app decidir como mostrar.
+  // Órfãos: docs achados que não estão vinculados a NENHUM movimento
   const usedIds = new Set();
   for (const m of movimentos) for (const d of (m.documentos || [])) usedIds.add(d.idDocumento);
   const docsOrfaos = documentos.filter(d => !usedIds.has(d.idDocumento));
+
+  // Diagnóstico automático: quando docs existem mas NENHUM trouxe
+  // conteúdo base64, captura snippet do XML pra cliente investigar a
+  // estrutura real e refinar o parser. Pega o primeiro <documento>
+  // completo (até 20KB) — geralmente revela qual é o nome da tag de
+  // conteúdo usada pelo sistema (Projudi vs PJe vs eSAJ variam).
+  let xmlSnippetDocumentos = null;
+  if (documentos.length > 0 && documentos.every(d => !d.tamanhoB64)) {
+    const firstDocMatch = procBlock.match(/<(?:\w+:)?documento\b[^>]*>[\s\S]{0,20000}?<\/(?:\w+:)?documento>/i);
+    if (firstDocMatch) xmlSnippetDocumentos = firstDocMatch[0];
+  }
 
   return {
     sucesso: true,
@@ -501,7 +540,10 @@ function parseConsultarProcesso(xml) {
     documentos: documentos.map(d => ({ ...d, conteudoB64: undefined, hasConteudo: !!d.conteudoB64 })),
     documentosConteudo: Object.fromEntries(documentos.filter(d => d.conteudoB64).map(d => [d.idDocumento, d.conteudoB64])),
     documentosTotal: documentos.length,
-    documentosOrfaos: docsOrfaos.length
+    documentosOrfaos: docsOrfaos.length,
+    // Snippet diagnóstico do XML quando docs vieram sem conteúdo — ajuda
+    // refinar o parser sem precisar passar debug=true (resposta grande).
+    xmlSnippetDocumentos
   };
 }
 
