@@ -4692,6 +4692,87 @@ async function mergeAllDuplicates() {
   await scanDuplicates();
 }
 
+// ====================================================================
+// Sanitização de clientes — limpa lixo extraído da publicação DJEN
+// (prefixo/sufixo "inclui X", "representado por Y", etc.) que poluiu
+// p.client em imports antigos antes do fix no djenInferProcessFromPublication.
+// ====================================================================
+
+async function scanClientesSujos() {
+  const target = $('clientesReport');
+  if (!target) return;
+  target.innerHTML = `<div class="help-text">Buscando…</div>`;
+  const procs = await DB.getAllProcesses();
+  const afetados = procs
+    .filter(p => _isClienteSujo(p.client))
+    .map(p => ({ p, sugestao: _cleanClienteString(p.client) }))
+    .filter(x => x.sugestao !== x.p.client); // só os que mudam
+
+  if (afetados.length === 0) {
+    target.innerHTML = `<div class="status ok" style="background:#d4e8d4;color:#2a5a2a;border-left:3px solid var(--uc-green);padding:12px;border-radius:6px;">✓ Nenhum processo com lixo no campo cliente. Tudo limpo.</div>`;
+    const btn = $('aplicarLimpezaBtn');
+    if (btn) btn.style.display = 'none';
+    return;
+  }
+
+  // Stash pra aplicarLimpezaClientes acessar
+  window._clientesSujosCache = afetados;
+
+  target.innerHTML = `
+    <div class="status warn" style="background:#f5e3c4;color:#5a4118;border-left:3px solid var(--uc-amber);padding:10px;border-radius:6px;margin-bottom:10px;font-size:13px;">
+      Encontrados <strong>${afetados.length}</strong> processo(s) com lixo no campo cliente.
+      Revise as sugestões abaixo e clique "Aplicar selecionados" pra atualizar.
+    </div>
+    <div style="display: flex; flex-direction: column; gap: 8px; max-height: 50vh; overflow-y: auto;" class="scroll-thin">
+      ${afetados.map((x, i) => `
+        <div style="display: flex; gap: 10px; align-items: flex-start; padding: 10px; background: var(--uc-cream); border-radius: 5px; border: 1px solid var(--uc-line);">
+          <input type="checkbox" id="_clienteFix_${i}" data-cliente-fix-idx="${i}" checked style="margin-top: 4px;">
+          <div style="flex: 1; min-width: 0; font-size: 12px;">
+            <div style="font-weight: 600; color: var(--uc-black); margin-bottom: 2px;">${escapeHtml(x.p.name || x.p.cnj || '(sem nome)')}</div>
+            ${x.p.cnj ? `<div class="process-cnj" style="font-size: 10px; color: var(--uc-warm-gray); margin-bottom: 4px;">${escapeHtml(x.p.cnj)}</div>` : ''}
+            <div style="display: grid; grid-template-columns: 70px 1fr; gap: 4px 8px;">
+              <span style="color: var(--uc-warm-gray);">Atual:</span>
+              <span style="color: var(--uc-red); text-decoration: line-through;">${escapeHtml(x.p.client)}</span>
+              <span style="color: var(--uc-warm-gray);">Sugestão:</span>
+              <span style="color: var(--uc-green); font-weight: 500;">${escapeHtml(x.sugestao) || '<em style="color: var(--uc-warm-gray); font-weight: normal;">(vazio — recomendado editar manual)</em>'}</span>
+            </div>
+          </div>
+        </div>
+      `).join('')}
+    </div>
+  `;
+  const btn = $('aplicarLimpezaBtn');
+  if (btn) btn.style.display = '';
+}
+
+async function aplicarLimpezaClientes() {
+  const afetados = window._clientesSujosCache || [];
+  if (afetados.length === 0) { toast('Nada a fazer', 'Execute "Buscar clientes com lixo" primeiro.', 'info'); return; }
+
+  const target = $('clientesReport');
+  const selecionados = afetados.filter((_, i) => $(`_clienteFix_${i}`)?.checked);
+  if (selecionados.length === 0) { toast('Nenhum selecionado', 'Marque ao menos 1 processo pra aplicar.', 'info'); return; }
+
+  let atualizados = 0;
+  for (const x of selecionados) {
+    const sugestao = x.sugestao || null; // vazio vira null pra não confundir UI
+    try {
+      x.p.client = sugestao;
+      // Atualiza também p.name se ele contém o cliente antigo (heurística simples)
+      if (x.p.name && x.p.name.includes(x.p.client) === false && sugestao) {
+        // Tenta substituir nas posições onde aparecer
+        // (skip — name não tem o lixo necessariamente, não vou tocar)
+      }
+      await DB.saveProcess(x.p);
+      atualizados++;
+    } catch (err) {
+      console.warn('[limpeza] falha em', x.p.id, err);
+    }
+  }
+  toast('Limpeza aplicada', `${atualizados} processo(s) sanitizado(s)`, 'success');
+  await scanClientesSujos(); // re-scan pra atualizar a lista
+}
+
 async function logoutFlow() {
   const ok = await confirmDialog('Sair do sistema?', 'Você precisará fazer login novamente para acessar.');
   if (!ok) return;
@@ -13282,6 +13363,21 @@ function renderSettingsTab(tab, prompts, defaultPromptId) {
         </div>
       </div>
 
+      <div class="card mb-3">
+        <h3 class="font-serif text-lg font-semibold smallcaps mb-3" style="color: var(--uc-black);">Sanitização de clientes</h3>
+        <p class="help-text mb-3">
+          Detecta processos cujo campo <strong>cliente</strong> ficou poluído por lixo extraído da publicação DJEN
+          (prefixos/sufixos como "inclui X", "representado por Y", "na pessoa de Z") em imports antigos.
+          Mostra a sugestão de limpeza pra cada um e aplica em lote com checkbox individual. Não toca em campos
+          já limpos.
+        </p>
+        <div id="clientesReport" class="mb-3"></div>
+        <div class="flex gap-2 flex-wrap">
+          <button class="btn btn-outline" onclick="scanClientesSujos()">Buscar clientes com lixo</button>
+          <button class="btn btn-primary" onclick="aplicarLimpezaClientes()" id="aplicarLimpezaBtn" style="display:none">Aplicar selecionados</button>
+        </div>
+      </div>
+
       <div class="card mb-3" style="border-left: 3px solid var(--uc-amber);">
         <h3 class="font-serif text-lg font-semibold smallcaps mb-3" style="color: var(--uc-amber);">Migração de clientes</h3>
         <p class="help-text mb-3">
@@ -16306,6 +16402,30 @@ function _djenRecursoChange(select) {
   if (isLast && realPicked) {
     _djenAddRecursoSlot(container);
   }
+}
+
+// Detecta string de cliente com lixo extraído da publicação DJEN. Padrões
+// comuns que vazam da regex POLO ATIVO da publicação:
+//   "inclui X", "representado por X", "na pessoa de X", "por seu X"
+// Pode aparecer como PREFIXO ou como SUFIXO depois de vírgula/ponto-vírgula.
+function _isClienteSujo(s) {
+  if (!s) return false;
+  const txt = String(s).trim();
+  if (/^(?:inclui|incluir|representado\s+por|na\s+pessoa\s+de|por\s+seu)\s+/i.test(txt)) return true;
+  if (/[,;]\s*(?:inclui|incluir|representado\s+por|na\s+pessoa\s+de|por\s+seu)\s+/i.test(txt)) return true;
+  return false;
+}
+
+// Sanitiza string de cliente: strip prefixo + sufixo após pontuação.
+// Idempotente — pode ser chamado em strings já limpas sem efeito colateral.
+function _cleanClienteString(s) {
+  if (!s) return s;
+  let clean = String(s).trim();
+  // Sufixo: ", inclui Y" → corta a partir da vírgula
+  clean = clean.replace(/\s*[,;]\s*(?:inclui|incluir|representado\s+por|na\s+pessoa\s+de|por\s+seu).*$/i, '').trim();
+  // Prefixo: "inclui X" → remove o prefixo
+  clean = clean.replace(/^(?:inclui|incluir|representado\s+por|na\s+pessoa\s+de|por\s+seu)\s+/i, '').trim();
+  return clean;
 }
 
 // Tenta vários nomes de campo até achar valor não-vazio.
