@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.46.1 (Eventos: data formatada em DD/MM/AAAA em vez de ISO)
-const CACHE_NAME = 'uc-juridico-v6-46-1';
+// Service Worker — UC Jurídico v6.46.2 (Datas: formatDate timezone-safe + audit BR em todo o projeto)
+const CACHE_NAME = 'uc-juridico-v6-46-2';
 const APP_SHELL = [
   './',
   './index.html',

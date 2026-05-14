@@ -820,10 +820,46 @@ function formatBytes(b) {
   return parseFloat((b / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 }
 
+// Parser de data tolerante a 3 formatos do projeto, retornando Date local:
+//   - Date instance: passthrough
+//   - timestamp number: passthrough
+//   - ISO "YYYY-MM-DD" → meio-dia LOCAL (não UTC, pra evitar -1 dia em GMT-3)
+//   - ISO "YYYY-MM-DDTHH:MM[:SS]" → parsed normal
+//   - MNI raw "YYYYMMDDHHMMSS" → reconstruído pra ISO
+// Volta null se inparseable. Centraliza a regra de timezone — qualquer
+// função de exibição (formatDate/formatDateTime/etc.) usa isso e nunca
+// sofre o problema do `new Date('2026-05-13')` interpretar como UTC.
+function _parseDateSafe(d) {
+  if (d == null || d === '') return null;
+  if (d instanceof Date) return isNaN(d) ? null : d;
+  if (typeof d === 'number') {
+    const x = new Date(d);
+    return isNaN(x) ? null : x;
+  }
+  const s = String(d).trim();
+  // ISO date-only: YYYY-MM-DD → forçar como meio-dia local
+  let m = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (m) return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), 12, 0, 0);
+  // ISO date+time: YYYY-MM-DDTHH:MM[:SS][.ms][Z|±HH:MM] → deixa Date parsear
+  m = s.match(/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}/);
+  if (m) {
+    const x = new Date(s);
+    return isNaN(x) ? null : x;
+  }
+  // MNI raw: YYYYMMDD[HHMMSS] sem separadores
+  m = s.match(/^(\d{4})(\d{2})(\d{2})(?:(\d{2})(\d{2})(\d{2})?)?$/);
+  if (m) {
+    const [, y, mo, dd, hh, mm, ss] = m;
+    return new Date(Number(y), Number(mo) - 1, Number(dd), Number(hh || 12), Number(mm || 0), Number(ss || 0));
+  }
+  // Fallback: tenta Date direto (pra timestamps strings ou outros formatos)
+  const x = new Date(s);
+  return isNaN(x) ? null : x;
+}
+
 function formatDate(d, opts = {}) {
-  if (!d) return '—';
-  const date = d instanceof Date ? d : new Date(d);
-  if (isNaN(date)) return '—';
+  const date = _parseDateSafe(d);
+  if (!date) return '—';
   if (opts.relative) {
     const diff = Date.now() - date.getTime();
     const days = Math.floor(diff / 86400000);
@@ -838,8 +874,8 @@ function formatDate(d, opts = {}) {
 }
 
 function formatDateTime(d) {
-  if (!d) return '—';
-  const date = new Date(d);
+  const date = _parseDateSafe(d);
+  if (!date) return '—';
   return date.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
 
@@ -5006,7 +5042,7 @@ function buildProcessClaudePackage(p, events, deadlines, notes, jurisprudence, p
     md += `\n---\n\n## Cronologia (${events.length} eventos)\n\n`;
     md += `| Evento | Data | Tipo | Pgs |\n|---|---|---|---|\n`;
     [...events].sort((a,b) => parseInt(a.eventNumber) - parseInt(b.eventNumber)).forEach(e => {
-      md += `| ${e.eventNumber} | ${e.date || '—'} | ${e.type.replace(/\|/g,'/')} | ${e.startPage}–${e.endPage} |\n`;
+      md += `| ${e.eventNumber} | ${formatDate(e.date)} | ${e.type.replace(/\|/g,'/')} | ${e.startPage}–${e.endPage} |\n`;
     });
   }
 
@@ -6834,7 +6870,7 @@ function generateIndexMarkdown(indexed, baseName) {
   if (indexed.processNumber) md += `**Processo:** \`${indexed.processNumber}\`\n`;
   md += `**Total de páginas:** ${indexed.totalPages}\n**Eventos detectados:** ${indexed.events.length}\n\n---\n\n`;
   md += `| Evento | Data | Tipo | Páginas | Pgs |\n|---|---|---|---|---|\n`;
-  for (const e of indexed.events) md += `| ${e.eventNumber} | ${e.date || '—'} | ${e.type.replace(/\|/g,'/')} | ${e.startPage}–${e.endPage} | ${e.pageCount} |\n`;
+  for (const e of indexed.events) md += `| ${e.eventNumber} | ${formatDate(e.date)} | ${e.type.replace(/\|/g,'/')} | ${e.startPage}–${e.endPage} | ${e.pageCount} |\n`;
   return md;
 }
 
@@ -6845,7 +6881,7 @@ h1{font-size:26px;color:#0a0a0a}.event{background:white;border:1px solid #d4cfc0
 .meta{font-size:12px;color:#6b6b68;margin-top:4px}</style></head><body>
 <h1>Timeline · ${baseName}</h1>
 <p><strong>Processo:</strong> ${indexed.processNumber || 'n/d'} · <strong>Total:</strong> ${indexed.totalPages} pgs · <strong>Eventos:</strong> ${indexed.events.length}</p>
-${indexed.events.map(e => `<div class="event"><strong>Evento ${e.eventNumber}</strong> · ${e.type}<br><span class="meta">${e.date || '—'} · pgs ${e.startPage}–${e.endPage} (${e.pageCount} pgs)</span></div>`).join('')}
+${indexed.events.map(e => `<div class="event"><strong>Evento ${e.eventNumber}</strong> · ${e.type}<br><span class="meta">${formatDate(e.date)} · pgs ${e.startPage}–${e.endPage} (${e.pageCount} pgs)</span></div>`).join('')}
 </body></html>`;
 }
 
@@ -9731,7 +9767,7 @@ function _renderPrazoNaAgenda(d, procById, today) {
           <div style="font-size: 12px; color: var(--uc-warm-gray);">
             ${d.advogadoResponsavel ? '👤 ' + escapeHtml(d.advogadoResponsavel.split(' ')[0]) : ''}
             ${proc ? ` · <a onclick="event.stopPropagation(); navigate('process', { currentProcessId: '${proc.id}' })" style="cursor:pointer; color:var(--uc-gold);">${escapeHtml(procLabel)}</a>` : ` · <span style="color: var(--uc-warm-gray);">${escapeHtml(procLabel)}</span>`}
-            · vence ${escapeHtml((d.deadlineDate || '').slice(0, 10))}
+            · vence ${escapeHtml(formatDate(d.deadlineDate))}
           </div>
           ${visual === 'suspenso' && d.suspensao ? `<div style="font-size: 11px; color: var(--uc-warm-gray); margin-top: 4px;">⏸ ${escapeHtml(d.suspensao.motivo || '')}${d.suspensao.suspensoAte ? ' · até ' + escapeHtml(d.suspensao.suspensoAte) : ''}</div>` : ''}
         </div>
@@ -12369,7 +12405,7 @@ async function _runToolActionSingle(action) {
           <details class="mt-3">
             <summary style="cursor:pointer; font-weight: 500;">Ver primeiros eventos</summary>
             <div style="margin-top: 8px; max-height: 300px; overflow-y: auto;" class="scroll-thin">
-              ${indexed.events.slice(0, 20).map(e => `<div style="padding: 6px 0; border-bottom: 1px solid var(--uc-line-soft); font-size: 13px;"><strong>Ev. ${escapeHtml(e.eventNumber)}</strong> · ${escapeHtml(e.type)} · ${escapeHtml(e.date || '—')} · pgs ${e.startPage}–${e.endPage}</div>`).join('')}
+              ${indexed.events.slice(0, 20).map(e => `<div style="padding: 6px 0; border-bottom: 1px solid var(--uc-line-soft); font-size: 13px;"><strong>Ev. ${escapeHtml(e.eventNumber)}</strong> · ${escapeHtml(e.type)} · ${escapeHtml(formatDate(e.date))} · pgs ${e.startPage}–${e.endPage}</div>`).join('')}
               ${indexed.events.length > 20 ? `<p class="help-text" style="margin-top:8px;">... e mais ${indexed.events.length - 20} eventos.</p>` : ''}
             </div>
           </details>
@@ -12534,7 +12570,7 @@ function generateLegacyClaudePackage(fileName, indexed, fullText, citations, dea
   if (indexed.processNumber) md += `**Processo:** ${indexed.processNumber}\n\n`;
   md += `---\n\n## Estatísticas\n\n- **Páginas:** ${indexed.totalPages}\n- **Eventos:** ${indexed.events.length}\n- **Caracteres:** ${fullText.length.toLocaleString('pt-BR')}\n\n`;
   md += `## Cronologia\n\n| Ev | Data | Tipo | Pgs |\n|---|---|---|---|\n`;
-  indexed.events.forEach(e => md += `| ${e.eventNumber} | ${e.date || '—'} | ${e.type.replace(/\|/g,'/')} | ${e.startPage}–${e.endPage} |\n`);
+  indexed.events.forEach(e => md += `| ${e.eventNumber} | ${formatDate(e.date)} | ${e.type.replace(/\|/g,'/')} | ${e.startPage}–${e.endPage} |\n`);
   md += `\n## Jurisprudência detectada\n\n`;
   Object.entries(citations).forEach(([t, items]) => { if (items.length > 0) md += `**${t}:** ${items.join('; ')}\n\n`; });
   if (deadlines.lastIntimation) {
@@ -13467,7 +13503,7 @@ async function djenViewHistory() {
                 ${p.processId ? `<span class="badge badge-green">vinculada</span>` : `<span class="badge badge-amber">órfã</span>`}
                 <span style="font-size:11px; color: var(--uc-warm-gray); margin-left:auto;">${formatDate(p.importedAt, { relative: true })}</span>
               </div>
-              <div style="font-size:12px; color: var(--uc-graphite);">${escapeHtml(p.tipo)} · ${escapeHtml(p.orgao)} · ${escapeHtml(p.dataDisponibilizacao)}</div>
+              <div style="font-size:12px; color: var(--uc-graphite);">${escapeHtml(p.tipo)} · ${escapeHtml(p.orgao)} · ${escapeHtml(formatDate(p.dataDisponibilizacao))}</div>
               ${p.processId ? `<button class="btn btn-ghost btn-sm" onclick="document.querySelector('.modal-backdrop').remove(); navigate('process', { currentProcessId: '${p.processId}' })">Ver processo →</button>` : ''}
             </div>
           `).join('')}
@@ -14813,7 +14849,7 @@ ${p.polo ? `<tr><th>Polo</th><td>${escapeHtml(p.polo)}</td></tr>` : ''}
 ${events.length > 0 ? `<h2>Cronologia processual</h2>
 <table>
 <tr><th>Evento</th><th>Data</th><th>Tipo</th><th>Páginas</th></tr>
-${[...events].sort((a,b) => parseInt(a.eventNumber) - parseInt(b.eventNumber)).map(e => `<tr><td>${escapeHtml(e.eventNumber)}</td><td>${escapeHtml(e.date || '—')}</td><td>${escapeHtml(e.type)}</td><td>${e.startPage}–${e.endPage}</td></tr>`).join('')}
+${[...events].sort((a,b) => parseInt(a.eventNumber) - parseInt(b.eventNumber)).map(e => `<tr><td>${escapeHtml(e.eventNumber)}</td><td>${escapeHtml(formatDate(e.date))}</td><td>${escapeHtml(e.type)}</td><td>${e.startPage}–${e.endPage}</td></tr>`).join('')}
 </table>` : ''}
 
 ${deadlines.filter(d => prazoEstaAtivo(d)).length > 0 ? `<h2>Prazos pendentes</h2>
@@ -15781,7 +15817,7 @@ async function djenShowResultsModal(classified, oabs, dataInicio, dataFim) {
         ${classified.duplicates.length > 0 ? `
           <h4 class="font-serif font-semibold smallcaps" style="color: var(--uc-warm-gray); margin: 20px 0 8px;">⊙ Já importadas · ${classified.duplicates.length}</h4>
           <div style="font-size:12px; color: var(--uc-warm-gray); padding: 8px;">
-            ${classified.duplicates.map(p => `${p._cnjFormatted} (${p.data_disponibilizacao || p.data_publicacao})`).join(' · ')}
+            ${classified.duplicates.map(p => `${p._cnjFormatted} (${formatDate(p.data_disponibilizacao || p.data_publicacao)})`).join(' · ')}
           </div>
         ` : ''}
 
