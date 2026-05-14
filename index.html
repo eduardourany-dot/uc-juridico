@@ -929,11 +929,23 @@ function showModal(title, fields, options = {}) {
     const getValue = idx => {
       const el = getField(idx);
       if (!el) return null;
+      // Multiselect: lê IDs selecionados de data-selected (JSON)
+      if (el.dataset?.multiselect === '1') {
+        try { return JSON.parse(el.dataset.selected || '[]'); }
+        catch { return []; }
+      }
       return el.type === 'checkbox' ? el.checked : el.value;
     };
     const setValue = (idx, val) => {
       const el = getField(idx);
       if (!el) return;
+      // Multiselect: aceita array ou single value
+      if (el.dataset?.multiselect === '1') {
+        const arr = Array.isArray(val) ? val : (val ? [val] : []);
+        el.dataset.selected = JSON.stringify(arr);
+        _renderMultiselectChips(el);
+        return;
+      }
       if (el.type === 'checkbox') el.checked = !!val;
       else el.value = val == null ? '' : val;
     };
@@ -989,6 +1001,13 @@ function showModal(title, fields, options = {}) {
       });
     });
 
+    // Inicializa multiselects: renderiza chips iniciais + popula dropdown
+    fields.forEach((f, i) => {
+      if (f.type !== 'multiselect') return;
+      const el = getField(i);
+      if (el) _renderMultiselectChips(el);
+    });
+
     const cancelBtn = $('_modalCancel');
     if (cancelBtn) cancelBtn.onclick = () => { cleanup(); resolve(null); };
     $('_modalConfirm').onclick = () => {
@@ -999,10 +1018,85 @@ function showModal(title, fields, options = {}) {
   });
 }
 
+// Re-renderiza chips do multiselect baseado em data-selected + data-options.
+// Chamado: após appendChild (init), depois de _msAddChip e _msRemoveChip.
+function _renderMultiselectChips(wrapper) {
+  const chips = wrapper.querySelector('.ms-chips');
+  const dropdown = wrapper.querySelector('.ms-add');
+  if (!chips || !dropdown) return;
+  let selected = [], options = [];
+  try { selected = JSON.parse(wrapper.dataset.selected || '[]'); } catch {}
+  try { options = JSON.parse(wrapper.dataset.options || '[]'); } catch {}
+  const optMap = new Map(options.map(o => [o.value, o.label]));
+  // Chips dos selecionados
+  if (selected.length === 0) {
+    chips.innerHTML = `<span style="color: var(--uc-warm-gray); font-size: 12px; font-style: italic;">Nenhum selecionado</span>`;
+  } else {
+    chips.innerHTML = selected.map(id => {
+      const label = optMap.get(id) || id;
+      return `<span class="ms-chip" data-id="${escapeHtml(id)}" style="display: inline-flex; align-items: center; gap: 4px; padding: 2px 4px 2px 8px; background: var(--uc-cream); border: 1px solid var(--uc-line); border-radius: 12px; font-size: 12px;">
+        ${escapeHtml(label)}
+        <button type="button" onclick="_msRemoveChip(this)" style="background: none; border: none; cursor: pointer; color: var(--uc-red); font-size: 14px; padding: 0 4px; line-height: 1;" title="Remover">×</button>
+      </span>`;
+    }).join('');
+  }
+  // Dropdown: só opções NÃO selecionadas
+  const selectedSet = new Set(selected);
+  const disponiveis = options.filter(o => !selectedSet.has(o.value));
+  dropdown.innerHTML = `<option value="">— Adicionar...</option>` +
+    disponiveis.map(o => `<option value="${escapeHtml(o.value)}">${escapeHtml(o.label)}</option>`).join('');
+  dropdown.value = '';
+  // Desabilita o dropdown quando não há mais opções
+  dropdown.disabled = disponiveis.length === 0;
+}
+
+function _msAddChip(dropdown) {
+  const wrapper = dropdown.closest('[data-multiselect="1"]');
+  if (!wrapper) return;
+  const id = dropdown.value;
+  if (!id) return;
+  let selected = [];
+  try { selected = JSON.parse(wrapper.dataset.selected || '[]'); } catch {}
+  if (!selected.includes(id)) selected.push(id);
+  wrapper.dataset.selected = JSON.stringify(selected);
+  _renderMultiselectChips(wrapper);
+}
+
+function _msRemoveChip(btn) {
+  const chip = btn.closest('.ms-chip');
+  const wrapper = btn.closest('[data-multiselect="1"]');
+  if (!chip || !wrapper) return;
+  const id = chip.dataset.id;
+  let selected = [];
+  try { selected = JSON.parse(wrapper.dataset.selected || '[]'); } catch {}
+  selected = selected.filter(x => x !== id);
+  wrapper.dataset.selected = JSON.stringify(selected);
+  _renderMultiselectChips(wrapper);
+}
+
 function renderModalField(f, i) {
   const id = '_mf_' + i;
   if (f.type === 'select') {
     return `<div><label class="label">${escapeHtml(f.label)}</label>${f.help ? `<p class="help-text" style="margin-bottom: 6px;">${f.help}</p>` : ''}<select class="select" id="${id}">${f.options.map(o => `<option value="${escapeHtml(o.value)}" ${o.value === f.default ? 'selected' : ''}>${escapeHtml(o.label)}</option>`).join('')}</select></div>`;
+  }
+  if (f.type === 'multiselect') {
+    // f.options: [{value, label}, ...]
+    // f.default: array de values selecionados
+    // Estrutura: wrapper com data-selected (JSON) + chips area + dropdown pra adicionar
+    const selected = Array.isArray(f.default) ? f.default : (f.default ? [f.default] : []);
+    return `<div>
+      <label class="label">${escapeHtml(f.label)}</label>
+      ${f.help ? `<p class="help-text" style="margin-bottom: 6px;">${f.help}</p>` : ''}
+      <div id="${id}" data-multiselect="1"
+           data-selected="${escapeHtml(JSON.stringify(selected))}"
+           data-options="${escapeHtml(JSON.stringify(f.options || []))}"
+           style="border: 1px solid var(--uc-line); border-radius: 4px; padding: 6px; background: #fff;">
+        <div class="ms-chips" style="display: flex; flex-wrap: wrap; gap: 4px; min-height: 28px; margin-bottom: 6px;"></div>
+        <select class="select ms-add" style="font-size: 13px;" onchange="_msAddChip(this)">
+          <option value="">— Adicionar...</option>
+        </select>
+      </div>
+    </div>`;
   }
   if (f.type === 'checkbox') {
     return `<div style="display: flex; gap: 8px; align-items: flex-start;"><input type="checkbox" id="${id}" ${f.default ? 'checked' : ''} style="margin-top: 3px;"><div><label for="${id}" style="font-weight: 500; cursor: pointer;">${escapeHtml(f.label)}</label>${f.help ? `<p class="help-text">${f.help}</p>` : ''}</div></div>`;
@@ -2558,7 +2652,7 @@ function renderProcessCard(p) {
         ${p.cnj ? `<div class="process-cnj">${escapeHtml(p.cnj)}</div>` : ''}
         <div class="process-name">${escapeHtml(p.name)}</div>
         <div class="process-meta">
-          ${p.client ? `<span>${escapeHtml(p.client)}</span>` : ''}
+          ${(() => { const lbl = _processClientesLabel(p); return lbl ? `<span>${escapeHtml(lbl)}</span>` : ''; })()}
           ${p.area ? `<span class="badge badge-gold">${escapeHtml(p.area)}</span>` : ''}
           ${p.tributoPrincipal ? `<span class="badge badge-gold" style="background: var(--uc-cream); color: var(--uc-gold); border: 1px solid var(--uc-gold-soft);">${escapeHtml(p.tributoPrincipal)}</span>` : ''}
           ${p.statusFiscal ? `<span class="badge ${statusFiscalBadge(p.statusFiscal)}" title="Status fiscal">${escapeHtml(statusFiscalLabel(p.statusFiscal))}</span>` : ''}
@@ -3392,7 +3486,12 @@ function renderProcessOverview(p, events, deadlines, notes, jurisprudence) {
       <h3 class="font-serif text-lg font-semibold smallcaps mb-3" style="color: var(--uc-black);">Identificação</h3>
       <div class="grid gap-2" style="grid-template-columns: 160px 1fr; font-size: 13px;">
         ${p.cnj ? `<div style="color: var(--uc-warm-gray);">CNJ:</div><div class="process-cnj">${escapeHtml(p.cnj)}</div>` : ''}
-        ${p.client ? `<div style="color: var(--uc-warm-gray);">Cliente:</div><div>${escapeHtml(p.client)}${p.clientDoc ? ` <span style="color: var(--uc-warm-gray);">(${escapeHtml(p.clientDoc)})</span>` : ''}</div>` : ''}
+        ${(() => {
+          const nomes = _processClientesNomes(p);
+          if (!nomes.length) return '';
+          const label = nomes.length > 1 ? 'Clientes:' : 'Cliente:';
+          return `<div style="color: var(--uc-warm-gray);">${label}</div><div>${escapeHtml(nomes.join(', '))}${p.clientDoc ? ` <span style="color: var(--uc-warm-gray);">(${escapeHtml(p.clientDoc)})</span>` : ''}</div>`;
+        })()}
         ${p.clientContact ? `<div style="color: var(--uc-warm-gray);">Contato cliente:</div><div>${escapeHtml(p.clientContact)}</div>` : ''}
         ${p.court ? `<div style="color: var(--uc-warm-gray);">Tribunal/Vara:</div><div>${escapeHtml(p.court)}</div>` : ''}
         ${p.comarca ? `<div style="color: var(--uc-warm-gray);">Comarca:</div><div>${escapeHtml(p.comarca)}</div>` : ''}
@@ -4257,20 +4356,23 @@ async function editProcessFlow() {
   const p = state._processView.p;
   const me = (window.UC_Auth?.getUser?.() || {}).email || '';
 
-  // Carrega clientes pra dropdown (substitui os 3 campos legados de cliente)
+  // Carrega clientes pra dropdown multi-select (novo modelo: múltiplos
+  // clientes por processo — co-réus, co-autores, litisconsórcio).
   const clientes = await DB.getAllClientes();
-  const cliOpts = [
-    { value: '', label: '— sem cliente vinculado —' },
-    ...clientes.filter(c => c.ativo !== false)
-      .sort((a, b) => (a.nome || '').localeCompare(b.nome || '', 'pt-BR'))
-      .map(c => ({ value: c.id, label: c.nome }))
-  ];
+  const cliOpts = clientes.filter(c => c.ativo !== false)
+    .sort((a, b) => (a.nome || '').localeCompare(b.nome || '', 'pt-BR'))
+    .map(c => ({ value: c.id, label: c.nome }));
+
+  // Default: prefere p.clienteIds (array novo); fallback p.clienteId (legacy single)
+  const clienteIdsDefault = Array.isArray(p.clienteIds) && p.clienteIds.length > 0
+    ? p.clienteIds
+    : (p.clienteId ? [p.clienteId] : []);
 
   const baseFields = [
     { label: 'Nome', name: 'name', default: p.name },
     { label: 'CNJ', name: 'cnj', default: p.cnj || '' },
 
-    { label: 'Cliente', name: 'clienteId', type: 'select', default: p.clienteId || '', options: cliOpts },
+    { label: 'Clientes', name: 'clienteIds', type: 'multiselect', default: clienteIdsDefault, options: cliOpts, help: 'Selecione um ou mais clientes (litisconsórcio, co-réus, co-autores). Pra adicionar cliente novo, vá em Clientes → + Novo cliente.' },
 
     { label: 'Polo', name: 'polo', type: 'select', default: p.polo || 'Defesa', options: [
       { value: 'Defesa', label: 'Defesa (executado/réu)' },
@@ -4520,7 +4622,7 @@ async function editProcessFlow() {
   if (!r) return;
   const [
     name, cnj,
-    clienteId,
+    clienteIds,  // array de FKs (multiselect)
     polo,
     advNome, advDoc, advLawyer, advLawyerOab,
     court, comarca, sistema,
@@ -4533,13 +4635,18 @@ async function editProcessFlow() {
     // Fase B (só presentes se isTributario(p.area) era true ao abrir)
     tipoExec, tributoPrincipal, periodoBase, statusFiscal, garantia, garantiaDetalhe, cdasRaw
   ] = r;
-  // Resolve nome do cliente novo (snapshot pra compat com p.client)
-  const cliEscolhido = clientes.find(c => c.id === clienteId) || null;
+  // Resolve snapshot de nomes dos clientes selecionados. Mantém também os
+  // campos legacy clienteId/client populados (1º do array) pra compat com
+  // código que ainda lê só p.clienteId / p.client.
+  const idsArray = Array.isArray(clienteIds) ? clienteIds.filter(Boolean) : [];
+  const nomesArray = idsArray.map(id => clientes.find(c => c.id === id)?.nome).filter(Boolean);
   Object.assign(p, {
     name,
     cnj: cnj || null,
-    clienteId: clienteId || null,
-    client: cliEscolhido?.nome || null,    // snapshot atualizado
+    clienteIds: idsArray,                   // novo: array de FKs
+    clientes: nomesArray,                   // novo: array de nomes snapshot
+    clienteId: idsArray[0] || null,         // legacy: 1º do array
+    client: nomesArray.join(', ') || null,  // legacy: string concatenada
     polo,
     advNome: advNome || null,
     advDoc: advDoc || null,
@@ -4693,49 +4800,70 @@ async function mergeAllDuplicates() {
 }
 
 // ====================================================================
-// Sanitização de clientes — limpa lixo extraído da publicação DJEN
-// (prefixo/sufixo "inclui X", "representado por Y", etc.) que poluiu
-// p.client em imports antigos antes do fix no djenInferProcessFromPublication.
+// Migração multi-cliente — split "X, inclui Y" em [X, Y]
 // ====================================================================
+// Imports DJEN antigos gravaram p.client com strings tipo:
+//   "LEILA HAJJAR KOUNBOZ, inclui SAMIR AJI KOUNBOZ" → 2 clientes
+//   "inclui SAMIR AJI KOUNBOZ"                       → 1 cliente (com prefixo)
+// O novo modelo suporta múltiplos via p.clientes / p.clienteIds arrays.
+// Este sweep detecta processos com padrões "inclui"/etc. e popula os arrays
+// novos, preservando TODOS os clientes (não trunca como o sweep anterior).
 
 async function scanClientesSujos() {
   const target = $('clientesReport');
   if (!target) return;
   target.innerHTML = `<div class="help-text">Buscando…</div>`;
   const procs = await DB.getAllProcesses();
-  const afetados = procs
-    .filter(p => _isClienteSujo(p.client))
-    .map(p => ({ p, sugestao: _cleanClienteString(p.client) }))
-    .filter(x => x.sugestao !== x.p.client); // só os que mudam
+  const afetados = [];
+  for (const p of procs) {
+    const original = String(p.client || '').trim();
+    if (!original) continue;
+    const jaEhArray = Array.isArray(p.clientes) && p.clientes.length > 0;
+    if (jaEhArray) continue; // já migrado
+    if (!_isClienteSujo(original)) continue;
+    // Gera lista de nomes via heurística (split por vírgula + strip prefixo)
+    const nomes = _processClientesNomes({ client: original });
+    if (nomes.length === 0) continue;
+    // Compara com o estado salvo. Se nada muda, skip.
+    const mesma = nomes.length === 1 && nomes[0] === original;
+    if (mesma) continue;
+    afetados.push({ p, original, nomes });
+  }
 
   if (afetados.length === 0) {
-    target.innerHTML = `<div class="status ok" style="background:#d4e8d4;color:#2a5a2a;border-left:3px solid var(--uc-green);padding:12px;border-radius:6px;">✓ Nenhum processo com lixo no campo cliente. Tudo limpo.</div>`;
+    target.innerHTML = `<div class="status ok" style="background:#d4e8d4;color:#2a5a2a;border-left:3px solid var(--uc-green);padding:12px;border-radius:6px;">✓ Nenhum processo precisa de migração. Tudo limpo.</div>`;
     const btn = $('aplicarLimpezaBtn');
     if (btn) btn.style.display = 'none';
     return;
   }
 
-  // Stash pra aplicarLimpezaClientes acessar
   window._clientesSujosCache = afetados;
 
   target.innerHTML = `
     <div class="status warn" style="background:#f5e3c4;color:#5a4118;border-left:3px solid var(--uc-amber);padding:10px;border-radius:6px;margin-bottom:10px;font-size:13px;">
-      Encontrados <strong>${afetados.length}</strong> processo(s) com lixo no campo cliente.
-      Revise as sugestões abaixo e clique "Aplicar selecionados" pra atualizar.
+      Encontrados <strong>${afetados.length}</strong> processo(s) onde o campo cliente contém múltiplos nomes ou prefixo
+      ("inclui X", "representado por Y") do parser DJEN antigo. Migra pra o array <code>p.clientes</code> preservando
+      TODOS os nomes (não trunca).
     </div>
     <div style="display: flex; flex-direction: column; gap: 8px; max-height: 50vh; overflow-y: auto;" class="scroll-thin">
       ${afetados.map((x, i) => `
         <div style="display: flex; gap: 10px; align-items: flex-start; padding: 10px; background: var(--uc-cream); border-radius: 5px; border: 1px solid var(--uc-line);">
-          <input type="checkbox" id="_clienteFix_${i}" data-cliente-fix-idx="${i}" checked style="margin-top: 4px;">
+          <input type="checkbox" id="_clienteFix_${i}" checked style="margin-top: 4px;">
           <div style="flex: 1; min-width: 0; font-size: 12px;">
             <div style="font-weight: 600; color: var(--uc-black); margin-bottom: 2px;">${escapeHtml(x.p.name || x.p.cnj || '(sem nome)')}</div>
             ${x.p.cnj ? `<div class="process-cnj" style="font-size: 10px; color: var(--uc-warm-gray); margin-bottom: 4px;">${escapeHtml(x.p.cnj)}</div>` : ''}
             <div style="display: grid; grid-template-columns: 70px 1fr; gap: 4px 8px;">
               <span style="color: var(--uc-warm-gray);">Atual:</span>
-              <span style="color: var(--uc-red); text-decoration: line-through;">${escapeHtml(x.p.client)}</span>
-              <span style="color: var(--uc-warm-gray);">Sugestão:</span>
-              <span style="color: var(--uc-green); font-weight: 500;">${escapeHtml(x.sugestao) || '<em style="color: var(--uc-warm-gray); font-weight: normal;">(vazio — recomendado editar manual)</em>'}</span>
+              <span style="color: var(--uc-warm-gray); font-style: italic;">${escapeHtml(x.original)}</span>
+              <span style="color: var(--uc-warm-gray);">Migra pra:</span>
+              <span style="color: var(--uc-green); font-weight: 500;">${x.nomes.map(n => `<span style="display: inline-block; padding: 1px 6px; background: #fff; border: 1px solid var(--uc-line); border-radius: 10px; margin-right: 4px;">${escapeHtml(n)}</span>`).join('')}</span>
             </div>
+            <p style="font-size: 10px; color: var(--uc-warm-gray); margin-top: 6px; font-style: italic;">
+              ${x.nomes.length > 1
+                ? `Vai criar lista de ${x.nomes.length} clientes (litisconsórcio).`
+                : 'Vai limpar o prefixo "inclui"/etc. mantendo 1 cliente.'}
+              Vínculo relacional (clienteId/clienteIds) preservado.
+            </p>
           </div>
         </div>
       `).join('')}
@@ -4747,30 +4875,28 @@ async function scanClientesSujos() {
 
 async function aplicarLimpezaClientes() {
   const afetados = window._clientesSujosCache || [];
-  if (afetados.length === 0) { toast('Nada a fazer', 'Execute "Buscar clientes com lixo" primeiro.', 'info'); return; }
+  if (afetados.length === 0) { toast('Nada a fazer', 'Execute "Buscar processos pra migrar" primeiro.', 'info'); return; }
 
-  const target = $('clientesReport');
   const selecionados = afetados.filter((_, i) => $(`_clienteFix_${i}`)?.checked);
   if (selecionados.length === 0) { toast('Nenhum selecionado', 'Marque ao menos 1 processo pra aplicar.', 'info'); return; }
 
   let atualizados = 0;
-  for (const x of selecionados) {
-    const sugestao = x.sugestao || null; // vazio vira null pra não confundir UI
+  for (const { p, nomes } of selecionados) {
     try {
-      x.p.client = sugestao;
-      // Atualiza também p.name se ele contém o cliente antigo (heurística simples)
-      if (x.p.name && x.p.name.includes(x.p.client) === false && sugestao) {
-        // Tenta substituir nas posições onde aparecer
-        // (skip — name não tem o lixo necessariamente, não vou tocar)
-      }
-      await DB.saveProcess(x.p);
+      // Popula schema novo (arrays) + legacy (snapshot string concatenada)
+      p.clientes = nomes;
+      // clienteIds: só preserva o que já tava vinculado (1º), os outros ficam como
+      // nomes-só até user editar pra vincular
+      p.clienteIds = p.clienteId ? [p.clienteId] : [];
+      p.client = nomes.join(', '); // snapshot legacy
+      await DB.saveProcess(p);
       atualizados++;
     } catch (err) {
-      console.warn('[limpeza] falha em', x.p.id, err);
+      console.warn('[migração multi-cliente] falha em', p.id, err);
     }
   }
-  toast('Limpeza aplicada', `${atualizados} processo(s) sanitizado(s)`, 'success');
-  await scanClientesSujos(); // re-scan pra atualizar a lista
+  toast('Migração aplicada', `${atualizados} processo(s) migrado(s) pra multi-cliente`, 'success');
+  await scanClientesSujos();
 }
 
 async function logoutFlow() {
@@ -13364,16 +13490,17 @@ function renderSettingsTab(tab, prompts, defaultPromptId) {
       </div>
 
       <div class="card mb-3">
-        <h3 class="font-serif text-lg font-semibold smallcaps mb-3" style="color: var(--uc-black);">Sanitização de clientes</h3>
+        <h3 class="font-serif text-lg font-semibold smallcaps mb-3" style="color: var(--uc-black);">Migração multi-cliente</h3>
         <p class="help-text mb-3">
-          Detecta processos cujo campo <strong>cliente</strong> ficou poluído por lixo extraído da publicação DJEN
-          (prefixos/sufixos como "inclui X", "representado por Y", "na pessoa de Z") em imports antigos.
-          Mostra a sugestão de limpeza pra cada um e aplica em lote com checkbox individual. Não toca em campos
-          já limpos.
+          Detecta processos com formato antigo (1 string única no campo <code>p.client</code>) que contém múltiplos
+          clientes em litisconsórcio ("LEILA, inclui SAMIR") ou prefixos do parser DJEN ("inclui X"). Migra pra o
+          novo schema <code>p.clientes: [...]</code> preservando <strong>TODOS os nomes</strong> — não trunca.
+          Vínculos relacionais (clienteId) são preservados pro 1º da lista; demais ficam como nomes-só até você
+          editar o processo pra vincular formalmente cada um.
         </p>
         <div id="clientesReport" class="mb-3"></div>
         <div class="flex gap-2 flex-wrap">
-          <button class="btn btn-outline" onclick="scanClientesSujos()">Buscar clientes com lixo</button>
+          <button class="btn btn-outline" onclick="scanClientesSujos()">Buscar processos pra migrar</button>
           <button class="btn btn-primary" onclick="aplicarLimpezaClientes()" id="aplicarLimpezaBtn" style="display:none">Aplicar selecionados</button>
         </div>
       </div>
@@ -15108,7 +15235,12 @@ th { background: #f4f1e8; font-variant: small-caps; }
 <table>
 ${p.name ? `<tr><th width="180">Processo</th><td>${escapeHtml(p.name)}</td></tr>` : ''}
 ${p.cnj ? `<tr><th>Número CNJ</th><td class="cnj">${escapeHtml(p.cnj)}</td></tr>` : ''}
-${p.client ? `<tr><th>Cliente</th><td>${escapeHtml(String(p.client).replace(/^\s*(?:inclui|incluir|representado\s+por|na\s+pessoa\s+de)\s+/i, '').trim())}</td></tr>` : ''}
+${(() => {
+  const nomes = _processClientesNomes(p);
+  if (!nomes.length) return '';
+  const label = nomes.length > 1 ? `Clientes (${nomes.length})` : 'Cliente';
+  return `<tr><th>${label}</th><td>${escapeHtml(nomes.join(', '))}</td></tr>`;
+})()}
 ${p.court ? `<tr><th>Tribunal/Vara</th><td>${escapeHtml(p.court)}</td></tr>` : ''}
 ${p.comarca ? `<tr><th>Comarca</th><td>${escapeHtml(p.comarca)}</td></tr>` : ''}
 ${p.type ? `<tr><th>Tipo de ação</th><td>${escapeHtml(p.type)}</td></tr>` : ''}
@@ -16402,6 +16534,51 @@ function _djenRecursoChange(select) {
   if (isLast && realPicked) {
     _djenAddRecursoSlot(container);
   }
+}
+
+// ====================================================================
+// Multi-cliente: helpers de resolução e exibição
+// ====================================================================
+// Modelo de dados atualizado pra suportar múltiplos clientes por processo:
+//   p.clienteIds: string[]  → array de FKs pra clientes collection (novo)
+//   p.clientes:   string[]  → array de nomes snapshot (novo, denormalizado)
+//   p.clienteId:  string    → legacy, mantido por back-compat (1º do array)
+//   p.client:     string    → legacy, mantido por back-compat (clientes.join(', '))
+// Helpers abaixo resolvem ambos os formatos e expõem a lista unificada.
+
+// Resolve array de nomes de clientes do processo, mesclando schema antigo
+// e novo. Ordem de preferência:
+//   1. p.clientes (array snapshot, formato novo) — usa direto
+//   2. p.client (string única) — split por vírgula/ponto-vírgula se contém,
+//      ou usa como item único
+//   3. vazio
+// Aplica strip cosmético de prefixo lixo ("inclui X" → "X").
+function _processClientesNomes(p) {
+  if (!p) return [];
+  // Caminho 1: array novo
+  if (Array.isArray(p.clientes) && p.clientes.length > 0) {
+    return p.clientes.map(n => _cleanClienteString(n)).filter(Boolean);
+  }
+  // Caminho 2: string única legacy — tenta detectar múltiplos via vírgula
+  const raw = String(p.client || '').trim();
+  if (!raw) return [];
+  // Heurística: separa por vírgula/ponto-vírgula APENAS se houver palavras-chave
+  // de lista ("inclui", "representado por", etc.). Senão trata como nome único
+  // (pra não quebrar "Banco Mercantil S.A.")
+  if (/[,;]\s*(?:inclui|incluir|representado\s+por|na\s+pessoa\s+de)/i.test(raw)) {
+    // Tem split pattern: separa em principal + extras
+    const parts = raw.split(/\s*[,;]\s*(?:inclui|incluir|representado\s+por|na\s+pessoa\s+de)\s+/i);
+    return parts.map(s => _cleanClienteString(s.trim())).filter(Boolean);
+  }
+  // Sem split pattern: 1 cliente só (limpo)
+  const limpo = _cleanClienteString(raw);
+  return limpo ? [limpo] : [];
+}
+
+// Renderiza nomes de clientes pra exibição em texto puro (cards, ficha).
+function _processClientesLabel(p, separator = ', ') {
+  const nomes = _processClientesNomes(p);
+  return nomes.join(separator);
 }
 
 // Detecta string de cliente com lixo extraído da publicação DJEN. Padrões

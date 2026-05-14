@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.49.0 (Manutenção: sanitização de clientes — limpa lixo do parser DJEN antigo)
-const CACHE_NAME = 'uc-juridico-v6-49-0';
+// Service Worker — UC Jurídico v6.50.0 (Multi-cliente: schema novo + multiselect chips + migração não-destrutiva)
+const CACHE_NAME = 'uc-juridico-v6-50-0';
 const APP_SHELL = [
   './',
   './index.html',
