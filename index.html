@@ -3130,7 +3130,7 @@ async function renderProcessTabContent() {
   if (activeTab === 'overview') c.innerHTML = renderProcessOverview(p, events, deadlines, notes, jurisprudence);
   else if (activeTab === 'cliente') c.innerHTML = await renderProcessCliente(p);
   else if (activeTab === 'events') c.innerHTML = renderProcessEvents(p, events, notes);
-  else if (activeTab === 'deadlines') c.innerHTML = renderProcessDeadlines(p, deadlines);
+  else if (activeTab === 'deadlines') c.innerHTML = await renderProcessDeadlines(p, deadlines);
   else if (activeTab === 'jurisprudence') c.innerHTML = renderProcessJurisprudence(p, jurisprudence);
   else if (activeTab === 'notes') c.innerHTML = renderProcessNotes(p, notes);
   else if (activeTab === 'honorarios') c.innerHTML = renderProcessHonorarios(p, honorarios || []);
@@ -3546,12 +3546,66 @@ function _renderEventoTimeline(e, notesCount) {
   `;
 }
 
-function renderProcessDeadlines(p, deadlines) {
+async function renderProcessDeadlines(p, deadlines) {
   const active = deadlines.filter(d => prazoEstaAtivo(d));
   const resolvidos = deadlines.filter(d => prazoEstaResolvido(d));
   const labelHist = resolvidos.length > 0
     ? `${resolvidos.length} resolvido(s) [cumpridos · cancelados · perdidos]`
     : '';
+
+  // Deadlines com mesma djenHash vêm da MESMA publicação DJEN (ex: sentença
+  // que gerou prazos pra embargos + apelação). Agrupa pra mostrar 1 card de
+  // publicação com N recursos dentro — preserva a hierarquia que o usuário
+  // viu no card de importação. Deadlines sem djenHash (manuais, MNI legado)
+  // continuam renderizando 1 card por prazo, como antes.
+  const djenHashes = [...new Set(deadlines.filter(d => d.djenHash).map(d => d.djenHash))];
+  const pubsMap = {};
+  for (const h of djenHashes) {
+    try { const pub = await DB.getDjenPublication(h); if (pub) pubsMap[h] = pub; } catch {}
+  }
+
+  const groups = new Map(); // djenHash → { hash, pub, ativos, resolvidos }
+  const otherActive = [];
+  const otherResolvidos = [];
+  for (const d of active) {
+    if (d.djenHash) {
+      if (!groups.has(d.djenHash)) groups.set(d.djenHash, { hash: d.djenHash, pub: pubsMap[d.djenHash] || null, ativos: [], resolvidos: [] });
+      groups.get(d.djenHash).ativos.push(d);
+    } else otherActive.push(d);
+  }
+  for (const d of resolvidos) {
+    if (d.djenHash) {
+      if (!groups.has(d.djenHash)) groups.set(d.djenHash, { hash: d.djenHash, pub: pubsMap[d.djenHash] || null, ativos: [], resolvidos: [] });
+      groups.get(d.djenHash).resolvidos.push(d);
+    } else otherResolvidos.push(d);
+  }
+
+  // Ordena grupos: 1º pelo prazo ativo mais próximo; quando só há resolvidos,
+  // pela data de intimação desc (mais recente primeiro).
+  const groupsArr = [...groups.values()].sort((a, b) => {
+    const earliestA = Math.min(...a.ativos.map(d => new Date(d.deadlineDate).getTime()), Infinity);
+    const earliestB = Math.min(...b.ativos.map(d => new Date(d.deadlineDate).getTime()), Infinity);
+    if (Number.isFinite(earliestA) || Number.isFinite(earliestB)) return earliestA - earliestB;
+    const lastA = Math.max(...a.resolvidos.map(d => new Date(d.intimationDate || d.createdAt).getTime()), 0);
+    const lastB = Math.max(...b.resolvidos.map(d => new Date(d.intimationDate || d.createdAt).getTime()), 0);
+    return lastB - lastA;
+  });
+
+  const otherActiveSorted = otherActive.sort((a,b) => new Date(a.deadlineDate) - new Date(b.deadlineDate));
+  const otherResolvidosSorted = otherResolvidos.sort((a,b) => (b.updatedAt || b.completedAt || 0) - (a.updatedAt || a.completedAt || 0));
+
+  // Render: grupos DJEN primeiro, depois deadlines avulsos
+  const cardsAtivos = [
+    ...groupsArr.filter(g => g.ativos.length > 0).map(g => renderPublicacaoCard(g, p, /* showResolvidos */ false)),
+    ...otherActiveSorted.map(d => renderDeadlineRow(d, p))
+  ].join('');
+
+  // Histórico: grupos cujos prazos estão TODOS resolvidos + deadlines avulsos resolvidos
+  const cardsHistorico = [
+    ...groupsArr.filter(g => g.ativos.length === 0 && g.resolvidos.length > 0).map(g => renderPublicacaoCard(g, p, true)),
+    ...otherResolvidosSorted.map(d => renderDeadlineRow(d, p))
+  ].join('');
+
   return `
     <div class="flex justify-between items-center mb-3">
       <p class="text-sm" style="color: var(--uc-warm-gray);">${active.length} ativo(s)${labelHist ? ' · ' + labelHist : ''}</p>
@@ -3562,13 +3616,86 @@ function renderProcessDeadlines(p, deadlines) {
         <p class="empty-state-msg">Nenhum prazo cadastrado para este processo.</p>
       </div>
     ` : ''}
-    ${active.sort((a,b) => new Date(a.deadlineDate) - new Date(b.deadlineDate)).map(d => renderDeadlineRow(d, p)).join('')}
-    ${resolvidos.length > 0 ? `<h4 class="smallcaps text-xs mt-6 mb-2" style="color: var(--uc-warm-gray);">Histórico (resolvidos)</h4>` : ''}
-    ${resolvidos.sort((a,b) => (b.updatedAt || b.completedAt || 0) - (a.updatedAt || a.completedAt || 0)).map(d => renderDeadlineRow(d, p)).join('')}
+    ${cardsAtivos}
+    ${cardsHistorico ? `<h4 class="smallcaps text-xs mt-6 mb-2" style="color: var(--uc-warm-gray);">Histórico (resolvidos)</h4>${cardsHistorico}` : ''}
   `;
 }
 
-function renderDeadlineRow(d, p) {
+// Renderiza UMA publicação DJEN como card com N recursos (deadlines) dentro.
+// Header tem dados da publicação (órgão, intimação, DJ Nº, link); cada
+// deadline interno é uma row compacta com nome do recurso, vencimento,
+// status e ações — sem repetir o cabeçalho.
+function renderPublicacaoCard(group, p, mostraResolvidos) {
+  const pub = group.pub; // pode ser null se não persistido
+  const todos = mostraResolvidos
+    ? group.resolvidos.sort((a,b) => (b.updatedAt || b.completedAt || 0) - (a.updatedAt || a.completedAt || 0))
+    : group.ativos.sort((a,b) => new Date(a.deadlineDate) - new Date(b.deadlineDate));
+
+  // Tenta extrair metadados ricos do pub.raw (estrutura original do DJEN)
+  const raw = pub?.raw || pub || {};
+  const meta = _djenExtractMeta(raw);
+  const orgaoNome = pub?.orgao || raw.nomeOrgao || raw.orgao || (todos[0]?.description?.split(' · ')[1]) || '';
+  const dataDispo = pub?.dataDisponibilizacao || meta.dataDisponibilizacao || todos[0]?.intimationDate || '';
+  const tribunalCode = pub?.tribunal || meta.tribunal || raw.siglaTribunal || '';
+  const tipoComunicacao = pub?.tipo || raw.tipoComunicacao || 'Intimação';
+  const numeroDiario = meta.numeroDiario;
+  const caderno = meta.caderno;
+  const pagina = meta.pagina;
+
+  // Linha de meta compacta (similar ao card de importação)
+  const metaPartes = [];
+  if (dataDispo) metaPartes.push(`Intimação ${_djenFormatBrDate(dataDispo)}`);
+  if (numeroDiario) metaPartes.push(`DJ Nº ${escapeHtml(String(numeroDiario))}`);
+  if (caderno) metaPartes.push(`cad. ${escapeHtml(String(caderno))}`);
+  if (pagina) metaPartes.push(`pág ${escapeHtml(String(pagina))}`);
+  if (tribunalCode) metaPartes.push(escapeHtml(tribunalCode));
+
+  const verTextoBtn = pub
+    ? `<button class="btn btn-ghost btn-sm" onclick="djenShowFullPublicacaoFromDb('${group.hash}')" style="padding: 3px 10px; font-size: 11px;" title="Abrir o texto integral da publicação salva">📄 Ver texto</button>`
+    : '';
+  const linkDiarioBtn = meta.link
+    ? `<a href="${escapeHtml(meta.link)}" target="_blank" rel="noopener noreferrer" class="btn btn-ghost btn-sm" style="padding: 3px 10px; font-size: 11px;" title="Abrir o diário oficial no portal do tribunal">🔗 Diário</a>`
+    : '';
+
+  return `
+    <div class="card" style="padding: 12px; margin-bottom: 12px;">
+      <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; padding-bottom: 10px; border-bottom: 1px solid var(--uc-line); margin-bottom: 10px;">
+        <div style="flex: 1; min-width: 0;">
+          <div style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap;">
+            <span style="font-size: 11px; color: var(--uc-warm-gray); text-transform: uppercase; letter-spacing: 0.04em;">📰 Publicação DJEN</span>
+            <span class="badge badge-gray" style="font-size: 10px;">${escapeHtml(tipoComunicacao)}</span>
+          </div>
+          <div style="font-weight: 600; color: var(--uc-black); margin-top: 4px;">${escapeHtml(orgaoNome || 'Publicação sem órgão identificado')}</div>
+          ${metaPartes.length ? `<div style="font-size: 11px; color: var(--uc-warm-gray); margin-top: 2px;">${metaPartes.join(' · ')}</div>` : ''}
+        </div>
+        <div style="display: flex; gap: 6px; flex-shrink: 0;">${verTextoBtn}${linkDiarioBtn}</div>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 8px;">
+        ${todos.map(d => renderDeadlineRow(d, p, /* compactInsidePub */ true)).join('')}
+      </div>
+    </div>
+  `;
+}
+
+// Abre modal com o texto da publicação DJEN buscando do DB (persistido em
+// DjenPublication). Usado na aba "Publicações" do processo, onde o cache
+// global window._djenClassifiedCache não existe.
+async function djenShowFullPublicacaoFromDb(hash) {
+  const pub = await DB.getDjenPublication(hash);
+  if (!pub) { toast('Publicação não encontrada', 'Pode ter sido removida do banco.', 'error'); return; }
+  // Reusa djenShowFullPublicacao injetando temporariamente o cache.
+  const raw = pub.raw || pub;
+  const prevCache = window._djenClassifiedCache;
+  window._djenClassifiedCache = { matched: [{ ...raw, hash }], unmatched: [] };
+  try {
+    djenShowFullPublicacao(hash);
+  } finally {
+    // Restaura cache anterior depois de criar o modal
+    setTimeout(() => { window._djenClassifiedCache = prevCache; }, 100);
+  }
+}
+
+function renderDeadlineRow(d, p, compactInsidePub) {
   const today = new Date(); today.setHours(0,0,0,0);
   const dl = new Date(d.deadlineDate);
   const days = Math.ceil((dl - today) / 86400000);
@@ -3619,12 +3746,29 @@ function renderDeadlineRow(d, p) {
     detalhesStatus = `<div style="font-size: 11px; color: var(--uc-red); margin-top: 4px; font-weight: 600;">✗ PRAZO PERDIDO — investigar e regularizar</div>`;
   }
 
+  // Quando renderizado dentro de um card de publicação (modo compactInsidePub),
+  // omite o órgão/CNJ/intimação do título (já estão no header da publicação)
+  // e mostra só o nome do recurso + base legal — visual hierárquico.
+  let tituloRecurso, metaLinha;
+  if (compactInsidePub) {
+    // Limpa o prefixo "[DJEN] " e o sufixo " · {orgão}" da description salva
+    const descLimpa = String(d.description || d.type || '')
+      .replace(/^\[DJEN\]\s*/i, '')
+      .split(' · ')[0]
+      .trim();
+    tituloRecurso = descLimpa || d.tipoEscolhido || 'Prazo';
+    metaLinha = `Vence ${formatDate(dl)}${d.daysAllowed ? ' · ' + d.daysAllowed + ' dias ' + unidLabel : ''}${d.tipoEscolhidoBaseLegal ? ' · ' + escapeHtml(d.tipoEscolhidoBaseLegal) : (d.parser?.baseLegal ? ' · ' + escapeHtml(d.parser.baseLegal) : '')}`;
+  } else {
+    tituloRecurso = escapeHtml(d.description || d.type);
+    metaLinha = `Vence ${formatDate(dl)}${d.intimationDate ? ' · intimação ' + formatDate(d.intimationDate) : ''}${d.daysAllowed ? ' · ' + d.daysAllowed + ' dias ' + unidLabel : ''}${d.tribunal && d.tribunal !== 'NACIONAL' ? ' · ' + escapeHtml(d.tribunal) : ''}`;
+  }
+
   return `
-    <div class="deadline-row ${v.cls}">
+    <div class="deadline-row ${v.cls}"${compactInsidePub ? ' style="border: 1px solid var(--uc-line-soft); border-radius: 4px;"' : ''}>
       <div style="flex: 1; min-width: 0;">
-        <div style="font-weight: 600; color: var(--uc-black);">${escapeHtml(d.description || d.type)}${d.emDobro ? ' <span class="badge badge-amber" style="font-size: 9px;">DOBRO</span>' : ''} ${parserBadge} ${reviewBadge}</div>
+        <div style="font-weight: 600; color: var(--uc-black);">${compactInsidePub ? escapeHtml(tituloRecurso) : tituloRecurso}${d.emDobro ? ' <span class="badge badge-amber" style="font-size: 9px;">DOBRO</span>' : ''} ${parserBadge} ${reviewBadge}</div>
         <div style="font-size: 12px; color: var(--uc-warm-gray); margin-top: 2px;">
-          Vence ${formatDate(dl)}${d.intimationDate ? ' · intimação ' + formatDate(d.intimationDate) : ''}${d.daysAllowed ? ' · ' + d.daysAllowed + ' dias ' + unidLabel : ''}${d.tribunal && d.tribunal !== 'NACIONAL' ? ' · ' + escapeHtml(d.tribunal) : ''}
+          ${metaLinha}
         </div>
         ${detalhesStatus}
         ${d.diarioCalculo ? `<details style="margin-top: 4px;"><summary style="font-size: 11px; color: var(--uc-warm-gray); cursor: pointer;">📋 diário de cálculo</summary><div style="font-size: 11px; color: var(--uc-graphite); padding: 6px 8px; background: var(--uc-cream); border-radius: 4px; margin-top: 4px; line-height: 1.5;">${escapeHtml(d.diarioCalculo)}</div></details>` : ''}
