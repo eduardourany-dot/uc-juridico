@@ -15200,14 +15200,19 @@ async function djenShowResultsModal(classified, oabs, dataInicio, dataFim) {
         ` : ''}
       </div>
     </div>`;
+  // Stash GLOBAL ANTES de appendChild — os handlers oninput/onchange dos
+  // slots (data-djen-prazo, data-djen-unidade) precisam acessar o cache pra
+  // calcular a data final. Se setasse só dentro do if (importBtn), slots
+  // sem botão de import (cenário com 0 publicações importáveis) ficariam
+  // sem cache disponível.
+  window._djenClassifiedCache = classified;
   $('modalContainer').appendChild(modal);
   document.getElementById('_djenCancel').onclick = () => modal.remove();
   const importBtn = document.getElementById('_djenImport');
-  if (importBtn) {
-    // Stash data globally so import button can access (closure would need binding)
-    window._djenClassifiedCache = classified;
-    importBtn.onclick = () => djenImportSelected(modal);
-  }
+  if (importBtn) importBtn.onclick = () => djenImportSelected(modal);
+  // Popula a data final inicial em todos os slots já renderizados (o 1º slot
+  // de cada card pode ter prazo pré-preenchido pelo parser).
+  modal.querySelectorAll('.djen-recurso-slot').forEach(slot => _djenUpdateSlotDataFinal(slot));
 }
 
 // ====================================================================
@@ -15315,16 +15320,17 @@ function _djenBuildRecursoOptionsAll() {
   return html;
 }
 
-// Renderiza UM slot de recurso (dropdown + prazo + unidade + dobro + remover).
+// Renderiza UM slot de recurso (dropdown + prazo + unidade + data final + remover).
 // O 1º slot (isFirst=true) usa o parser pra pré-selecionar; slots adicionais
 // (isFirst=false) começam vazios com lista completa de recursos.
+// A data final é calculada via JS após o slot ser inserido no DOM (precisa
+// olhar o pub pra ter dataDispo + tribunal) — ver _djenUpdateSlotDataFinal.
 function _djenBuildSlot(parsed, isFirst) {
   const hasPrazo = isFirst && parsed?.prazoDias != null && parsed.prazoDias > 0;
   const recursosCabiveis = isFirst ? (parsed?.recursosCabiveis || []) : [];
   const precisaEscolher = isFirst && !hasPrazo && recursosCabiveis.length > 0;
   const prazoDefault = hasPrazo ? String(parsed.prazoDias) : '';
   const unidadeDefault = (isFirst && parsed?.unidade) || 'UTEIS';
-  const emDobroDefault = isFirst && parsed?.emDobro;
   const optionsHtml = isFirst ? _djenBuildRecursoOptions(parsed) : _djenBuildRecursoOptionsAll();
   const bg = precisaEscolher ? '#fff8e8' : 'rgba(244,241,232,0.4)';
   const border = precisaEscolher ? 'var(--uc-amber)' : 'var(--uc-line)';
@@ -15337,20 +15343,67 @@ function _djenBuildSlot(parsed, isFirst) {
         </select>
         ${isFirst ? '' : `<button type="button" onclick="_djenRemoveSlot(this)" title="Remover este recurso" style="border: 1px solid var(--uc-red); background: #fff; color: var(--uc-red); cursor: pointer; padding: 2px 8px; border-radius: 3px; font-size: 11px;">✕</button>`}
       </div>
-      <label style="display: inline-flex; align-items: center; gap: 6px; font-size: 11px;">
-        Prazo:
-        <input type="number" data-djen-prazo value="${prazoDefault}" min="1" max="365" placeholder="—" style="width: 65px; padding: 2px 6px; border: 1px solid var(--uc-line); border-radius: 4px; ${precisaEscolher ? 'opacity: 0.5;' : ''}" ${precisaEscolher ? 'disabled' : ''}>
-        <select data-djen-unidade style="padding: 2px 4px; border: 1px solid var(--uc-line); border-radius: 4px; font-size: 11px;">
-          <option value="UTEIS" ${unidadeDefault === 'UTEIS' ? 'selected' : ''}>úteis</option>
-          <option value="CORRIDOS" ${unidadeDefault === 'CORRIDOS' ? 'selected' : ''}>corridos</option>
-        </select>
-        <label style="display: inline-flex; align-items: center; gap: 3px; margin-left: 6px;">
-          <input type="checkbox" data-djen-dobro ${emDobroDefault ? 'checked' : ''}>
-          <span style="font-size: 10px;">em dobro</span>
+      <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 11px;">
+        <label style="display: inline-flex; align-items: center; gap: 6px;">
+          Prazo:
+          <input type="number" data-djen-prazo value="${prazoDefault}" min="1" max="365" placeholder="—" oninput="_djenUpdateSlotDataFinal(this.closest('.djen-recurso-slot'))" style="width: 65px; padding: 2px 6px; border: 1px solid var(--uc-line); border-radius: 4px; ${precisaEscolher ? 'opacity: 0.5;' : ''}" ${precisaEscolher ? 'disabled' : ''}>
+          <select data-djen-unidade onchange="_djenUpdateSlotDataFinal(this.closest('.djen-recurso-slot'))" style="padding: 2px 4px; border: 1px solid var(--uc-line); border-radius: 4px; font-size: 11px;">
+            <option value="UTEIS" ${unidadeDefault === 'UTEIS' ? 'selected' : ''}>úteis</option>
+            <option value="CORRIDOS" ${unidadeDefault === 'CORRIDOS' ? 'selected' : ''}>corridos</option>
+          </select>
         </label>
-      </label>
+        <span data-djen-data-final style="font-size: 11px; color: var(--uc-green); font-weight: 500;"></span>
+      </div>
     </div>
   `;
+}
+
+// Calcula a data final do prazo a partir do pub + slot config.
+// Reusa calcDjenDeadline (mesma engine usada na importação) pra garantir
+// consistência entre o preview no card e o prazo que será salvo.
+function _djenComputeDataFinal(pub, prazoDias, unidade) {
+  if (!pub || !prazoDias) return null;
+  const dataDispo = pub.data_disponibilizacao || pub.data_publicacao;
+  if (!dataDispo) return null;
+  const tribunal = inferirTribunal(pub.tribunal || pub.siglaTribunal || pub.nomeOrgao || '') || 'NACIONAL';
+  try {
+    const calc = calcDjenDeadline(dataDispo, prazoDias, tribunal, unidade || 'UTEIS', false);
+    return calc.deadline; // Date object
+  } catch (e) {
+    console.warn('[DJEN] _djenComputeDataFinal falhou', e);
+    return null;
+  }
+}
+
+// Atualiza o badge "→ Vence DD/MM/YYYY" de um slot. Chamado:
+//   - onchange do dropdown de recurso (_djenRecursoChange)
+//   - oninput do <input type=number data-djen-prazo>
+//   - onchange do <select data-djen-unidade>
+//   - inicialização: após djenShowResultsModal anexa o modal ao DOM
+function _djenUpdateSlotDataFinal(slot) {
+  if (!slot) return;
+  const card = slot.closest('[data-djen-id]');
+  if (!card) return;
+  const hash = card.dataset.djenId;
+  const c = window._djenClassifiedCache;
+  const pub = c && [...(c.matched || []), ...(c.unmatched || [])].find(p => p.hash === hash);
+  if (!pub) return;
+  const prazoInput = slot.querySelector('[data-djen-prazo]');
+  const unidadeSelect = slot.querySelector('[data-djen-unidade]');
+  const out = slot.querySelector('[data-djen-data-final]');
+  if (!prazoInput || !unidadeSelect || !out) return;
+  const prazoNum = parseInt(prazoInput.value);
+  if (!Number.isFinite(prazoNum) || prazoNum <= 0) {
+    out.textContent = '';
+    return;
+  }
+  const dataFinal = _djenComputeDataFinal(pub, prazoNum, unidadeSelect.value);
+  if (!dataFinal) {
+    out.textContent = '';
+    return;
+  }
+  const unidLabel = unidadeSelect.value === 'CORRIDOS' ? 'corridos' : 'úteis';
+  out.innerHTML = `→ <strong>Vence ${formatDate(dataFinal)}</strong> <span style="opacity:.7; font-weight:400;">(${prazoNum} dias ${unidLabel})</span>`;
 }
 
 // Adiciona um novo slot (vazio) ao container de recursos da publicação.
@@ -15407,6 +15460,9 @@ function _djenRecursoChange(select) {
   const card = slot.closest('[data-djen-id]');
   const baseLegalStatic = card?.querySelector('[data-djen-baselegal-static]');
   if (baseLegalStatic && opt.dataset.baselegal) baseLegalStatic.textContent = opt.dataset.baselegal;
+
+  // Recalcula a data final agora que prazo/unidade foram atualizados.
+  _djenUpdateSlotDataFinal(slot);
 
   // Auto-add: se este é o último slot E user escolheu recurso real, abre o próximo.
   const container = slot.parentElement;
@@ -15860,7 +15916,6 @@ async function djenImportSelected(modal) {
       const tipoAtoSelect = slot.querySelector('[data-djen-tipo-ato]');
       const prazoInput = slot.querySelector('[data-djen-prazo]');
       const unidadeSelect = slot.querySelector('[data-djen-unidade]');
-      const dobroCheckbox = slot.querySelector('[data-djen-dobro]');
       const tipoAto = tipoAtoSelect?.value || '';
       const prazoRaw = prazoInput?.value || '';
       const prazoParsed = parseInt(prazoRaw);
@@ -15870,7 +15925,7 @@ async function djenImportSelected(modal) {
         tipoAtoBaseLegal: TIPOS_ATO[tipoAto]?.baseLegal || '',
         prazo: Number.isFinite(prazoParsed) && prazoParsed > 0 ? prazoParsed : null,
         unidade: unidadeSelect?.value || 'UTEIS',
-        emDobro: !!dobroCheckbox?.checked
+        emDobro: false  // checkbox removido da UI; usuário ajusta no detalhe do prazo se preciso
       };
     }).filter(r => r.tipoAto && r.tipoAto !== 'CIENCIA' && r.prazo); // só slots válidos
     rowSettings[hash] = {
