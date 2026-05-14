@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.46.0 (MNI: baixar documentos dos movimentos via consultarProcesso incluirDocumentos=true)
-const CACHE_NAME = 'uc-juridico-v6-46-0';
+// Service Worker — UC Jurídico v6.46.1 (Eventos: data formatada em DD/MM/AAAA em vez de ISO)
+const CACHE_NAME = 'uc-juridico-v6-46-1';
 const APP_SHELL = [
   './',
   './index.html',

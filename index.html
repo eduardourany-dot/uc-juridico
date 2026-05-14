@@ -3539,6 +3539,31 @@ function renderProcessEvents(p, events, notes) {
   `;
 }
 
+// Formata data de evento pra exibição BR "DD/MM/AAAA" ou "DD/MM/AAAA HH:MM".
+// Aceita:
+//   - ISO "YYYY-MM-DD" → "DD/MM/AAAA"
+//   - ISO "YYYY-MM-DDTHH:MM[:SS]" → "DD/MM/AAAA HH:MM"
+//   - MNI raw "YYYYMMDDHHMMSS" (sem separadores) → "DD/MM/AAAA HH:MM"
+// Parse direto da string — evita o timezone shift que `new Date('YYYY-MM-DD')`
+// causa (interpreta como UTC e mostra -1 dia em fusos negativos).
+function _formatEventoData(s) {
+  if (!s) return '';
+  const str = String(s);
+  // ISO com separadores
+  let m = str.match(/^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2}))?/);
+  if (m) {
+    const [, y, mo, d, hh, mm] = m;
+    return hh && mm ? `${d}/${mo}/${y} ${hh}:${mm}` : `${d}/${mo}/${y}`;
+  }
+  // MNI raw sem separadores (YYYYMMDD[HHMMSS])
+  m = str.match(/^(\d{4})(\d{2})(\d{2})(?:(\d{2})(\d{2}))?/);
+  if (m) {
+    const [, y, mo, d, hh, mm] = m;
+    return hh && mm ? `${d}/${mo}/${y} ${hh}:${mm}` : `${d}/${mo}/${y}`;
+  }
+  return str;
+}
+
 // Render tolerante a 2 fontes de evento:
 //   1) movimento_mni: título = descrição do movimento, sublinha = data + códigos
 //   2) PDF indexado: título = "Evento N · tipo", sublinha = data + páginas
@@ -3547,13 +3572,13 @@ function _renderEventoTimeline(e, notesCount) {
   let titulo, subtitulo;
   if (isMni) {
     titulo = e.description || '(movimento sem descrição)';
-    const dataFmt = e.date ? e.date.replace('T', ' ').slice(0, 16) : '';
+    const dataFmt = _formatEventoData(e.date);
     const code = (e.eventNumber || '').replace(/^MNI-/, '');
     subtitulo = [dataFmt, code ? `cód. ${code}` : '', 'via MNI']
       .filter(Boolean).join(' · ');
   } else {
     titulo = `Evento ${e.eventNumber || ''}${e.type ? ' · ' + e.type : ''}`;
-    const dataFmt = e.date || '';
+    const dataFmt = _formatEventoData(e.date);
     const pgs = (e.startPage != null && e.endPage != null)
       ? `pgs ${e.startPage}–${e.endPage}${e.pageCount ? ` (${e.pageCount} pgs)` : ''}`
       : '';
@@ -3570,7 +3595,7 @@ function _renderEventoTimeline(e, notesCount) {
       ${e.mniDocs.map(d => `
         <button class="btn btn-ghost btn-sm" style="padding: 3px 8px; font-size: 11px; border: 1px solid var(--uc-line); background: #fff;"
                 onclick="event.stopPropagation(); _mniDocDownload('${e.processId}', '${escapeHtml(d.idDocumento)}')"
-                title="${escapeHtml(d.tipoDocumento || '')} · ${escapeHtml(d.mimetype || '')}${d.dataHora ? ' · ' + escapeHtml(d.dataHora) : ''}${d.hash ? ' · hash ' + escapeHtml(String(d.hash).slice(0, 12)) : ''}">📄 ${escapeHtml((d.nome || 'documento').slice(0, 60))}</button>
+                title="${escapeHtml(d.tipoDocumento || '')} · ${escapeHtml(d.mimetype || '')}${d.dataHora ? ' · ' + escapeHtml(_formatEventoData(d.dataHora)) : ''}${d.hash ? ' · hash ' + escapeHtml(String(d.hash).slice(0, 12)) : ''}">📄 ${escapeHtml((d.nome || 'documento').slice(0, 60))}</button>
       `).join('')}
     </div>
   ` : '';
@@ -4917,14 +4942,14 @@ async function openEventDetail(eventId) {
     : `Evento ${e.eventNumber || ''}`;
   const headerHtml = isMni ? `
     <div style="margin-bottom: 16px; font-size: 14px;">
-      ${e.date ? `<p><strong>Data:</strong> ${escapeHtml(e.date.replace('T', ' ').slice(0, 16))}</p>` : ''}
+      ${e.date ? `<p><strong>Data:</strong> ${escapeHtml(_formatEventoData(e.date))}</p>` : ''}
       ${e.eventNumber ? `<p><strong>Código:</strong> <code>${escapeHtml(e.eventNumber.replace(/^MNI-/, ''))}</code> <small style="color:var(--uc-warm-gray);">· via MNI</small></p>` : ''}
       ${e.details ? `<div style="margin-top:8px;padding:10px;background:var(--uc-cream);border-radius:5px;font-size:13px;white-space:pre-wrap;line-height:1.5;">${escapeHtml(e.details)}</div>` : ''}
     </div>
   ` : `
     <div style="margin-bottom: 16px; font-size: 14px;">
       <p><strong>Tipo:</strong> ${escapeHtml(e.type || '—')}</p>
-      ${e.date ? `<p><strong>Data:</strong> ${escapeHtml(e.date)}</p>` : ''}
+      ${e.date ? `<p><strong>Data:</strong> ${escapeHtml(_formatEventoData(e.date))}</p>` : ''}
       ${(e.startPage != null && e.endPage != null) ? `<p><strong>Páginas:</strong> ${e.startPage}–${e.endPage}${e.pageCount ? ` (${e.pageCount} pgs)` : ''}</p>` : ''}
     </div>
   `;
@@ -4937,7 +4962,7 @@ async function openEventDetail(eventId) {
           <div style="flex: 1; min-width: 0; font-size: 12px;">
             <div style="font-weight: 500; color: var(--uc-black);">${escapeHtml(d.nome || 'documento')}</div>
             <div style="font-size: 11px; color: var(--uc-warm-gray); margin-top: 2px;">
-              ${escapeHtml(d.tipoDocumento || '—')} · ${escapeHtml(d.mimetype || '')}${d.dataHora ? ' · ' + escapeHtml(d.dataHora.slice(0, 12)) : ''}${d.hash ? ' · hash <code style="font-size: 10px;">' + escapeHtml(String(d.hash).slice(0, 16)) + '…</code>' : ''}
+              ${escapeHtml(d.tipoDocumento || '—')} · ${escapeHtml(d.mimetype || '')}${d.dataHora ? ' · ' + escapeHtml(_formatEventoData(d.dataHora)) : ''}${d.hash ? ' · hash <code style="font-size: 10px;">' + escapeHtml(String(d.hash).slice(0, 16)) + '…</code>' : ''}
             </div>
           </div>
           <button class="btn btn-secondary btn-sm" style="padding: 3px 10px; font-size: 11px; white-space: nowrap;"
