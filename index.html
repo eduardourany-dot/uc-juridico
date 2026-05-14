@@ -8847,6 +8847,7 @@ async function removerTransacao(id) {
 
 const COMPROMISSO_TIPOS = [
   { value: 'audiencia',       label: 'Audiência',           icon: '⚖️', cor: '#a8472d' },
+  { value: 'prazo_judicial',  label: 'Prazo judicial',      icon: '⏳', cor: '#a8472d' },
   { value: 'reuniao_cliente', label: 'Reunião com cliente', icon: '🤝', cor: '#8a6f3d' },
   { value: 'reuniao_interna', label: 'Reunião interna',     icon: '👥', cor: '#4a7c4a' },
   { value: 'diligencia',      label: 'Diligência',          icon: '🚗', cor: '#b87f1c' },
@@ -15639,7 +15640,10 @@ function djenRenderPubRow(pub, kind, idx) {
                 <div class="djen-recursos-container">
                   ${_djenBuildSlot(parsed, true)}
                 </div>
-                <button type="button" class="btn btn-ghost btn-sm" onclick="_djenAddRecursoSlot(this)" style="padding: 3px 10px; font-size: 11px; margin-top: 2px;" title="Adicionar outro recurso/ato pra agendar a partir desta mesma publicação (cria um prazo adicional)">+ Adicionar outro recurso</button>
+                <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 4px;">
+                  <button type="button" class="btn btn-ghost btn-sm" onclick="_djenAddRecursoSlot(this)" style="padding: 3px 10px; font-size: 11px;" title="Adicionar outro recurso/ato pra agendar a partir desta mesma publicação (cria um prazo adicional)">+ Adicionar outro recurso</button>
+                  <button type="button" data-djen-agendar-btn class="btn btn-primary btn-sm" onclick="djenAgendarPrazos('${pub.hash}')" style="padding: 4px 12px; font-size: 11px;" title="Salva esta publicação no processo + cria 1 compromisso 'Prazo judicial' na agenda pra cada recurso escolhido — independente do botão 'Importar selecionadas' lá embaixo">📅 Salvar e agendar prazos</button>
+                </div>
                 <div style="margin-top: 8px; display:flex; gap:6px; flex-wrap: wrap; align-items:center;">
                   <span class="badge ${confColor}" style="font-size: 10px;" title="Confiança ${(parsed.confianca*100).toFixed(0)}% · fonte: ${escapeHtml(parsed.fonte)}${parsed.evidencia ? ' · trecho: &quot;' + escapeHtml(String(parsed.evidencia).slice(0, 80)) + '&quot;' : ''}">⚙ parser: ${escapeHtml(parsed.label)}</span>
                   ${parsed.baseLegal ? `<span style="font-size: 10px; color: var(--uc-warm-gray);" data-djen-baselegal-static>${escapeHtml(parsed.baseLegal)}</span>` : ''}
@@ -16088,6 +16092,160 @@ async function djenImportSelected(modal) {
 }
 
 // Try to extract a meaningful name and metadata from a DJEN publication
+// Salva a publicação no processo + cria 1 compromisso por recurso na agenda,
+// independente do botão "Importar selecionadas". Atende pedido específico do
+// Eduardo: workflow rápido pra colocar prazos diretamente na agenda sem
+// passar pelo seletor de import em lote. Cada slot de recurso vira um
+// compromisso tipo "prazo_judicial" com a data de vencimento já calculada,
+// vinculado ao processo, com observações detalhadas pra trilha de auditoria.
+async function djenAgendarPrazos(hash) {
+  const cache = window._djenClassifiedCache;
+  if (!cache) { toast('Cache expirado', 'Re-execute a busca DJEN.', 'error'); return; }
+  const pub = [...(cache.matched || []), ...(cache.unmatched || [])].find(p => p.hash === hash);
+  if (!pub) { toast('Publicação não encontrada', '', 'error'); return; }
+
+  const card = document.querySelector(`[data-djen-id="${hash}"]`);
+  if (!card) return;
+
+  // Coleta slots válidos (mesmo critério do djenImportSelected)
+  const slots = [...card.querySelectorAll('.djen-recurso-slot')];
+  const recursos = slots.map(slot => {
+    const tipoAtoSelect = slot.querySelector('[data-djen-tipo-ato]');
+    const prazoInput = slot.querySelector('[data-djen-prazo]');
+    const unidadeSelect = slot.querySelector('[data-djen-unidade]');
+    const tipoAto = tipoAtoSelect?.value || '';
+    const prazoParsed = parseInt(prazoInput?.value || '');
+    return {
+      tipoAto,
+      label: TIPOS_ATO[tipoAto]?.label || '',
+      baseLegal: TIPOS_ATO[tipoAto]?.baseLegal || '',
+      prazo: Number.isFinite(prazoParsed) && prazoParsed > 0 ? prazoParsed : null,
+      unidade: unidadeSelect?.value || 'UTEIS'
+    };
+  }).filter(r => r.tipoAto && r.tipoAto !== 'CIENCIA' && r.prazo);
+
+  if (recursos.length === 0) {
+    toast('Sem recurso válido', 'Escolha pelo menos 1 recurso com prazo no card antes de agendar.', 'error');
+    return;
+  }
+
+  // Resolve processId. Se unmatched, respeita o checkbox "Criar processo".
+  // Se desmarcado e sem processo, pergunta antes de criar.
+  let processId = pub._proc?.id;
+  if (!processId) {
+    const createCheckbox = card.querySelector('[data-djen-create-process]');
+    let criar = !!createCheckbox?.checked;
+    if (!criar) {
+      criar = confirm(`Publicação de processo não cadastrado (${pub._cnjFormatted || 'sem CNJ'}).\n\nCriar o processo agora pra vincular o compromisso?\n\n(Cancelar = agenda compromisso sem vínculo de processo)`);
+    }
+    if (criar) {
+      const newProc = djenInferProcessFromPublication(pub);
+      await DB.saveProcess(newProc);
+      processId = newProc.id;
+    }
+  }
+
+  // Salva publication record (dedup por hash)
+  const dataDispo = pub.data_disponibilizacao || pub.data_publicacao;
+  const jaExiste = await DB.hasDjenPublication(pub.hash);
+  if (!jaExiste) {
+    await DB.saveDjenPublication({
+      hash: pub.hash,
+      cnj: pub._cnjNormalized,
+      processId: processId || null,
+      tribunal: pub.siglaTribunal || pub.tribunal || '',
+      orgao: pub.nomeOrgao || pub.orgao || '',
+      tipo: pub.tipoComunicacao || 'Intimação',
+      dataDisponibilizacao: dataDispo,
+      texto: pub.texto || '',
+      link: pub.link || '',
+      oab: pub._oab,
+      raw: pub,
+      status: processId ? 'imported' : 'orphan',
+      importedAt: Date.now()
+    });
+  }
+
+  // Cria 1 compromisso por recurso
+  const proc = processId ? await DB.getProcess(processId) : null;
+  const tribunal = inferirTribunal(proc?.court || pub.tribunal || pub.nomeOrgao);
+  const orgaoNome = pub.nomeOrgao || pub.orgao || '';
+  const procIdent = proc ? ((proc.cnj || pub._cnjFormatted || '') + (proc.name ? ' · ' + proc.name : '')).trim() : (pub._cnjFormatted || '(sem CNJ)');
+  const meta = pub._meta || _djenExtractMeta(pub);
+  const pubISO = meta.dataPublicacaoApi || _djenCalcDataPublicacao(meta.dataDisponibilizacao, tribunal) || dataDispo;
+  const meuEmail = (window.UC_Auth?.getUser?.() || {}).email || '';
+  const meuNome = (typeof defaultAdvogado === 'function' ? defaultAdvogado(meuEmail) : '') || '';
+
+  // Dedup: olha compromissos já existentes do mesmo processo com mesmo hash+recurso
+  const existentes = processId ? await DB.getCompromissosByProcess?.(processId).catch(() => []) || [] : [];
+  let criados = 0, pulados = 0;
+
+  for (const r of recursos) {
+    const calc = calcDjenDeadline(dataDispo, r.prazo, tribunal, r.unidade, false);
+    const deadlineDate = new Date(calc.deadline);
+    deadlineDate.setHours(9, 0, 0, 0); // 09:00 do dia do vencimento — push T-0 dispara cedo
+
+    // Dedup: mesmo djenHash + djenRecurso já existe?
+    if (existentes.some(c => c.djenHash === pub.hash && c.djenRecurso === r.tipoAto)) {
+      pulados++;
+      continue;
+    }
+
+    const unidLabel = r.unidade === 'CORRIDOS' ? 'corridos' : 'úteis';
+    const obsLinhas = [
+      `Prazo originado de publicação DJEN.`,
+      ``,
+      `Processo: ${procIdent}`,
+      `Órgão: ${orgaoNome}`,
+      `Disp: ${_djenFormatBrDate(meta.dataDisponibilizacao || dataDispo)}`,
+      `Pub: ${_djenFormatBrDate(pubISO)}${pubISO && !meta.dataPublicacaoApi ? ' (calc.)' : ''}`,
+      `Marco inicial: ${formatDate(calc.publication)}`,
+      `Prazo: ${r.prazo} dias ${unidLabel}${r.baseLegal ? ' · ' + r.baseLegal : ''}`,
+      `Vence: ${formatDate(calc.deadline)}`
+    ];
+    if (meta.numeroDiario) obsLinhas.push(`DJ Nº ${meta.numeroDiario}${meta.caderno ? ' · cad. ' + meta.caderno : ''}${meta.pagina ? ' · pág ' + meta.pagina : ''}`);
+    if (meta.link) obsLinhas.push(``, `Diário oficial: ${meta.link}`);
+
+    await DB.saveCompromisso({
+      id: uid(),
+      tipo: 'prazo_judicial',
+      titulo: `${r.label} · ${procIdent}`.slice(0, 200),
+      dataHoraInicio: deadlineDate.toISOString(),
+      dataHoraFim: null,
+      local: orgaoNome || null,
+      processoId: processId || null,
+      clienteId: proc?.clienteId || null,
+      responsavel: meuNome || null,
+      participantes: [],
+      status: 'agendado',
+      observacoes: obsLinhas.join('\n'),
+      notificado: {},
+      // Trilha forense + dedup
+      djenHash: pub.hash,
+      djenRecurso: r.tipoAto,
+      djenRecursoBaseLegal: r.baseLegal,
+      diarioCalculo: calc.diario || null,
+      createdAt: Date.now()
+    });
+    criados++;
+  }
+
+  // Visual feedback no botão
+  const btn = card.querySelector('[data-djen-agendar-btn]');
+  if (btn) {
+    btn.disabled = true;
+    btn.style.background = '#4a7c4a';
+    btn.style.color = '#fff';
+    btn.style.borderColor = '#4a7c4a';
+    btn.textContent = pulados > 0 && criados === 0 ? '✓ Já agendado' : `✓ ${criados} agendado${criados !== 1 ? 's' : ''}`;
+  }
+  const msgPartes = [];
+  if (criados > 0) msgPartes.push(`${criados} prazo${criados !== 1 ? 's' : ''} agendado${criados !== 1 ? 's' : ''}`);
+  if (pulados > 0) msgPartes.push(`${pulados} duplicad${pulados !== 1 ? 'os' : 'o'} ignorad${pulados !== 1 ? 'os' : 'o'}`);
+  if (!processId) msgPartes.push('sem processo vinculado');
+  toast('Compromissos na agenda', msgPartes.join(' · ') || 'Nada a fazer', criados > 0 ? 'success' : 'info');
+}
+
 function djenInferProcessFromPublication(pub) {
   const cnj = pub._cnjFormatted || pub.numero_processo;
   const tribunal = pub.siglaTribunal || pub.tribunal || '';
