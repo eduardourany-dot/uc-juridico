@@ -3630,11 +3630,10 @@ function _renderEventoTimeline(e, notesCount) {
     <div style="margin-top: 8px; display: flex; gap: 6px; flex-wrap: wrap;" onclick="event.stopPropagation();">
       ${e.mniDocs.map(d => {
         // Ícone reflete o caminho de acesso:
-        //   ⬇ blob local (download direto)
-        //   🔗 hash presente — abrirá no Projudi web
-        //   📄 só metadata, sem hash → modal info
-        const icon = d.hasContent ? '⬇' : (d.hash ? '🔗' : '📄');
-        const acao = d.hasContent ? 'baixar' : (d.hash ? 'abrir no Projudi (precisa estar logado)' : 'ver metadata');
+        //   ⬇ blob local (download direto — quando sistema devolve base64)
+        //   📄 só metadata → modal info com botão "abrir Projudi + copia CNJ"
+        const icon = d.hasContent ? '⬇' : '📄';
+        const acao = d.hasContent ? 'baixar' : 'ver metadata + abrir Projudi';
         const titleParts = [
           d.tituloLegivel || d.tipoDocumento || '',
           d.mimetype || '',
@@ -5009,8 +5008,8 @@ async function openEventDetail(eventId) {
     <h4 class="font-serif font-semibold smallcaps mb-2" style="color: var(--uc-black);">📎 Documentos vinculados (${e.mniDocs.length})</h4>
     <div style="display: flex; flex-direction: column; gap: 6px; margin-bottom: 16px;">
       ${e.mniDocs.map(d => {
-        const btnLabel = d.hasContent ? '⬇ Baixar' : (d.hash ? '🔗 Abrir no Projudi' : '📄 Info');
-        const btnClass = d.hasContent ? 'btn-secondary' : (d.hash ? 'btn-primary' : 'btn-outline');
+        const btnLabel = d.hasContent ? '⬇ Baixar' : '📄 Info';
+        const btnClass = d.hasContent ? 'btn-secondary' : 'btn-outline';
         const tituloLeg = d.tituloLegivel ? `${escapeHtml(d.tituloLegivel)} · ` : '';
         return `
         <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 8px 10px; background: var(--uc-cream); border-radius: 5px; border: 1px solid var(--uc-line);">
@@ -14289,15 +14288,12 @@ function _mniBase64ToBlob(b64, mimetype = 'application/pdf') {
   return new Blob([bytes], { type: mimetype || 'application/pdf' });
 }
 
-// Compõe URL direta pro visualizador do Projudi a partir do hash do
-// documento. Cada Projudi de tribunal estadual usa o mesmo domínio
-// prefixado por `projudi.${dominio}.jus.br`. Pattern confirmado pelo
-// TJGO (Eduardo 2026-05): /BuscaProcesso?PaginaAtual=6&hash=...&id_proc=undefined.
-// id_proc=undefined é literal — bug na origem do Projudi mas funciona.
-function _mniProjudiDocUrl(tribunalCode, hash) {
-  if (!hash) return null;
+// Base URL do portal web do Projudi por tribunal (pra abrir o user no
+// portal certo). Nota: NÃO dá pra compor deep-link pro doc específico
+// porque o Projudi exige `Id_MovimentacaoArquivo` que o MNI não devolve
+// (testado 2026-05-13: hash sozinho devolve "Acesso negado").
+function _mniProjudiBaseUrl(tribunalCode) {
   const tcode = String(tribunalCode || '').toUpperCase();
-  // Map tribunal MNI → base host do Projudi web
   const baseMap = {
     'TJGO': 'https://projudi.tjgo.jus.br',
     'TJPR': 'https://projudi.tjpr.jus.br',
@@ -14305,17 +14301,14 @@ function _mniProjudiDocUrl(tribunalCode, hash) {
     'TJAM': 'https://projudi.tjam.jus.br',
     'TJRR': 'https://projudi.tjrr.jus.br'
   };
-  const base = baseMap[tcode];
-  if (!base) return null;
-  return `${base}/BuscaProcesso?PaginaAtual=6&hash=${encodeURIComponent(hash)}&id_proc=undefined`;
+  return baseMap[tcode] || null;
 }
 
 // Baixa/abre um documento. Ordem de tentativa:
 //   1. Blob cacheado localmente (quando o tribunal devolve conteúdo via MNI)
 //      → download direto via URL.createObjectURL + <a download>
-//   2. URL composta do Projudi web (TJGO/TJPR/TJPA/TJAM/TJRR) usando o hash
-//      → abre em nova aba; user precisa estar logado no Projudi
-//   3. Fallback: modal informativo com metadata pra o user cruzar manualmente
+//   2. Sem blob: modal info com metadata + botão "📋 Copia CNJ + abrir
+//      Projudi" pra cross-reference manual
 async function _mniDocDownload(processId, idDocumento) {
   const pdfId = `mni_${processId}_${idDocumento}`;
   const rec = await DB.getPdf(pdfId);
@@ -14330,30 +14323,30 @@ async function _mniDocDownload(processId, idDocumento) {
     setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 100);
     return;
   }
-  // Sem blob: tenta URL direta pro Projudi web
+  // Sem blob: monta o info modal com metadata
   const proc = await DB.getProcess(processId);
-  const tribunalCode = proc?.tribunal || proc?.mniData?.tribunal || '';
   const eventos = await DB.getEventsByProcess(processId);
   let docMeta = null;
   for (const e of eventos) {
     const found = (e.mniDocs || []).find(d => String(d.idDocumento) === String(idDocumento));
     if (found) { docMeta = found; break; }
   }
-  const projudiUrl = _mniProjudiDocUrl(tribunalCode, docMeta?.hash);
-  if (projudiUrl) {
-    window.open(projudiUrl, '_blank', 'noopener,noreferrer');
-    return;
-  }
-  // Sem URL composable: fallback pra modal info
-  _mniMostrarInfoDocSemConteudo(processId, idDocumento, docMeta);
+  _mniMostrarInfoDocSemConteudo(processId, idDocumento, docMeta, proc);
 }
 
 // Modal informativo quando o usuário tenta abrir um doc cujo conteúdo
-// não veio do tribunal (limitação do TJGO Projudi e similares).
-function _mniMostrarInfoDocSemConteudo(processId, idDocumento, meta) {
+// não veio do tribunal (limitação do TJGO Projudi: SOAP/MNI não devolve
+// o PDF). Ação principal: copia CNJ pra clipboard + abre Projudi web,
+// user cola o número e navega até a peça. Cross-reference por hash/id.
+function _mniMostrarInfoDocSemConteudo(processId, idDocumento, meta, proc) {
   const modal = document.createElement('div');
   modal.className = 'modal-backdrop';
+  const tribunalCode = proc?.tribunal || proc?.mniData?.tribunal || '';
+  const projudiBase = _mniProjudiBaseUrl(tribunalCode);
+  const cnj = proc?.cnj || '';
+
   const linhas = [];
+  if (cnj) linhas.push(['CNJ', `<code>${escapeHtml(cnj)}</code>`]);
   if (meta) {
     if (meta.nome) linhas.push(['Arquivo', escapeHtml(meta.nome)]);
     if (meta.tituloLegivel || meta.tipoDocumento) linhas.push(['Tipo', escapeHtml(meta.tituloLegivel || `código ${meta.tipoDocumento}`)]);
@@ -14368,21 +14361,19 @@ function _mniMostrarInfoDocSemConteudo(processId, idDocumento, meta) {
     <div class="modal scroll-thin" style="max-width: 560px;">
       <h3 class="modal-title">📄 Documento sem conteúdo local</h3>
       <div style="background:#f5e3c4;border-left:3px solid var(--uc-amber);padding:12px;border-radius:5px;margin-bottom:14px;font-size:13px;line-height:1.5;color:#5a4118;">
-        O <strong>TJGO Projudi não devolve o PDF</strong> via SOAP/MNI — só metadata.
-        Pra baixar o arquivo:
-        <ol style="margin:8px 0 0 18px;padding:0;">
-          <li>Abra <a href="https://projudi.tjgo.jus.br" target="_blank" rel="noopener" style="color:var(--uc-gold);font-weight:600;">projudi.tjgo.jus.br</a> em outra aba</li>
-          <li>Localize o processo + movimento correspondente</li>
-          <li>Cruze pelo <strong>idDocumento</strong> ou <strong>hash</strong> abaixo</li>
-        </ol>
+        O <strong>Projudi não devolve o PDF</strong> via SOAP/MNI — só metadata.
+        Use o botão abaixo: copia o CNJ pra área de transferência e abre o Projudi numa nova aba.
+        Você só precisa colar o CNJ no campo de busca e navegar até a peça
+        (cruze pelo <strong>idDocumento</strong> ou <strong>hash</strong> da tabela).
       </div>
       <div style="display: grid; grid-template-columns: 120px 1fr; gap: 6px 12px; padding: 12px; background: var(--uc-cream); border-radius: 5px; font-size: 12px;">
         ${linhas.map(([k, v]) => `<span style="color: var(--uc-warm-gray); font-weight: 500;">${k}:</span><span>${v}</span>`).join('')}
       </div>
-      <div class="flex gap-2" style="margin-top: 16px;">
-        <button class="btn btn-outline" id="_mniInfoCopyId" style="flex:1;">📋 Copiar idDocumento</button>
-        ${meta?.hash ? `<button class="btn btn-outline" id="_mniInfoCopyHash">📋 Copiar hash</button>` : ''}
-        <button class="btn btn-primary" id="_mniInfoClose" style="flex:1;">Fechar</button>
+      <div class="flex gap-2" style="margin-top: 16px; flex-wrap: wrap;">
+        ${projudiBase && cnj ? `<button class="btn btn-primary" id="_mniInfoAbrirProjudi" style="flex:1; min-width: 200px;">🔗 Copiar CNJ + abrir Projudi</button>` : ''}
+        <button class="btn btn-outline btn-sm" id="_mniInfoCopyId">📋 idDocumento</button>
+        ${meta?.hash ? `<button class="btn btn-outline btn-sm" id="_mniInfoCopyHash">📋 Hash</button>` : ''}
+        <button class="btn btn-outline btn-sm" id="_mniInfoClose">Fechar</button>
       </div>
     </div>`;
   $('modalContainer').appendChild(modal);
@@ -14396,6 +14387,14 @@ function _mniMostrarInfoDocSemConteudo(processId, idDocumento, meta) {
     copyHashBtn.onclick = async () => {
       try { await navigator.clipboard.writeText(String(meta.hash)); toast('Hash copiado', '', 'info'); }
       catch (e) { toast('Falha ao copiar', '', 'error'); }
+    };
+  }
+  const abrirBtn = document.getElementById('_mniInfoAbrirProjudi');
+  if (abrirBtn && projudiBase && cnj) {
+    abrirBtn.onclick = async () => {
+      try { await navigator.clipboard.writeText(cnj); } catch {}
+      toast('CNJ copiado', `${cnj} · cole no campo de busca do Projudi`, 'info');
+      window.open(projudiBase, '_blank', 'noopener,noreferrer');
     };
   }
 }

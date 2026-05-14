@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.47.1 (MNI docs: botão 🔗 abre Projudi web direto pelo hash)
-const CACHE_NAME = 'uc-juridico-v6-47-1';
+// Service Worker — UC Jurídico v6.47.2 (MNI docs: pivot pra modal "copia CNJ + abre Projudi" — hash sozinho dá Acesso negado)
+const CACHE_NAME = 'uc-juridico-v6-47-2';
 const APP_SHELL = [
   './',
   './index.html',
