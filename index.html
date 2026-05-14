@@ -4175,23 +4175,23 @@ async function editProcessFlow() {
 
     { label: 'Cliente', name: 'clienteId', type: 'select', default: p.clienteId || '', options: cliOpts },
 
-    { label: 'Polo', type: 'select', default: p.polo || 'Defesa', options: [
+    { label: 'Polo', name: 'polo', type: 'select', default: p.polo || 'Defesa', options: [
       { value: 'Defesa', label: 'Defesa (executado/réu)' },
       { value: 'Ataque', label: 'Ataque (autor/exequente)' }
     ]},
 
-    { label: 'Parte adversa — Nome', default: p.advNome || '', placeholder: 'opcional, se DJEN não extraiu' },
-    { label: 'Parte adversa — CPF/CNPJ', default: p.advDoc || '', placeholder: 'opcional' },
-    { label: 'Advogado adverso — Nome', default: p.advLawyer || '', placeholder: 'opcional' },
-    { label: 'Advogado adverso — OAB', default: p.advLawyerOab || '', placeholder: 'ex: GO 12345' },
+    { label: 'Parte adversa — Nome', name: 'advNome', default: p.advNome || '', placeholder: 'opcional, se DJEN não extraiu' },
+    { label: 'Parte adversa — CPF/CNPJ', name: 'advDoc', default: p.advDoc || '', placeholder: 'opcional' },
+    { label: 'Advogado adverso — Nome', name: 'advLawyer', default: p.advLawyer || '', placeholder: 'opcional' },
+    { label: 'Advogado adverso — OAB', name: 'advLawyerOab', default: p.advLawyerOab || '', placeholder: 'ex: GO 12345' },
 
-    { label: 'Tribunal/Vara', default: p.court || '', placeholder: 'ex: TJGO 1ª Vara · TRF1 7ª Turma' },
-    { label: 'Comarca', default: p.comarca || '', placeholder: 'ex: Goiânia/GO' },
-    { label: 'Sistema', type: 'select', default: p.sistema || '', options: SISTEMA_OPTIONS },
+    { label: 'Tribunal/Vara', name: 'court', default: p.court || '', placeholder: 'ex: TJGO 1ª Vara · TRF1 7ª Turma' },
+    { label: 'Comarca', name: 'comarca', default: p.comarca || '', placeholder: 'ex: Goiânia/GO' },
+    { label: 'Sistema', name: 'sistema', type: 'select', default: p.sistema || '', options: SISTEMA_OPTIONS },
 
-    { label: 'Área', type: 'select', default: p.area || 'Tributário', options: AREA_OPTIONS },
-    { label: 'Tipo de ação', default: p.type || '', placeholder: 'ex: Execução Fiscal · Apelação Cível · MS' },
-    { label: 'Fase processual', type: 'select', default: p.fase || '', options: [
+    { label: 'Área', name: 'area', type: 'select', default: p.area || 'Tributário', options: AREA_OPTIONS },
+    { label: 'Tipo de ação', name: 'type', default: p.type || '', placeholder: 'ex: Execução Fiscal · Apelação Cível · MS' },
+    { label: 'Fase processual', name: 'fase', type: 'select', default: p.fase || '', options: [
       { value: '', label: '— não definida —' },
       { value: 'conhecimento', label: 'Conhecimento' },
       { value: 'recurso', label: 'Recurso' },
@@ -4199,27 +4199,27 @@ async function editProcessFlow() {
       { value: 'cumprimento', label: 'Cumprimento de sentença' }
     ]},
 
-    { label: 'Valor da causa (R$)', type: 'number', default: p.valorCausa ?? '', placeholder: 'opcional', min: 0, step: 0.01 },
-    { label: 'Data de distribuição', type: 'date', default: p.dataDistribuicao || '' },
+    { label: 'Valor da causa (R$)', name: 'valorCausa', type: 'number', default: p.valorCausa ?? '', placeholder: 'opcional', min: 0, step: 0.01 },
+    { label: 'Data de distribuição', name: 'dataDistribuicao', type: 'date', default: p.dataDistribuicao || '' },
 
-    { label: 'Risco', type: 'select', default: p.risco || '', options: [
+    { label: 'Risco', name: 'risco', type: 'select', default: p.risco || '', options: [
       { value: '', label: '— não avaliado —' },
       { value: 'baixo', label: 'Baixo · provável êxito' },
       { value: 'medio', label: 'Médio · perda parcial' },
       { value: 'alto', label: 'Alto · perda provável' }
     ]},
 
-    { label: 'Honorários — tipo', type: 'select', default: p.honTipo || '', options: [
+    { label: 'Honorários — tipo', name: 'honTipo', type: 'select', default: p.honTipo || '', options: [
       { value: '', label: '— não definido —' },
       { value: 'fixo', label: 'Fixo (R$)' },
       { value: 'percentual', label: 'Percentual sobre valor da causa' },
       { value: 'exito', label: 'Êxito (success fee)' },
       { value: 'misto', label: 'Misto' }
     ]},
-    { label: 'Honorários — valor', default: p.honValor || '', placeholder: 'ex: R$ 5.000 · 20% · misto' },
+    { label: 'Honorários — valor', name: 'honValor', default: p.honValor || '', placeholder: 'ex: R$ 5.000 · 20% · misto' },
 
-    { label: 'Advogado responsável (titular)', type: 'select', default: p.advogadoResponsavel || defaultAdvogado(me), options: ADVOGADO_OPTIONS },
-    { label: 'Advogado suplente (cobertura de ausência)', type: 'select', default: p.advogadoSuplente || '', options: ADVOGADO_OPTIONS }
+    { label: 'Advogado responsável (titular)', name: 'advogadoResponsavel', type: 'select', default: p.advogadoResponsavel || defaultAdvogado(me), options: ADVOGADO_OPTIONS },
+    { label: 'Advogado suplente (cobertura de ausência)', name: 'advogadoSuplente', type: 'select', default: p.advogadoSuplente || '', options: ADVOGADO_OPTIONS }
   ];
 
   // Fase B — campos tributários, só aparecem se área é tributário/execução fiscal
@@ -4256,7 +4256,170 @@ async function editProcessFlow() {
     { label: 'CDAs (uma por linha)', type: 'textarea', rows: 5, default: serializeCdas(p.cdas), help: 'Formato: <strong>número | valor | período</strong> · uma CDA por linha. Ex: 2024.01.123456 | 50000.00 | 01/2020 a 12/2020' }
   ] : [];
 
-  const r = await showModal('Editar processo', [...baseFields, ...tribFields], { confirmLabel: 'Salvar' });
+  const fieldsAll = [...baseFields, ...tribFields];
+
+  // Intro: botão pra disparar busca MNI e auto-preencher os campos.
+  // O HTML do intro NÃO é escapado por showModal, então pode trazer botão
+  // inline + área de status pra feedback durante a busca.
+  const introHtml = `
+    <div style="display: flex; gap: 10px; align-items: center; padding: 10px 12px; background: var(--uc-cream); border-left: 3px solid var(--uc-gold); border-radius: 5px;">
+      <button type="button" id="_editMniBtn" class="btn btn-secondary btn-sm" style="white-space: nowrap;">🔍 Buscar via MNI</button>
+      <span id="_editMniStatus" style="font-size: 12px; color: var(--uc-warm-gray); flex: 1;">Preencha o CNJ acima e clique pra puxar dados do tribunal.</span>
+    </div>
+  `;
+
+  // Captura a promise mas não dá await ainda — precisamos do DOM já montado
+  // pra ligar o botão MNI no intro. showModal mounta o modal sincronicamente
+  // dentro do construtor da Promise, então logo após chamar showModal o
+  // DOM já existe.
+  const modalPromise = showModal('Editar processo', fieldsAll, {
+    confirmLabel: 'Salvar',
+    intro: introHtml
+  });
+
+  // Helpers de manipulação de field por nome (replica do showModal pra uso
+  // dentro do click handler do botão MNI).
+  const _setByName = (name, val) => {
+    const idx = fieldsAll.findIndex(f => f.name === name);
+    if (idx < 0) return;
+    const el = document.getElementById('_mf_' + idx);
+    if (!el) return;
+    if (el.type === 'checkbox') el.checked = !!val;
+    else el.value = val == null ? '' : String(val);
+  };
+  const _getByName = (name) => {
+    const idx = fieldsAll.findIndex(f => f.name === name);
+    if (idx < 0) return '';
+    const el = document.getElementById('_mf_' + idx);
+    return el ? (el.type === 'checkbox' ? el.checked : el.value) : '';
+  };
+
+  const mniBtn = document.getElementById('_editMniBtn');
+  const mniStatus = document.getElementById('_editMniStatus');
+  if (mniBtn) {
+    mniBtn.onclick = async () => {
+      const cnjAtual = String(_getByName('cnj') || '').trim();
+      if (!cnjAtual) {
+        if (mniStatus) mniStatus.innerHTML = '<span style="color: var(--uc-red);">✗ Preencha o CNJ antes de buscar.</span>';
+        return;
+      }
+      mniBtn.disabled = true;
+      const origLabel = mniBtn.innerHTML;
+      mniBtn.innerHTML = '⏳ Buscando…';
+      if (mniStatus) mniStatus.innerHTML = '<span class="spinner" style="display:inline-block;border:2px solid #d4cfc0;border-top-color:var(--uc-gold);border-radius:50%;width:11px;height:11px;animation:spin 0.8s linear infinite;vertical-align:-1px;margin-right:6px;"></span> Detectando tribunal…';
+
+      try {
+        // 1. Detecta tribunal pelo CNJ digitado no form (não pelo p.cnj salvo).
+        // Preferência: p.tribunal (código tipo TJGO salvo em sync anterior)
+        // → senão usa detectarPorCnj do worker baseado no segmento+TT do CNJ.
+        const detect = await _mniDetectarTribunal({ cnj: cnjAtual, tribunal: p.tribunal });
+        if (!detect) throw new Error('Tribunal não identificado pelo CNJ.');
+        const { codigo, conf } = detect;
+        if (conf?.naoSuportado) throw new Error(`${codigo} não suporta MNI: ${conf.motivo || ''}`);
+        if (mniStatus) mniStatus.innerHTML = `Tribunal <strong>${escapeHtml(codigo)}</strong>: consultando…`;
+
+        // 2. Worker URL configurada?
+        const config = await _mniGetConfig();
+        if (!config.workerUrl) throw new Error('Worker MNI não configurada (Configurações → MNI).');
+
+        // 3. Cofre destravado?
+        if (!window.MniCrypto.isUnlocked()) {
+          if (!config.salt || !config.canary) throw new Error('Cofre MNI não configurado (Configurações → MNI).');
+          const r2 = await showModal(`Destravar cofre pra consultar ${codigo}`, [
+            { label: 'Chave mestra MNI', type: 'password' }
+          ], { confirmLabel: 'Destravar e buscar' });
+          if (!r2) { mniBtn.disabled = false; mniBtn.innerHTML = origLabel; if (mniStatus) mniStatus.textContent = 'Cancelado.'; return; }
+          const ok = await window.MniCrypto.unlock(r2[0], config.salt, config.canary);
+          if (!ok) throw new Error('Chave mestra incorreta.');
+        }
+
+        // 4. Credencial: tenta advogado responsável → suplente → me
+        const meuEmail = (window.UC_Auth?.getUser?.() || {}).email || '';
+        const meuNome = (typeof defaultAdvogado === 'function' ? defaultAdvogado(meuEmail) : '') || '';
+        const candidatos = [_getByName('advogadoResponsavel') || p.advogadoResponsavel, _getByName('advogadoSuplente') || p.advogadoSuplente, meuNome].filter(Boolean);
+        let cred = null, usedAdvogado = null;
+        for (const adv of candidatos) {
+          cred = await _mniBuscarCredencial(adv, codigo);
+          if (cred) { usedAdvogado = adv; break; }
+        }
+        if (!cred) throw new Error(`Nenhum advogado cadastrado tem credencial pro ${codigo}. Configure em Configurações → MNI.`);
+
+        // 5. Decifra senha + chama Worker
+        let senha;
+        try { senha = await window.MniCrypto.decrypt(cred.senhaCifrada); }
+        catch { throw new Error('Falha ao decifrar credencial.'); }
+        const t0 = Date.now();
+        const resp = await fetch(config.workerUrl.replace(/\/$/, ''), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ tribunal: codigo, operacao: 'consultarProcesso', cnj: cnjAtual, cpf: cred.cpf, senha })
+        });
+        senha = null;
+        const data = await resp.json();
+        const elapsed = Date.now() - t0;
+        if (!resp.ok || data.sucesso === false || data.erro) {
+          throw new Error(data.erro || data.mensagem || `HTTP ${resp.status}`);
+        }
+
+        // 6. Aplica dados aos campos. Só sobrescreve campo vazio (não derruba
+        // edição manual do user). Pra campos select, busca match case-insensitive
+        // antes de aplicar pra evitar value inválido.
+        _setByName('court', data.orgaoJulgador || _getByName('court'));
+        // Comarca: parsea de serventia/orgao
+        const comarcaMni = _mniExtrairComarca(data.serventia || data.orgaoJulgador || '');
+        if (comarcaMni && !_getByName('comarca')) _setByName('comarca', comarcaMni);
+        // Área: prefere data.area se bater com options, senão heurística
+        const areaSelEl = document.getElementById('_mf_' + fieldsAll.findIndex(f => f.name === 'area'));
+        const areaOpts = Array.from(areaSelEl?.options || []).map(o => o.value);
+        let areaFinal = '';
+        if (data.area) {
+          const m = areaOpts.find(o => o.toLowerCase() === String(data.area).toLowerCase());
+          if (m) areaFinal = m;
+        }
+        if (!areaFinal) areaFinal = _mniSugerirArea(codigo, data.assunto?.descricao || '');
+        if (areaFinal) _setByName('area', areaFinal);
+        // Tipo de ação
+        if (!_getByName('type')) {
+          if (data.processoTipo && data.processoTipo.toLowerCase() !== 'jurisdicional') _setByName('type', data.processoTipo);
+          else if (data.assunto?.descricao) {
+            const partes = data.assunto.descricao.split(/\s*[→>]\s*/);
+            _setByName('type', (partes[partes.length - 1] || data.assunto.descricao).slice(0, 80));
+          }
+        }
+        // Polo
+        const polo = _mniSugerirPolo(data, cred.cpf);
+        if (polo) _setByName('polo', polo);
+        // Valor da causa
+        if (data.valorCausa && !_getByName('valorCausa')) {
+          _setByName('valorCausa', String(data.valorCausa).replace(',', '.'));
+        }
+        // Data de distribuição: MNI devolve dataAjuizamento como YYYY-MM-DD
+        if (data.dataAjuizamento && !_getByName('dataDistribuicao')) {
+          _setByName('dataDistribuicao', data.dataAjuizamento);
+        }
+        // Nome: se vazio, monta "Ativo × Passivo" da 1ª parte de cada polo
+        if (!_getByName('name')) {
+          const ativos = (data.partes || []).filter(x => x.polo === 'AT');
+          const passivos = (data.partes || []).filter(x => x.polo === 'PA');
+          if (ativos.length && passivos.length) {
+            _setByName('name', `${ativos[0].nome.split('-')[0].trim()} × ${passivos[0].nome.split('-')[0].trim()}`.slice(0, 120));
+          }
+        }
+        // Sistema
+        if (conf?.sistema && !_getByName('sistema')) _setByName('sistema', conf.sistema);
+
+        if (mniStatus) mniStatus.innerHTML = `<span style="color: var(--uc-green);">✓ Preenchido via ${escapeHtml(codigo)} · ${data.partes?.length || 0} parte(s) · ${data.movimentos?.length || 0} movimento(s) · ${elapsed}ms · adv. ${escapeHtml(usedAdvogado || '?')}</span>`;
+      } catch (e) {
+        console.warn('[edit MNI] falhou', e);
+        if (mniStatus) mniStatus.innerHTML = `<span style="color: var(--uc-red);">✗ ${escapeHtml(e.message || String(e))}</span>`;
+      } finally {
+        mniBtn.disabled = false;
+        mniBtn.innerHTML = origLabel;
+      }
+    };
+  }
+
+  const r = await modalPromise;
   if (!r) return;
   const [
     name, cnj,

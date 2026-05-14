@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.44.1 (Processos: troca Jurisprudência↔Compromissos + Próximo prazo clicável)
-const CACHE_NAME = 'uc-juridico-v6-44-1';
+// Service Worker — UC Jurídico v6.45.0 (Editar processo: botão "Buscar via MNI" auto-preenche os campos)
+const CACHE_NAME = 'uc-juridico-v6-45-0';
 const APP_SHELL = [
   './',
   './index.html',
