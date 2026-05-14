@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.39.4 (DJEN: metadados do diário oficial — disp/pub/diário/caderno/pág/link)
-const CACHE_NAME = 'uc-juridico-v6-39-4';
+// Service Worker — UC Jurídico v6.39.5 (DJEN: "Criar processo na importação" também desmarcado por padrão)
+const CACHE_NAME = 'uc-juridico-v6-39-5';
 const APP_SHELL = [
   './',
   './index.html',
