@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.44.0 (Processos: agrupa prazos da mesma publicação DJEN em 1 card hierárquico)
-const CACHE_NAME = 'uc-juridico-v6-44-0';
+// Service Worker — UC Jurídico v6.44.1 (Processos: troca Jurisprudência↔Compromissos + Próximo prazo clicável)
+const CACHE_NAME = 'uc-juridico-v6-44-1';
 const APP_SHELL = [
   './',
   './index.html',

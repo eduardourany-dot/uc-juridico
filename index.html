@@ -3100,12 +3100,12 @@ async function renderProcessDetail() {
       <button class="detail-tab ${state._processView.activeTab === 'overview' ? 'active' : ''}" onclick="setProcessTab('overview')">Visão geral</button>
       <button class="detail-tab ${state._processView.activeTab === 'cliente' ? 'active' : ''}" onclick="setProcessTab('cliente')">Cliente</button>
       <button class="detail-tab ${state._processView.activeTab === 'honorarios' ? 'active' : ''}" onclick="setProcessTab('honorarios')">Honorários · ${honorarios.length}</button>
-      <button class="detail-tab ${state._processView.activeTab === 'compromissos' ? 'active' : ''}" onclick="setProcessTab('compromissos')">Compromissos · ${compromissos.length}</button>
+      <button class="detail-tab ${state._processView.activeTab === 'jurisprudence' ? 'active' : ''}" onclick="setProcessTab('jurisprudence')">Jurisprudência · ${jurisprudence.length}</button>
       <button class="detail-tab ${state._processView.activeTab === 'peticoes' ? 'active' : ''}" onclick="setProcessTab('peticoes')">Petições · ${peticoes.length}</button>
       ${/* Tabs 'atalho-cards' só aparecem quando ativas (acessadas via clique nos cards da visão geral). */ ''}
       ${state._processView.activeTab === 'events' ? `<button class="detail-tab active" onclick="setProcessTab('events')">Eventos · ${events.length}</button>` : ''}
       ${state._processView.activeTab === 'deadlines' ? `<button class="detail-tab active" onclick="setProcessTab('deadlines')">Publicações · ${deadlines.filter(d => prazoEstaAtivo(d)).length}</button>` : ''}
-      ${state._processView.activeTab === 'jurisprudence' ? `<button class="detail-tab active" onclick="setProcessTab('jurisprudence')">Jurisprudência · ${jurisprudence.length}</button>` : ''}
+      ${state._processView.activeTab === 'compromissos' ? `<button class="detail-tab active" onclick="setProcessTab('compromissos')">Compromissos · ${compromissos.length}</button>` : ''}
       ${state._processView.activeTab === 'notes' ? `<button class="detail-tab active" onclick="setProcessTab('notes')">Notas · ${notes.length}</button>` : ''}
       ${state._processView.activeTab === 'analysis' ? `<button class="detail-tab active" onclick="setProcessTab('analysis')">Análise IA</button>` : ''}
     </div>
@@ -3122,6 +3122,34 @@ function setProcessTab(tab) {
       (tab === 'overview' && i === 0));
   });
   renderProcessTabContent();
+}
+
+// Navega do card "Próximo prazo" pra aba Publicações e destaca o item.
+// Se o prazo veio de uma publicação DJEN (tem djenHash), scrolla pro card
+// da publicação inteira (que pode ter outros recursos junto). Senão, scrolla
+// pro deadline-row específico.
+function _navProximoPrazo(deadlineId, djenHash) {
+  state._processView.scrollTarget = { deadlineId, djenHash };
+  setProcessTab('deadlines');
+  // renderProcessDeadlines é async — aguarda mais tempo que o set sync.
+  setTimeout(() => {
+    const selector = djenHash
+      ? `[data-djen-pub-hash="${djenHash}"]`
+      : `[data-deadline-id="${deadlineId}"]`;
+    const el = document.querySelector(selector);
+    if (!el) return;
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    // Pulse visual pra orientar o olho do usuário
+    el.style.transition = 'box-shadow 1.6s, background 1.6s';
+    const origBg = el.style.background;
+    const origShadow = el.style.boxShadow;
+    el.style.boxShadow = '0 0 0 3px rgba(168, 71, 45, 0.4)';
+    el.style.background = 'rgba(168, 71, 45, 0.06)';
+    setTimeout(() => {
+      el.style.boxShadow = origShadow;
+      el.style.background = origBg;
+    }, 1600);
+  }, 250);
 }
 
 async function renderProcessTabContent() {
@@ -3288,6 +3316,7 @@ function _renderParteLi(parte) {
 
 function renderProcessOverview(p, events, deadlines, notes, jurisprudence) {
   const activeDeadlines = deadlines.filter(d => prazoEstaAtivo(d));
+  const compromissos = state._processView?.compromissos || [];
   const today = new Date(); today.setHours(0,0,0,0);
   const nextDeadline = activeDeadlines
     .map(d => ({ ...d, days: Math.ceil((new Date(d.deadlineDate) - today) / 86400000) }))
@@ -3297,12 +3326,12 @@ function renderProcessOverview(p, events, deadlines, notes, jurisprudence) {
     <div class="grid gap-4 mb-4" style="grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));">
       <div class="stat-card stat-card-link" onclick="setProcessTab('events')" title="Ver eventos do processo"><div class="stat-label">Eventos</div><div class="stat-value">${events.length}</div></div>
       <div class="stat-card stat-card-link" onclick="setProcessTab('deadlines')" title="Ver publicações do processo"><div class="stat-label">Publicações ativas</div><div class="stat-value">${activeDeadlines.length}</div></div>
-      <div class="stat-card stat-card-link" onclick="setProcessTab('jurisprudence')" title="Ver jurisprudência vinculada"><div class="stat-label">Jurisprudência</div><div class="stat-value">${jurisprudence.length}</div></div>
+      <div class="stat-card stat-card-link" onclick="setProcessTab('compromissos')" title="Ver compromissos vinculados"><div class="stat-label">Compromissos</div><div class="stat-value">${compromissos.length}</div></div>
       <div class="stat-card stat-card-link" onclick="setProcessTab('notes')" title="Ver notas do processo"><div class="stat-label">Notas</div><div class="stat-value">${notes.length}</div></div>
     </div>
 
     ${nextDeadline ? `
-      <div class="card card-gold-border mb-4">
+      <div class="card card-gold-border mb-4" onclick="_navProximoPrazo('${nextDeadline.id}'${nextDeadline.djenHash ? `, '${nextDeadline.djenHash}'` : ''})" onmouseover="this.style.borderColor='var(--uc-gold)';this.style.transform='translateY(-1px)';" onmouseout="this.style.borderColor='';this.style.transform='';" title="Ir para a publicação deste prazo" style="cursor: pointer; transition: all .15s;">
         <div class="flex justify-between items-start">
           <div>
             <p class="smallcaps text-xs" style="color: var(--uc-gold); font-weight: 600;">Próximo prazo</p>
@@ -3658,7 +3687,7 @@ function renderPublicacaoCard(group, p, mostraResolvidos) {
     : '';
 
   return `
-    <div class="card" style="padding: 12px; margin-bottom: 12px;">
+    <div class="card" data-djen-pub-hash="${escapeHtml(group.hash)}" style="padding: 12px; margin-bottom: 12px;">
       <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; padding-bottom: 10px; border-bottom: 1px solid var(--uc-line); margin-bottom: 10px;">
         <div style="flex: 1; min-width: 0;">
           <div style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap;">
@@ -3764,7 +3793,7 @@ function renderDeadlineRow(d, p, compactInsidePub) {
   }
 
   return `
-    <div class="deadline-row ${v.cls}"${compactInsidePub ? ' style="border: 1px solid var(--uc-line-soft); border-radius: 4px;"' : ''}>
+    <div class="deadline-row ${v.cls}" data-deadline-id="${escapeHtml(d.id)}"${compactInsidePub ? ' style="border: 1px solid var(--uc-line-soft); border-radius: 4px;"' : ''}>
       <div style="flex: 1; min-width: 0;">
         <div style="font-weight: 600; color: var(--uc-black);">${compactInsidePub ? escapeHtml(tituloRecurso) : tituloRecurso}${d.emDobro ? ' <span class="badge badge-amber" style="font-size: 9px;">DOBRO</span>' : ''} ${parserBadge} ${reviewBadge}</div>
         <div style="font-size: 12px; color: var(--uc-warm-gray); margin-top: 2px;">
