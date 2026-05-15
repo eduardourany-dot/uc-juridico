@@ -13705,6 +13705,7 @@ function renderSettingsTab(tab, prompts, defaultPromptId) {
         <p class="help-text mb-3">A sessão fica salva no seu navegador. Saia ao usar dispositivo compartilhado.</p>
         <button class="btn btn-outline btn-sm" onclick="logoutFlow()">Sair</button>
       </div>
+      ${_isClienteMode() ? '' : `
       <div class="card mb-3">
         <h3 class="font-serif text-lg font-semibold smallcaps mb-3" style="color: var(--uc-black);">Auditoria de privacidade</h3>
         <div style="background: var(--uc-green-soft); border: 1px solid var(--uc-green); border-radius: 6px; padding: 12px; display: flex; gap: 12px; align-items: center;">
@@ -13725,6 +13726,7 @@ function renderSettingsTab(tab, prompts, defaultPromptId) {
         <p class="help-text mb-3">Remove permanentemente <strong>todos</strong> os processos, eventos, prazos, notas, jurisprudência e PDFs salvos. Útil antes de emprestar dispositivo. <strong>Faça backup antes.</strong></p>
         <button class="btn btn-danger btn-sm" onclick="wipeAllData()">Apagar tudo</button>
       </div>
+      `}
     `;
   }
   if (tab === 'about') {

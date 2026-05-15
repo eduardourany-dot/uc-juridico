@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.55.8 (cliente: libera Configurações com tabs Aparência + Segurança + Sobre)
-const CACHE_NAME = 'uc-juridico-v6-55-8';
+// Service Worker — UC Jurídico v6.55.9 (cliente: tab Segurança mostra só card Sessão atual)
+const CACHE_NAME = 'uc-juridico-v6-55-9';
 const APP_SHELL = [
   './',
   './index.html',
