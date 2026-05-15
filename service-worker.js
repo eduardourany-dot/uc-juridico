@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.53.0 (MNI.4 fase 1: DJEN auto-check ao abrir o app + banner de publicações novas)
-const CACHE_NAME = 'uc-juridico-v6-53-0';
+// Service Worker — UC Jurídico v6.54.0 (Acessos: role "viewer" somente-leitura + DB writes interceptados)
+const CACHE_NAME = 'uc-juridico-v6-54-0';
 const APP_SHELL = [
   './',
   './index.html',
