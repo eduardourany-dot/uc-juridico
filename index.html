@@ -4574,15 +4574,12 @@ async function editProcessFlow() {
         // Comarca: parsea de serventia/orgao
         const comarcaMni = _mniExtrairComarca(data.serventia || data.orgaoJulgador || '');
         if (comarcaMni && !_getByName('comarca')) _setByName('comarca', comarcaMni);
-        // Área: prefere data.area se bater com options, senão heurística
+        // Área: prefere data.area se bater (case-insensitive) com options,
+        // senão heurística por tribunal/assunto. Sempre re-valida o final
+        // contra as options pra evitar value órfão.
         const areaSelEl = document.getElementById('_mf_' + fieldsAll.findIndex(f => f.name === 'area'));
-        const areaOpts = Array.from(areaSelEl?.options || []).map(o => o.value);
-        let areaFinal = '';
-        if (data.area) {
-          const m = areaOpts.find(o => o.toLowerCase() === String(data.area).toLowerCase());
-          if (m) areaFinal = m;
-        }
-        if (!areaFinal) areaFinal = _mniSugerirArea(codigo, data.assunto?.descricao || '');
+        let areaFinal = _matchSelectOption(areaSelEl, data.area)
+                    || _matchSelectOption(areaSelEl, _mniSugerirArea(codigo, data.assunto?.descricao || ''));
         if (areaFinal) _setByName('area', areaFinal);
         // Tipo de ação
         if (!_getByName('type')) {
@@ -4592,9 +4589,28 @@ async function editProcessFlow() {
             _setByName('type', (partes[partes.length - 1] || data.assunto.descricao).slice(0, 80));
           }
         }
-        // Polo
+        // Polo (case-insensitive match)
         const polo = _mniSugerirPolo(data, cred.cpf);
-        if (polo) _setByName('polo', polo);
+        if (polo) {
+          const poloSelEl = document.getElementById('_mf_' + fieldsAll.findIndex(f => f.name === 'polo'));
+          const match = _matchSelectOption(poloSelEl, polo);
+          if (match) _setByName('polo', match);
+        }
+        // Parte adversa: extrai do polo OPOSTO ao do cliente. Polo "Defesa"
+        // significa cliente no passivo → adversária no ATIVO; "Ataque"
+        // significa cliente no ativo → adversária no PASSIVO.
+        const meuPolo = _getByName('polo') || p.polo || 'Defesa';
+        const poloAdverso = meuPolo === 'Defesa' ? 'AT' : 'PA';
+        const partesAdversas = (data.partes || []).filter(x => x.polo === poloAdverso);
+        if (partesAdversas.length) {
+          if (!_getByName('advNome')) _setByName('advNome', partesAdversas[0].nome || '');
+          if (!_getByName('advDoc')) _setByName('advDoc', partesAdversas[0].cpfCnpj || '');
+          const advAdv = partesAdversas[0]?.advogados?.[0];
+          if (advAdv) {
+            if (!_getByName('advLawyer')) _setByName('advLawyer', advAdv.nome || '');
+            if (!_getByName('advLawyerOab')) _setByName('advLawyerOab', advAdv.oab || '');
+          }
+        }
         // Valor da causa
         if (data.valorCausa && !_getByName('valorCausa')) {
           _setByName('valorCausa', String(data.valorCausa).replace(',', '.'));
@@ -4611,8 +4627,13 @@ async function editProcessFlow() {
             _setByName('name', `${ativos[0].nome.split('-')[0].trim()} × ${passivos[0].nome.split('-')[0].trim()}`.slice(0, 120));
           }
         }
-        // Sistema
-        if (conf?.sistema && !_getByName('sistema')) _setByName('sistema', conf.sistema);
+        // Sistema (case-insensitive match: worker manda 'projudi' minúsculo,
+        // options têm 'Projudi' caixa alta)
+        if (conf?.sistema && !_getByName('sistema')) {
+          const sistemaSelEl = document.getElementById('_mf_' + fieldsAll.findIndex(f => f.name === 'sistema'));
+          const sistemaMatch = _matchSelectOption(sistemaSelEl, conf.sistema);
+          if (sistemaMatch) _setByName('sistema', sistemaMatch);
+        }
 
         if (mniStatus) mniStatus.innerHTML = `<span style="color: var(--uc-green);">✓ Preenchido via ${escapeHtml(codigo)} · ${data.partes?.length || 0} parte(s) · ${data.movimentos?.length || 0} movimento(s) · ${elapsed}ms · adv. ${escapeHtml(usedAdvogado || '?')}</span>`;
       } catch (e) {
@@ -14150,15 +14171,33 @@ function _mniSugerirPolo(data, cpfConsultante) {
 // que parece nome de cidade (1-3 palavras com inicial maiúscula).
 function _mniExtrairComarca(s) {
   if (!s) return null;
-  const tokens = String(s).split(/\s+de\s+|\s[-–—]\s+/);
-  if (tokens.length < 2) return null;
-  const last = tokens[tokens.length - 1].trim();
-  if (last.length > 40) return null;
-  // Cidade simples: 1 palavra "Anápolis", "Goiânia"
-  // OU composta: "Rio Verde", "São Paulo", "Belo Horizonte" (2-3 palavras
-  // todas começando com maiúscula)
-  if (/^[A-ZÁÉÍÓÚÂÊÎÔÛÃÕÇ][A-Za-zÀ-ÿ]+(?:\s+[A-ZÁÉÍÓÚÂÊÎÔÛÃÕÇ]?[A-Za-zÀ-ÿ]+){0,2}$/.test(last)) {
-    return last;
+  const str = String(s).trim();
+  // 1. Padrão "Comarca de X" (alguns tribunais usam serventia assim)
+  let m = str.match(/Comarca\s+de\s+([A-ZÁÉÍÓÚÂÊÎÔÛÃÕÇ][A-Za-zÀ-ÿ\s]+?)(?:[\s\-–—,]|$)/);
+  if (m) return m[1].trim();
+  // 2. TJGO/Projudi: "Cidade - Vara/Órgão" → pega antes do PRIMEIRO " - "
+  const tokens = str.split(/\s[-–—]\s+/);
+  const first = (tokens[0] || '').trim();
+  if (!first || first.length > 40) return null;
+  // Filtra códigos de tribunal em caixa-alta ("TJGO", "TRF1")
+  if (first.toUpperCase() === first && first.length < 10) return null;
+  // Aceita: "Goiânia", "Rio Verde", "São Paulo", "Belo Horizonte"
+  // (1 a 4 palavras, primeira em maiúscula)
+  if (/^[A-ZÁÉÍÓÚÂÊÎÔÛÃÕÇ][A-Za-zÀ-ÿ]+(?:\s+[A-Za-zÀ-ÿ]+){0,3}$/.test(first)) {
+    return first;
+  }
+  return null;
+}
+
+// Procura uma option no <select> cujo value bate (case-insensitive) com
+// o valor procurado. Resolve o problema "worker manda 'projudi' (caixa
+// baixa) mas a option correta tem value 'Projudi' (caixa alta)" — sem
+// match exato, o browser ignora o set e o select fica vazio.
+function _matchSelectOption(selectEl, value) {
+  if (!selectEl || value == null || value === '') return null;
+  const target = String(value).toLowerCase().trim();
+  for (const opt of selectEl.options) {
+    if (String(opt.value).toLowerCase().trim() === target) return opt.value;
   }
   return null;
 }

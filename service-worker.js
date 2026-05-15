@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.50.3 (FIX bug: showModal aninhado lia ID do modal errado — destravar cofre travava)
-const CACHE_NAME = 'uc-juridico-v6-50-3';
+// Service Worker — UC Jurídico v6.50.4 (FIX preenchimento MNI: comarca, sistema case-insensitive, parte adversa)
+const CACHE_NAME = 'uc-juridico-v6-50-4';
 const APP_SHELL = [
   './',
   './index.html',
