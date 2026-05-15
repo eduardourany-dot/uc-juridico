@@ -628,18 +628,29 @@ function requireAdmin_() {
 }
 
 window.UC_admin = {
-  async addUser(email, nome, role = 'user') {
+  async addUser(email, nome, role = 'user', clienteId = null) {
     requireAdmin_();
     const e = String(email || '').toLowerCase().trim();
     if (!e) throw new Error('email_required');
-    await setDoc(doc(db, 'users', e), {
+    const payload = {
       email: e,
       nome: nome || '',
       role,
       ativo: true,
       escritorioId: (currentUserDoc && currentUserDoc.escritorioId) || 'UC',
       criadoEm: Date.now()
-    }, { merge: true });
+    };
+    // Pra role 'cliente': linkar ao doc da coleção clientes via clienteId.
+    // O filtro de processos em bootApp do app usa esse campo pra mostrar
+    // só os processos que tem clienteIds incluindo esse clienteId.
+    if (clienteId) payload.clienteId = String(clienteId);
+    await setDoc(doc(db, 'users', e), payload, { merge: true });
+    return e;
+  },
+  async setClienteId(email, clienteId) {
+    requireAdmin_();
+    const e = String(email || '').toLowerCase().trim();
+    await updateDoc(doc(db, 'users', e), { clienteId: clienteId ? String(clienteId) : null });
     return e;
   },
   async backfillEscritorioId(escritorioId = 'UC') {

@@ -58,6 +58,14 @@ body{background:var(--uc-paper);color:var(--uc-graphite);font-size:15px;-webkit-
 .nav-section{padding:8px 12px 4px;font-size:11px;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;color:var(--uc-warm-gray)}
 .nav-item{display:flex;align-items:center;gap:12px;padding:10px 20px;color:var(--uc-graphite);text-decoration:none;border-left:3px solid transparent;transition:all 0.15s;cursor:pointer;font-size:14px}
 .nav-item:hover{background:var(--uc-cream)}
+
+/* Modo cliente: esconde no menu lateral (e nav mobile) tudo que não está
+   na whitelist [dashboard, processes, deadlines, agenda, tools]. Esconde
+   também os labels de seção ("Carteira", "Operacional", "Sistema") pra
+   visual limpo. Aplicado quando body.cliente-mode (setado em bootApp). */
+body.cliente-mode .sidebar .nav-item:not([data-route="dashboard"]):not([data-route="processes"]):not([data-route="deadlines"]):not([data-route="agenda"]):not([data-route="tools"]),
+body.cliente-mode .mobile-nav .nav-item:not([data-route="dashboard"]):not([data-route="processes"]):not([data-route="deadlines"]):not([data-route="agenda"]):not([data-route="tools"]),
+body.cliente-mode .nav-section { display: none !important; }
 .nav-item.active{background:var(--uc-cream);border-left-color:var(--uc-gold);color:var(--uc-black);font-weight:600}
 .nav-item svg{width:18px;height:18px;flex-shrink:0}
 .nav-badge{margin-left:auto;background:var(--uc-red);color:white;font-size:10px;padding:2px 6px;border-radius:10px;font-weight:600}
@@ -1932,6 +1940,19 @@ async function _formClienteFlow(clienteAtual) {
     { label: 'Ativo', name: 'ativo', type: 'checkbox', default: clienteAtual ? clienteAtual.ativo !== false : true }
   ];
 
+  // Field visible só pra admin: libera acesso do cliente ao sistema (modo cliente,
+  // somente leitura dos próprios processos). Precisa de email cadastrado.
+  const meRole = (window.UC_Auth?.getUser?.() || {}).role;
+  if (meRole === 'admin') {
+    fields.push({
+      label: '🔓 Habilitar acesso ao sistema',
+      name: 'temAcessoSistema',
+      type: 'checkbox',
+      default: clienteAtual?.temAcessoSistema === true,
+      help: 'Quando marcado, o cliente loga via Google com o email acima e vê APENAS os processos onde está vinculado. Continua sem permissão de edição. Requer email preenchido. Bloqueia ao desmarcar (não apaga o histórico).'
+    });
+  }
+
   const intro = enderecoLegacy
     ? `Endereço legado (string única): <em>${escapeHtml(enderecoLegacy)}</em><br>Re-preencha pelos campos novos pra organizar.`
     : 'Digite o CEP primeiro — logradouro, bairro, cidade e estado preenchem automaticamente.';
@@ -1941,11 +1962,18 @@ async function _formClienteFlow(clienteAtual) {
     intro
   });
   if (!r) return;
+  // r tem 14 campos sempre + opcionalmente `temAcessoSistema` no final (só admin vê)
   const [nome, tipoPessoa, cpfCnpj, email, telefone, cep, logradouro, numero, complemento, bairro, cidade, estado, observacoes, ativo] = r;
+  const temAcessoSistema = r.length > 14 ? !!r[14] : (clienteAtual?.temAcessoSistema === true);
 
   if (!nome?.trim()) { toast('Nome obrigatório', '', 'error'); return; }
   if (!_validarCpfCnpj(cpfCnpj)) { toast('CPF/CNPJ inválido', 'Use 11 dígitos pra CPF ou 14 pra CNPJ.', 'error'); return; }
   if (!_validarEmail(email)) { toast('Email inválido', '', 'error'); return; }
+  // Validação extra pra acesso ao sistema: precisa de email
+  if (temAcessoSistema && !email?.trim()) {
+    toast('Email obrigatório', 'Pra habilitar acesso ao sistema, cadastre o email do cliente.', 'error');
+    return;
+  }
 
   // Dedup por nome (case-insensitive). Se editando, ignora o próprio.
   const clientes = await DB.getAllClientes();
@@ -1972,12 +2000,35 @@ async function _formClienteFlow(clienteAtual) {
     estado: ((estado || '').trim() || null)?.toUpperCase() || null,
     observacoes: (observacoes || '').trim() || null,
     ativo: !!ativo,
+    temAcessoSistema: !!temAcessoSistema,
     createdAt: clienteAtual?.createdAt || Date.now()
   };
   // Compat: gera endereco string composto pra quem ainda lê o campo antigo
   cliente.endereco = _composeEndereco(cliente) || null;
 
   await DB.saveCliente(cliente);
+
+  // Sincroniza acesso ao sistema: cria/ativa/bloqueia user doc conforme flag.
+  // Só roda quando o flag MUDOU pra evitar overwrites desnecessários.
+  // Errors aqui não bloqueiam o save do cliente — só notifica via toast.
+  const flagMudou = (!!temAcessoSistema) !== (clienteAtual?.temAcessoSistema === true);
+  const emailMudou = (clienteAtual?.email || null) !== (cliente.email || null);
+  if ((flagMudou || (temAcessoSistema && emailMudou)) && cliente.email) {
+    try {
+      if (temAcessoSistema) {
+        await window.UC_admin.addUser(cliente.email, cliente.nome, 'cliente', cliente.id);
+        toast('Acesso liberado', `${cliente.email} agora pode logar como cliente`, 'success');
+      } else if (clienteAtual?.email) {
+        // Desligou o flag — bloqueia o user antigo (preserva histórico)
+        await window.UC_admin.setActive(clienteAtual.email, false);
+        toast('Acesso bloqueado', `${clienteAtual.email} não pode mais logar`, 'info');
+      }
+    } catch (err) {
+      console.warn('[cliente acesso] sync falhou', err);
+      toast('Cliente salvo · sync de acesso falhou', err.message || String(err), 'error');
+    }
+  }
+
   toast(isEdit ? 'Cliente atualizado' : 'Cliente cadastrado', cliente.nome, 'success');
   renderClientesList();
 }
@@ -15354,11 +15405,12 @@ async function importBackupFlow() {
 // Admin — gestão de acessos (UI sobre window.UC_admin do api.js)
 // ====================================================================
 
-// Metadata dos 3 roles do sistema (centralizado pra consistência visual)
+// Metadata dos 4 roles do sistema (centralizado pra consistência visual)
 const ROLES_META = {
-  admin:  { label: 'ADMIN',  badge: 'badge-amber', desc: 'Acesso total + gestão de acessos' },
-  user:   { label: 'USER',   badge: 'badge-gray',  desc: 'Acesso normal (cria, edita, importa)' },
-  viewer: { label: 'VIEWER', badge: 'badge-green', desc: '👁 Somente leitura — não faz alterações' }
+  admin:   { label: 'ADMIN',   badge: 'badge-amber', desc: 'Acesso total + gestão de acessos' },
+  user:    { label: 'USER',    badge: 'badge-gray',  desc: 'Acesso normal (cria, edita, importa)' },
+  viewer:  { label: 'VIEWER',  badge: 'badge-green', desc: '👁 Equipe — só leitura de tudo' },
+  cliente: { label: 'CLIENTE', badge: 'badge-gold',  desc: '👤 Cliente externo — vê só seus processos' }
 };
 
 function _roleBadge(role) {
@@ -15370,6 +15422,19 @@ function _roleBadge(role) {
 // Lê de currentUserDoc.role (vindo do Firestore via api.js).
 function _isViewerOnly() {
   return (window.UC_Auth?.getUser?.()?.role === 'viewer');
+}
+
+// True pra qualquer role que NÃO deve fazer writes (viewer ou cliente).
+// Usado pelos blockers de DB.save*/delete* e pelo MutationObserver de UI.
+function _isReadOnly() {
+  const r = window.UC_Auth?.getUser?.()?.role;
+  return r === 'viewer' || r === 'cliente';
+}
+
+// True quando user é cliente (vê apenas processos vinculados).
+function _isClienteMode() {
+  const u = window.UC_Auth?.getUser?.() || {};
+  return u.role === 'cliente' && !!u.clienteId;
 }
 
 // Lista de padrões que identificam botões de write pra esconder no viewer.
@@ -15505,7 +15570,9 @@ async function adminRenderUsersList() {
         <strong>Roles</strong>:
         ${_roleBadge('admin')} ${ROLES_META.admin.desc} ·
         ${_roleBadge('user')} ${ROLES_META.user.desc} ·
-        ${_roleBadge('viewer')} ${ROLES_META.viewer.desc}
+        ${_roleBadge('viewer')} ${ROLES_META.viewer.desc} ·
+        ${_roleBadge('cliente')} ${ROLES_META.cliente.desc}<br>
+        <em>Dica</em>: pra adicionar cliente externo, use o cadastro do Cliente (Clientes → + Novo / Editar → marca "🔓 Habilitar acesso ao sistema"). O vínculo cliente↔user fica automático.
       </p>
     `;
   } catch (e) {
@@ -18243,12 +18310,14 @@ async function bootApp() {
   // O binding `const DB` permanece; só os métodos são trocados.
   Object.assign(DB, window.UC_RemoteDB);
 
-  // Viewer mode: intercepta TODOS os métodos de escrita do DB e bloqueia
-  // com toast amigável. Defesa em profundidade — mesmo que algum botão de
-  // edição escape do hide visual, o write falha aqui antes de chegar no
-  // Firestore. Não bloqueia setSetting (usado pra preferências de UI tipo
-  // tema/última busca DJEN). Não bloqueia get*/list* (read-only é livre).
-  if (window.UC_Auth?.getUser?.()?.role === 'viewer') {
+  // Read-only mode: intercepta TODOS os métodos de escrita do DB e bloqueia
+  // com toast amigável. Aplica pra role 'viewer' (escritório interno) e
+  // 'cliente' (cliente externo, vê só seus processos). Defesa em profundidade —
+  // mesmo que algum botão de edição escape do hide visual, o write falha aqui
+  // antes de chegar no Firestore. Não bloqueia setSetting (preferências de UI
+  // tipo tema/última busca DJEN). Não bloqueia get*/list* (read-only é livre).
+  const _myRole = window.UC_Auth?.getUser?.()?.role;
+  if (_myRole === 'viewer' || _myRole === 'cliente') {
     const writeOps = [
       // Processos / dados principais
       'saveProcess', 'deleteProcess',
@@ -18294,10 +18363,8 @@ async function bootApp() {
     for (const op of writeOps) {
       if (typeof DB[op] === 'function') DB[op] = blocker(op);
     }
-    console.warn('[viewer-mode] DB writes interceptados pra role viewer. Operações:', writeOps);
-    // Indicador visual fixo no canto inferior direito — discreto, não
-    // compete com o banner de staging (top). Lembra ao user que está
-    // em modo só-leitura sem entrar no caminho dos botões.
+    console.warn(`[read-only mode] DB writes interceptados pra role '${_myRole}'. Operações:`, writeOps);
+    // Indicador visual fixo no canto inferior direito — diferente por role.
     const tag = document.createElement('div');
     tag.id = '_ucViewerBadge';
     tag.style.cssText = [
@@ -18309,10 +18376,100 @@ async function bootApp() {
       'box-shadow:0 2px 8px rgba(0,0,0,0.2)',
       'z-index:998', 'pointer-events:none'
     ].join(';');
-    tag.textContent = '👁 Somente leitura';
+    tag.textContent = _myRole === 'cliente' ? '👤 Modo cliente' : '👁 Somente leitura';
     document.body.appendChild(tag);
     document.body.classList.add('viewer-mode');
     _viewerInitHideSweep();
+
+    // Cliente mode: além do read-only, FILTRA dados pra mostrar só processos
+    // vinculados ao clienteId do user. Wraps em DB.getAll*/get* aplicam o
+    // filtro antes do retorno — todas as telas reusam os mesmos call sites
+    // e ficam automaticamente filtradas.
+    const _me = window.UC_Auth?.getUser?.() || {};
+    if (_me.role === 'cliente' && _me.clienteId) {
+      document.body.classList.add('cliente-mode');
+      const meuClienteId = _me.clienteId;
+
+      // Predicate: processo pertence ao cliente atual?
+      // Aceita schema novo (p.clienteIds: []) e legacy (p.clienteId: string).
+      const _proCliente = (p) => {
+        if (!p) return false;
+        if (Array.isArray(p.clienteIds) && p.clienteIds.includes(meuClienteId)) return true;
+        if (p.clienteId === meuClienteId) return true;
+        return false;
+      };
+
+      // Wrap getAllProcesses
+      const _origGetAllProcesses = DB.getAllProcesses.bind(DB);
+      DB.getAllProcesses = async () => (await _origGetAllProcesses()).filter(_proCliente);
+
+      // Wrap getProcess(id) — devolve null se não pertencer (404 pra rota tentando abrir)
+      const _origGetProcess = DB.getProcess.bind(DB);
+      DB.getProcess = async (id) => {
+        const p = await _origGetProcess(id);
+        return p && _proCliente(p) ? p : null;
+      };
+
+      // Cache local dos processIds permitidos (TTL 2 min) — evita refetch
+      // a cada call de getAllDeadlines/getAllCompromissos/etc.
+      let _allowedIdsCache = null;
+      let _allowedIdsAt = 0;
+      const _ALLOWED_TTL = 2 * 60 * 1000;
+      const _getAllowedIds = async () => {
+        if (_allowedIdsCache && (Date.now() - _allowedIdsAt < _ALLOWED_TTL)) return _allowedIdsCache;
+        _allowedIdsCache = new Set((await DB.getAllProcesses()).map(p => p.id));
+        _allowedIdsAt = Date.now();
+        return _allowedIdsCache;
+      };
+
+      // Wrap listas que dependem de processId
+      const _origGetAllDeadlines = DB.getAllDeadlines.bind(DB);
+      DB.getAllDeadlines = async () => {
+        const ids = await _getAllowedIds();
+        return (await _origGetAllDeadlines()).filter(d => ids.has(d.processId));
+      };
+
+      if (typeof DB.getAllCompromissos === 'function') {
+        const _origGetAllCompromissos = DB.getAllCompromissos.bind(DB);
+        DB.getAllCompromissos = async () => {
+          const ids = await _getAllowedIds();
+          return (await _origGetAllCompromissos()).filter(c => ids.has(c.processoId));
+        };
+      }
+
+      // Wrap métodos por-processo: bloqueia retorno se pid não autorizado
+      const _origGetEventsByProcess = DB.getEventsByProcess.bind(DB);
+      DB.getEventsByProcess = async (pid) => {
+        const ids = await _getAllowedIds();
+        if (!ids.has(pid)) return [];
+        return _origGetEventsByProcess(pid);
+      };
+
+      const _origGetDeadlinesByProcess = DB.getDeadlinesByProcess.bind(DB);
+      DB.getDeadlinesByProcess = async (pid) => {
+        const ids = await _getAllowedIds();
+        if (!ids.has(pid)) return [];
+        return _origGetDeadlinesByProcess(pid);
+      };
+
+      if (typeof DB.getCompromissosByProcess === 'function') {
+        const _origGetCompromissosByProcess = DB.getCompromissosByProcess.bind(DB);
+        DB.getCompromissosByProcess = async (pid) => {
+          const ids = await _getAllowedIds();
+          if (!ids.has(pid)) return [];
+          return _origGetCompromissosByProcess(pid);
+        };
+      }
+
+      // getAllClientes: cliente só vê o próprio doc (pra preencher próprio
+      // perfil em telas que mostram dados de cliente)
+      const _origGetAllClientes = DB.getAllClientes.bind(DB);
+      DB.getAllClientes = async () => {
+        return (await _origGetAllClientes()).filter(c => c.id === meuClienteId);
+      };
+
+      console.warn('[cliente-mode] filtros aplicados pra clienteId =', meuClienteId);
+    }
   }
 
   // ============================================================
