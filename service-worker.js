@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.55.5 (cliente: esconde tabs Jurisprudência + Petições + Notas no detalhe + stat-card Notas)
-const CACHE_NAME = 'uc-juridico-v6-55-5';
+// Service Worker — UC Jurídico v6.55.6 (cliente: esconde menu Publicações do sidebar/mobile-nav)
+const CACHE_NAME = 'uc-juridico-v6-55-6';
 const APP_SHELL = [
   './',
   './index.html',
