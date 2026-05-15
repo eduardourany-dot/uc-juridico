@@ -1288,7 +1288,7 @@ async function renderDashboard() {
       </div>
     </div>
 
-    ${showBackupReminder ? `
+    ${(showBackupReminder && !_isClienteMode()) ? `
       <div class="backup-banner">
         <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
         <div style="flex:1;">
@@ -1299,7 +1299,7 @@ async function renderDashboard() {
       </div>
     ` : ''}
 
-    ${meuNome ? `
+    ${(meuNome && !_isClienteMode()) ? `
       <div class="card mb-6" style="border-left: 3px solid ${prazosVencidos.length > 0 || compsHoje.length > 0 ? 'var(--uc-red)' : 'var(--uc-gold)'};">
         <div class="flex justify-between items-center mb-3" style="flex-wrap: wrap; gap: 8px;">
           <h2 class="font-serif text-lg font-semibold smallcaps" style="color: var(--uc-black); margin: 0;">
@@ -1444,16 +1444,18 @@ async function renderDashboard() {
         <div class="stat-value">${processes.length}</div>
         <div class="stat-meta">${processes.filter(p => p.status === 'active').length} ativos</div>
       </div>
-      <div class="stat-card" style="${urgentDeadlines.length > 0 ? 'background: var(--uc-red-soft); border-color: var(--uc-red);' : ''}">
-        <div class="stat-label">Publicações urgentes</div>
-        <div class="stat-value" ${urgentDeadlines.length > 0 ? 'style="color: var(--uc-red);"' : ''}>${urgentDeadlines.length}</div>
-        <div class="stat-meta">≤ 5 dias úteis</div>
-      </div>
-      <div class="stat-card" style="${expiredDeadlines.length > 0 ? 'background: var(--uc-amber-soft);' : ''}">
-        <div class="stat-label">Vencidos</div>
-        <div class="stat-value">${expiredDeadlines.length}</div>
-        <div class="stat-meta">${expiredDeadlines.length > 0 ? 'Verifique' : 'Tudo em dia'}</div>
-      </div>
+      ${_isClienteMode() ? '' : `
+        <div class="stat-card" style="${urgentDeadlines.length > 0 ? 'background: var(--uc-red-soft); border-color: var(--uc-red);' : ''}">
+          <div class="stat-label">Publicações urgentes</div>
+          <div class="stat-value" ${urgentDeadlines.length > 0 ? 'style="color: var(--uc-red);"' : ''}>${urgentDeadlines.length}</div>
+          <div class="stat-meta">≤ 5 dias úteis</div>
+        </div>
+        <div class="stat-card" style="${expiredDeadlines.length > 0 ? 'background: var(--uc-amber-soft);' : ''}">
+          <div class="stat-label">Vencidos</div>
+          <div class="stat-value">${expiredDeadlines.length}</div>
+          <div class="stat-meta">${expiredDeadlines.length > 0 ? 'Verifique' : 'Tudo em dia'}</div>
+        </div>
+      `}
       <div class="stat-card">
         <div class="stat-label">Próximas publicações</div>
         <div class="stat-value">${activeDeadlines.length}</div>

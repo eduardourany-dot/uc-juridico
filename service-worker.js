@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.55.0 (Role "cliente" — acesso externo ao próprio processo via app)
-const CACHE_NAME = 'uc-juridico-v6-55-0';
+// Service Worker — UC Jurídico v6.55.1 (Dashboard limpo pro cliente — sem backup, urgentes, vencidos, tarefas)
+const CACHE_NAME = 'uc-juridico-v6-55-1';
 const APP_SHELL = [
   './',
   './index.html',
