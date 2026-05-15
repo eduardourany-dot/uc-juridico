@@ -63,8 +63,8 @@ body{background:var(--uc-paper);color:var(--uc-graphite);font-size:15px;-webkit-
    na whitelist [dashboard, processes, deadlines, agenda, tools]. Esconde
    também os labels de seção ("Carteira", "Operacional", "Sistema") pra
    visual limpo. Aplicado quando body.cliente-mode (setado em bootApp). */
-body.cliente-mode .sidebar .nav-item:not([data-route="dashboard"]):not([data-route="processes"]):not([data-route="agenda"]):not([data-route="tools"]),
-body.cliente-mode .mobile-nav .nav-item:not([data-route="dashboard"]):not([data-route="processes"]):not([data-route="agenda"]):not([data-route="tools"]),
+body.cliente-mode .sidebar .nav-item:not([data-route="dashboard"]):not([data-route="processes"]):not([data-route="agenda"]):not([data-route="tools"]):not([data-route="settings"]),
+body.cliente-mode .mobile-nav .nav-item:not([data-route="dashboard"]):not([data-route="processes"]):not([data-route="agenda"]):not([data-route="tools"]):not([data-route="settings"]),
 body.cliente-mode .nav-section { display: none !important; }
 .nav-item.active{background:var(--uc-cream);border-left-color:var(--uc-gold);color:var(--uc-black);font-weight:600}
 .nav-item svg{width:18px;height:18px;flex-shrink:0}
@@ -13104,7 +13104,12 @@ async function renderSettings() {
   const prompts = await DB.getAllPrompts();
   const defaultPromptId = await DB.getSetting('defaultPromptId');
   state.prompts = prompts;
-  const tab = state._settingsTab || 'appearance';
+  let tab = state._settingsTab || 'appearance';
+  // Cliente só vê: appearance / security / about — qualquer outra cai pra appearance.
+  if (_isClienteMode() && !['appearance', 'security', 'about'].includes(tab)) {
+    tab = 'appearance';
+    state._settingsTab = tab;
+  }
 
   $('appContent').innerHTML = `
     <div class="page-header">
@@ -13116,14 +13121,14 @@ async function renderSettings() {
 
     <div class="tabs">
       <button class="tab ${tab === 'appearance' ? 'active' : ''}" onclick="setSettingsTab('appearance')">Aparência</button>
-      <button class="tab ${tab === 'equipe' ? 'active' : ''}" onclick="setSettingsTab('equipe')">Equipe</button>
-      <button class="tab ${tab === 'djen' ? 'active' : ''}" onclick="setSettingsTab('djen')">DJEN</button>
-      <button class="tab ${tab === 'mni' ? 'active' : ''}" onclick="setSettingsTab('mni')">MNI</button>
-      <button class="tab ${tab === 'prompts' ? 'active' : ''}" onclick="setSettingsTab('prompts')">Prompts</button>
-      <button class="tab ${tab === 'backup' ? 'active' : ''}" onclick="setSettingsTab('backup')">Backup</button>
-      <button class="tab ${tab === 'sync' ? 'active' : ''}" onclick="setSettingsTab('sync')">Sincronização</button>
+      ${_isClienteMode() ? '' : `<button class="tab ${tab === 'equipe' ? 'active' : ''}" onclick="setSettingsTab('equipe')">Equipe</button>`}
+      ${_isClienteMode() ? '' : `<button class="tab ${tab === 'djen' ? 'active' : ''}" onclick="setSettingsTab('djen')">DJEN</button>`}
+      ${_isClienteMode() ? '' : `<button class="tab ${tab === 'mni' ? 'active' : ''}" onclick="setSettingsTab('mni')">MNI</button>`}
+      ${_isClienteMode() ? '' : `<button class="tab ${tab === 'prompts' ? 'active' : ''}" onclick="setSettingsTab('prompts')">Prompts</button>`}
+      ${_isClienteMode() ? '' : `<button class="tab ${tab === 'backup' ? 'active' : ''}" onclick="setSettingsTab('backup')">Backup</button>`}
+      ${_isClienteMode() ? '' : `<button class="tab ${tab === 'sync' ? 'active' : ''}" onclick="setSettingsTab('sync')">Sincronização</button>`}
       ${(window.UC_Auth?.getUser?.()?.role === 'admin') ? `<button class="tab ${tab === 'acessos' ? 'active' : ''}" onclick="setSettingsTab('acessos')">🔐 Acessos</button>` : ''}
-      <button class="tab ${tab === 'maintenance' ? 'active' : ''}" onclick="setSettingsTab('maintenance')">Manutenção</button>
+      ${_isClienteMode() ? '' : `<button class="tab ${tab === 'maintenance' ? 'active' : ''}" onclick="setSettingsTab('maintenance')">Manutenção</button>`}
       <button class="tab ${tab === 'security' ? 'active' : ''}" onclick="setSettingsTab('security')">Segurança</button>
       <button class="tab ${tab === 'about' ? 'active' : ''}" onclick="setSettingsTab('about')">Sobre</button>
     </div>

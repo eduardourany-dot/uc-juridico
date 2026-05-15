@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.55.7 (cliente: esconde botão Nova comunicação no dashboard do cliente)
-const CACHE_NAME = 'uc-juridico-v6-55-7';
+// Service Worker — UC Jurídico v6.55.8 (cliente: libera Configurações com tabs Aparência + Segurança + Sobre)
+const CACHE_NAME = 'uc-juridico-v6-55-8';
 const APP_SHELL = [
   './',
   './index.html',
