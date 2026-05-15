@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.54.0 (Acessos: role "viewer" somente-leitura + DB writes interceptados)
-const CACHE_NAME = 'uc-juridico-v6-54-0';
+// Service Worker — UC Jurídico v6.54.1 (Viewer: esconde botões de write via MutationObserver — UI limpa)
+const CACHE_NAME = 'uc-juridico-v6-54-1';
 const APP_SHELL = [
   './',
   './index.html',

@@ -15372,6 +15372,85 @@ function _isViewerOnly() {
   return (window.UC_Auth?.getUser?.()?.role === 'viewer');
 }
 
+// Lista de padrões que identificam botões de write pra esconder no viewer.
+// Match contra o atributo `onclick` literal do botão. Conservador — só esconde
+// quando o nome da função bate. Botões de navegação (navigate, setProcessTab,
+// openEventDetail, djenShowFullPublicacao, etc.) NÃO entram na lista — viewer
+// continua navegando livremente.
+const _VIEWER_HIDE_PATTERNS = [
+  // Edit / new flows
+  /editProcessFlow/,
+  /newProcessFlow/,
+  /editarCliente/, /excluirCliente/, /novoClienteFlow/,
+  /editarCompromisso/, /excluirCompromisso/, /novoCompromissoFlow/, /duplicarCompromisso/,
+  /editarHonorario/, /excluirHonorario/, /novoHonorarioFlow/,
+  /editarBanco/, /excluirBanco/, /novoBancoFlow/,
+  /editarCartao/, /excluirCartao/, /novoCartaoFlow/,
+  /editarTransacao/, /excluirTransacao/, /novaTransacaoFlow/,
+  /editarRecorrencia/, /excluirRecorrencia/, /novaRecorrenciaFlow/,
+  /editarPeticao/, /excluirPeticao/, /novaPeticaoFlow/, /gerarPeticao/,
+  // Add / remove flows nos tabs do processo
+  /addDeadlineFlow/, /addEventFlow/, /addNoteFlow/,
+  /deleteDeadline/, /deleteEvent/, /deleteNote/, /deleteProcess/,
+  /editNote/,
+  // Estado de prazos
+  /reabrirPrazo/, /abrirModalCumprimento/, /abrirModalSuspender/, /abrirModalCancelar/,
+  // MNI (mexem em dados)
+  /mniBuscarProcessoFlow/, /mniBaixarDocumentosFlow/, /mniLimparMovimentosFlow/,
+  /mniAddCredencialFlow/, /mniDeleteCredencial/, /mniEditCredencialFlow/,
+  /mniResetCofre/, /mniRevealSenhaFlow/, /mniSaveConfigFlow/, /mniAvisosPendentesFlow/,
+  // DJEN (importa, agenda)
+  /djenRunSearch/, /djenAgendarPrazos/, /djenAddOabFlow/, /djenRemoveOab/,
+  /djenToggleOab/, /djenToggleAllOabs/, /djenReExtractParties/,
+  // PDF import
+  /importPdfToProcess/, /importPdf/,
+  // Settings (admin)
+  /adminAddUserFlow/, /adminToggleAtivo/, /adminChangeRoleFlow/,
+  /scanDuplicates/, /mergeAllDuplicates/,
+  /scanClientesSujos/, /aplicarLimpezaClientes/,
+  /limparClientesEDesligarMigracao/, /reabilitarMigracaoClientes/,
+  /wipeAllData/, /exportAllJSON/, /importAllJSON/,
+  // Backup
+  /backupNow/, /restoreFromBackup/,
+  // Prompts
+  /editPromptFlow/, /deletePromptFlow/, /setDefaultPrompt/, /addPromptFlow/,
+  // Exportar CSV continua OK (read-only). Re-render handlers continuam OK.
+];
+
+// Esconde dentro de `root` (default: document) os botões cujo onclick bate
+// com algum padrão de write. Idempotente — pode ser chamado várias vezes
+// no mesmo elemento sem efeito colateral.
+function _viewerHideWriteButtons(root) {
+  if (!_isViewerOnly()) return;
+  const scope = root || document;
+  const els = scope.querySelectorAll ? scope.querySelectorAll('button[onclick], a[onclick]') : [];
+  els.forEach(el => {
+    if (el.dataset.viewerChecked === '1') return; // já avaliado
+    const oc = el.getAttribute('onclick') || '';
+    for (const re of _VIEWER_HIDE_PATTERNS) {
+      if (re.test(oc)) { el.style.display = 'none'; break; }
+    }
+    el.dataset.viewerChecked = '1';
+  });
+}
+
+// MutationObserver pra capturar buttons renderizados dinamicamente (modais,
+// re-renders de aba, infinite scroll, etc.) — modo viewer só liga uma vez.
+function _viewerInitHideSweep() {
+  // Sweep inicial do DOM existente
+  _viewerHideWriteButtons(document);
+  // Listen pra adições futuras
+  const obs = new MutationObserver(mutations => {
+    for (const m of mutations) {
+      for (const node of m.addedNodes) {
+        if (node.nodeType !== 1) continue;
+        _viewerHideWriteButtons(node);
+      }
+    }
+  });
+  obs.observe(document.body, { childList: true, subtree: true });
+}
+
 async function adminRenderUsersList() {
   const el = document.getElementById('adminUsersList');
   if (!el) return;
@@ -18232,6 +18311,8 @@ async function bootApp() {
     ].join(';');
     tag.textContent = '👁 Somente leitura';
     document.body.appendChild(tag);
+    document.body.classList.add('viewer-mode');
+    _viewerInitHideSweep();
   }
 
   // ============================================================
