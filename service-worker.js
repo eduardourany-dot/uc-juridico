@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.55.3 (FIX: renderProcessDetail quebrava pra cliente — saveProcess em render path)
-const CACHE_NAME = 'uc-juridico-v6-55-3';
+// Service Worker — UC Jurídico v6.55.4 (cliente: esconde Análise IA + Editar + Gerar ficha + Gerar petição no topo + seção Ações no rodapé do detalhe)
+const CACHE_NAME = 'uc-juridico-v6-55-4';
 const APP_SHELL = [
   './',
   './index.html',

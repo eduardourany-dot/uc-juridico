@@ -3288,12 +3288,12 @@ async function renderProcessDetail() {
         </p>
       </div>
       <div class="flex gap-2">
-        ${p.cnj ? `<button class="btn btn-secondary btn-sm" onclick="mniBuscarProcessoFlow('${p.id}')" title="Consultar dados atualizados via SOAP/MNI no tribunal de origem">🔍 Buscar MNI</button>` : ''}
+        ${(p.cnj && !_isClienteMode()) ? `<button class="btn btn-secondary btn-sm" onclick="mniBuscarProcessoFlow('${p.id}')" title="Consultar dados atualizados via SOAP/MNI no tribunal de origem">🔍 Buscar MNI</button>` : ''}
         ${/* DataJud desabilitado — funções permanecem no código. */ ''}
-        <button class="btn btn-outline btn-sm" onclick="editProcessFlow()">Editar</button>
-        <button class="btn btn-secondary btn-sm" onclick="generateProcessFiche()">Gerar ficha</button>
-        <button class="btn btn-secondary btn-sm" onclick="setProcessTab('analysis')" title="Abre análise IA do processo">🧠 Análise IA</button>
-        <button class="btn btn-primary btn-sm" onclick="gerarPeticaoEscolhaFlow()" title="Gerar petição — escolha entre modelo cadastrado ou geração via IA">📝 Gerar petição</button>
+        ${_isClienteMode() ? '' : `<button class="btn btn-outline btn-sm" onclick="editProcessFlow()">Editar</button>`}
+        ${_isClienteMode() ? '' : `<button class="btn btn-secondary btn-sm" onclick="generateProcessFiche()">Gerar ficha</button>`}
+        ${_isClienteMode() ? '' : `<button class="btn btn-secondary btn-sm" onclick="setProcessTab('analysis')" title="Abre análise IA do processo">🧠 Análise IA</button>`}
+        ${_isClienteMode() ? '' : `<button class="btn btn-primary btn-sm" onclick="gerarPeticaoEscolhaFlow()" title="Gerar petição — escolha entre modelo cadastrado ou geração via IA">📝 Gerar petição</button>`}
       </div>
     </div>
 
@@ -3687,6 +3687,7 @@ function renderProcessOverview(p, events, deadlines, notes, jurisprudence) {
     ` : ''}
     `}
 
+    ${_isClienteMode() ? '' : `
     <div class="card">
       <div class="flex justify-between items-center mb-3">
         <h3 class="font-serif text-lg font-semibold smallcaps" style="color: var(--uc-black);">Ações</h3>
@@ -3703,6 +3704,7 @@ function renderProcessOverview(p, events, deadlines, notes, jurisprudence) {
         <button class="btn btn-danger btn-sm" onclick="deleteProcessFlow()">🗑 Excluir processo</button>
       </div>
     </div>
+    `}
   `;
 }
 
