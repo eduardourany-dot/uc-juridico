@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.51.0 (Editar processo: remove honorários/comarca, polo Ativo/Passivo, adv adverso único)
-const CACHE_NAME = 'uc-juridico-v6-51-0';
+// Service Worker — UC Jurídico v6.52.0 (Configurações: aba "Acessos" — UI admin pra gerenciar users do Firestore)
+const CACHE_NAME = 'uc-juridico-v6-52-0';
 const APP_SHELL = [
   './',
   './index.html',

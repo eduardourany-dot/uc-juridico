@@ -13063,6 +13063,7 @@ async function renderSettings() {
       <button class="tab ${tab === 'prompts' ? 'active' : ''}" onclick="setSettingsTab('prompts')">Prompts</button>
       <button class="tab ${tab === 'backup' ? 'active' : ''}" onclick="setSettingsTab('backup')">Backup</button>
       <button class="tab ${tab === 'sync' ? 'active' : ''}" onclick="setSettingsTab('sync')">Sincronização</button>
+      ${(window.UC_Auth?.getUser?.()?.role === 'admin') ? `<button class="tab ${tab === 'acessos' ? 'active' : ''}" onclick="setSettingsTab('acessos')">🔐 Acessos</button>` : ''}
       <button class="tab ${tab === 'maintenance' ? 'active' : ''}" onclick="setSettingsTab('maintenance')">Manutenção</button>
       <button class="tab ${tab === 'security' ? 'active' : ''}" onclick="setSettingsTab('security')">Segurança</button>
       <button class="tab ${tab === 'about' ? 'active' : ''}" onclick="setSettingsTab('about')">Sobre</button>
@@ -13523,6 +13524,31 @@ function renderSettingsTab(tab, prompts, defaultPromptId) {
       </div>
     `;
   }
+  if (tab === 'acessos') {
+    const me = window.UC_Auth?.getUser?.() || {};
+    if (me.role !== 'admin') {
+      return `
+        <div class="card empty-state">
+          <h3 class="empty-state-title">🔐 Restrito a administradores</h3>
+          <p class="empty-state-msg">Apenas usuários com role <code>admin</code> podem gerenciar acessos. Peça pro Eduardo te promover.</p>
+        </div>`;
+    }
+    return `
+      <div class="card mb-3">
+        <h3 class="font-serif text-lg font-semibold smallcaps mb-3" style="color: var(--uc-black);">🔐 Acessos ao sistema</h3>
+        <p class="help-text mb-3">
+          Liste, adicione, bloqueie ou promova usuários do escritório. Esta tela usa
+          <code>window.UC_admin</code> (require role admin) e grava direto na coleção
+          <code>users</code> do Firestore do ambiente atual${window.UC_CONFIG_ENV === 'staging' ? ' (<strong>STAGING</strong> — dados de teste)' : ''}.
+        </p>
+        <div class="flex gap-2 mb-3 flex-wrap">
+          <button class="btn btn-primary btn-sm" onclick="adminAddUserFlow()">+ Adicionar usuário</button>
+          <button class="btn btn-outline btn-sm" onclick="renderSettings()">↻ Atualizar lista</button>
+        </div>
+        <div id="adminUsersList"><div class="help-text">Carregando…</div></div>
+      </div>
+    `;
+  }
   if (tab === 'maintenance') {
     const cache = state._manutencaoCache || {};
     const migDesligada = cache.migracaoClientesDesligada;
@@ -13637,6 +13663,9 @@ function renderSettingsTab(tab, prompts, defaultPromptId) {
 }
 
 function setupSettingsHandlers(tab) {
+  if (tab === 'acessos') {
+    adminRenderUsersList();
+  }
   if (tab === 'maintenance') {
     (async () => {
       const migracaoClientesDesligada = await DB.getSetting('migracaoClientesDesligada', false);
@@ -15278,6 +15307,123 @@ async function importBackupFlow() {
     }
   };
   input.click();
+}
+
+// ====================================================================
+// Admin — gestão de acessos (UI sobre window.UC_admin do api.js)
+// ====================================================================
+
+async function adminRenderUsersList() {
+  const el = document.getElementById('adminUsersList');
+  if (!el) return;
+  if (!window.UC_admin) {
+    el.innerHTML = `<div class="status err">UC_admin não carregou — recarregue a página.</div>`;
+    return;
+  }
+  try {
+    const users = await window.UC_admin.listUsers();
+    if (!users.length) {
+      el.innerHTML = `<div class="empty-state"><p class="empty-state-msg">Nenhum usuário cadastrado ainda.</p></div>`;
+      return;
+    }
+    users.sort((a, b) => (a.email || '').localeCompare(b.email || '', 'pt-BR'));
+    const meEmail = (window.UC_Auth?.getUser?.() || {}).email || '';
+    el.innerHTML = `
+      <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
+        <thead>
+          <tr style="background: var(--uc-cream); text-transform: uppercase; letter-spacing: 0.04em; font-size: 11px;">
+            <th style="text-align: left; padding: 8px;">Email</th>
+            <th style="text-align: left; padding: 8px;">Nome</th>
+            <th style="text-align: left; padding: 8px;">Role</th>
+            <th style="text-align: center; padding: 8px;">Ativo</th>
+            <th style="text-align: right; padding: 8px;">Ações</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${users.map(u => {
+            const isMe = u.email === meEmail;
+            const ativoBadge = u.ativo
+              ? '<span class="badge badge-green" style="font-size:10px;">ATIVO</span>'
+              : '<span class="badge badge-red" style="font-size:10px;">BLOQUEADO</span>';
+            const roleBadge = u.role === 'admin'
+              ? '<span class="badge badge-amber" style="font-size:10px;">ADMIN</span>'
+              : '<span class="badge badge-gray" style="font-size:10px;">USER</span>';
+            return `
+              <tr style="border-bottom: 1px solid var(--uc-line);">
+                <td style="padding: 8px;"><code style="font-size: 11px;">${escapeHtml(u.email)}</code>${isMe ? ' <span style="font-size: 10px; color: var(--uc-warm-gray);">(você)</span>' : ''}</td>
+                <td style="padding: 8px;">${escapeHtml(u.nome || '—')}</td>
+                <td style="padding: 8px;">${roleBadge}</td>
+                <td style="padding: 8px; text-align: center;">${ativoBadge}</td>
+                <td style="padding: 8px; text-align: right; white-space: nowrap;">
+                  ${isMe ? '<span style="font-size:10px;color:var(--uc-warm-gray);font-style:italic;">próprio user</span>' : `
+                    <button class="btn btn-ghost btn-sm" style="padding: 2px 6px; font-size: 11px;" onclick="adminToggleAtivo('${escapeHtml(u.email)}', ${!u.ativo})" title="${u.ativo ? 'Bloquear acesso' : 'Liberar acesso'}">${u.ativo ? '🚫 Bloquear' : '✓ Liberar'}</button>
+                    <button class="btn btn-ghost btn-sm" style="padding: 2px 6px; font-size: 11px;" onclick="adminToggleRole('${escapeHtml(u.email)}', '${u.role === 'admin' ? 'user' : 'admin'}')" title="${u.role === 'admin' ? 'Rebaixar pra user' : 'Promover a admin'}">${u.role === 'admin' ? '↓ User' : '↑ Admin'}</button>
+                  `}
+                </td>
+              </tr>
+            `;
+          }).join('')}
+        </tbody>
+      </table>
+      <p class="help-text" style="margin-top: 10px; font-size: 11px;">
+        <strong>Bloquear</strong>: desativa <code>ativo</code> → user não consegue logar. Reverte com "Liberar".
+        <strong>Admin</strong>: ganha acesso a esta tela + pode promover/bloquear outros.
+      </p>
+    `;
+  } catch (e) {
+    el.innerHTML = `<div class="status err" style="padding: 12px; background: #f3d8cf; border-left: 3px solid var(--uc-red); border-radius: 5px;"><strong>Erro:</strong> ${escapeHtml(e.message || String(e))}</div>`;
+  }
+}
+
+async function adminAddUserFlow() {
+  const r = await showModal('Adicionar usuário', [
+    { label: 'Email (Google)', name: 'email', placeholder: 'fulano@uranydecastro.com.br' },
+    { label: 'Nome (display)', name: 'nome', placeholder: 'NOME COMPLETO' },
+    { label: 'Role', name: 'role', type: 'select', default: 'user', options: [
+      { value: 'user', label: 'Usuário (acesso normal)' },
+      { value: 'admin', label: 'Admin (pode gerenciar acessos)' }
+    ]}
+  ], { confirmLabel: 'Adicionar' });
+  if (!r) return;
+  const [email, nome, role] = r;
+  if (!email?.trim()) { toast('Email obrigatório', '', 'error'); return; }
+  try {
+    await window.UC_admin.addUser(email.trim().toLowerCase(), (nome || '').trim().toUpperCase(), role || 'user');
+    toast('Usuário adicionado', `${email.trim()} pode logar agora`, 'success');
+    adminRenderUsersList();
+  } catch (e) {
+    toast('Falha ao adicionar', e.message || String(e), 'error');
+  }
+}
+
+async function adminToggleAtivo(email, ativo) {
+  const acao = ativo ? 'liberar' : 'bloquear';
+  const ok = await confirmDialog(`${ativo ? 'Liberar' : 'Bloquear'} acesso?`,
+    `Confirma ${acao} o acesso de ${email}?${!ativo ? ' Esse usuário não vai conseguir mais logar no sistema enquanto estiver bloqueado.' : ''}`,
+    !ativo);
+  if (!ok) return;
+  try {
+    await window.UC_admin.setActive(email, ativo);
+    toast(`Acesso ${ativo ? 'liberado' : 'bloqueado'}`, email, 'success');
+    adminRenderUsersList();
+  } catch (e) {
+    toast('Falha', e.message || String(e), 'error');
+  }
+}
+
+async function adminToggleRole(email, novoRole) {
+  const acao = novoRole === 'admin' ? 'promover a ADMIN' : 'rebaixar pra USER';
+  const ok = await confirmDialog(`Confirmar mudança de role?`,
+    `Vai ${acao} o usuário ${email}.${novoRole === 'admin' ? ' Admins podem gerenciar acessos de outros usuários — concede com cuidado.' : ''}`,
+    novoRole === 'admin');
+  if (!ok) return;
+  try {
+    await window.UC_admin.setRole(email, novoRole);
+    toast(`Role alterado`, `${email} agora é ${novoRole}`, 'success');
+    adminRenderUsersList();
+  } catch (e) {
+    toast('Falha', e.message || String(e), 'error');
+  }
 }
 
 async function wipeAllData() {
