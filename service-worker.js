@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.55.2 (FIX: hide sweep pra cliente — antes só pegava role viewer)
-const CACHE_NAME = 'uc-juridico-v6-55-2';
+// Service Worker — UC Jurídico v6.55.3 (FIX: renderProcessDetail quebrava pra cliente — saveProcess em render path)
+const CACHE_NAME = 'uc-juridico-v6-55-3';
 const APP_SHELL = [
   './',
   './index.html',

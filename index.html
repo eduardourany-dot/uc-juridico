@@ -3265,10 +3265,14 @@ async function renderProcessDetail() {
   let peticoes = [];
   try { peticoes = await DB.getPeticoesByProcess(p.id); } catch (e) { console.warn('peticoes não disponíveis', e); }
 
-  // Update counts
+  // Update counts (skip pra read-only — não pode escrever; eventCount/
+  // noteCount são metadados que continuam corretos derivados em runtime).
+  // Try/catch defensivo pro caso do blocker disparar inesperado.
   p.eventCount = events.length;
   p.noteCount = notes.length;
-  await DB.saveProcess(p);
+  if (!_isReadOnly()) {
+    try { await DB.saveProcess(p); } catch (e) { console.warn('saveProcess (counts) falhou', e); }
+  }
 
   state._processView = { p, events, deadlines, notes, jurisprudence, honorarios, compromissos, peticoes, activeTab: state._processView?.activeTab || 'overview' };
 
