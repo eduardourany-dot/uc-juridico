@@ -13254,6 +13254,31 @@ function renderSettingsTab(tab, prompts, defaultPromptId) {
       </div>
 
       <div class="card mb-3">
+        <h4 class="font-serif font-semibold smallcaps mb-2" style="color: var(--uc-black);">⏱ Auto-check ao abrir o app</h4>
+        <p class="help-text" style="margin-bottom: 10px;">
+          Quando ativo, ao abrir o app o sistema verifica em background se há publicações novas
+          casando com seus processos cadastrados. Se achar, mostra banner no topo "🔔 N publicações
+          novas". Não importa automaticamente — você revisa antes. Não dispara enquanto a última
+          consulta for muito recente (controlado pelo intervalo mínimo abaixo).
+        </p>
+        <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap;">
+          <label style="display: inline-flex; align-items: center; gap: 6px;">
+            <input type="checkbox" id="djenAutoCheckInput" ${state._djenCache?.autoCheckEnabled !== false ? 'checked' : ''}>
+            <span>Ativo</span>
+          </label>
+          <label style="display: inline-flex; align-items: center; gap: 6px;">
+            <span>Intervalo mínimo:</span>
+            <input type="number" id="djenAutoCheckHoursInput" value="${state._djenCache?.autoCheckHours || 12}" min="1" max="168" style="width: 60px; padding: 4px 6px; border: 1px solid var(--uc-line); border-radius: 4px;">
+            <span>horas</span>
+          </label>
+          <button class="btn btn-ghost btn-sm" id="djenSaveAutoCheck">Salvar</button>
+        </div>
+        <p class="help-text" style="margin-top: 8px; font-size: 11px;">
+          Última verificação automática: <strong>${state._djenCache?.lastAutoCheck ? formatDateTime(state._djenCache.lastAutoCheck) : 'nunca'}</strong>.
+        </p>
+      </div>
+
+      <div class="card mb-3">
         <h4 class="font-serif font-semibold smallcaps mb-2" style="color: var(--uc-black);">Endpoint DJEN (Diário Eletrônico)</h4>
         <p class="help-text" style="margin-bottom: 8px;">
           URL da Cloudflare Worker que repassa as chamadas para a API do DJEN do CNJ. Deixe vazio para tentar chamar a API direto (provavelmente vai dar CORS).
@@ -13717,6 +13742,15 @@ function setupSettingsHandlers(tab) {
       state._djenCache = { ...state._djenCache, lookback, workerUrl, datajudWorkerUrl };
       toast('Configurações salvas', '', 'success');
     };
+    const saveAutoBtn = $('djenSaveAutoCheck');
+    if (saveAutoBtn) saveAutoBtn.onclick = async () => {
+      const enabled = $('djenAutoCheckInput').checked;
+      const hours = Math.max(1, Math.min(168, parseInt($('djenAutoCheckHoursInput').value) || 12));
+      await DB.setSetting('djenAutoCheckEnabled', enabled);
+      await DB.setSetting('djenAutoCheckHours', hours);
+      state._djenCache = { ...state._djenCache, autoCheckEnabled: enabled, autoCheckHours: hours };
+      toast('Auto-check configurado', enabled ? `Verifica a cada ${hours}h` : 'Desativado', 'success');
+    };
   }
   if (tab === 'mni') {
     mniLoadSettingsCache().then(() => {
@@ -13752,7 +13786,14 @@ async function djenLoadSettingsCache() {
   const workerUrl = await DB.getSetting('djenWorkerUrl', '') || '';
   const datajudWorkerUrl = await DB.getSetting('datajudWorkerUrl', '') || '';
   const lastFetch = await DB.getSetting('djenLastFetch', null);
-  state._djenCache = { oabs, lookback, workerUrl, datajudWorkerUrl, lastFetch };
+  // Auto-check settings (MNI.4 — DJEN polling automático ao abrir o app)
+  const autoCheckEnabled = await DB.getSetting('djenAutoCheckEnabled', true);
+  const autoCheckHours = await DB.getSetting('djenAutoCheckHours', 12);
+  const lastAutoCheck = await DB.getSetting('djenLastAutoCheck', null);
+  state._djenCache = {
+    oabs, lookback, workerUrl, datajudWorkerUrl, lastFetch,
+    autoCheckEnabled, autoCheckHours, lastAutoCheck
+  };
 }
 
 async function djenAddOabFlow() {
@@ -17623,6 +17664,104 @@ function djenInferProcessFromPublication(pub) {
 }
 
 // === MAIN ENTRY POINT: triggered from Dashboard button ===
+// ====================================================================
+// DJEN auto-check — MNI.4 / fase 1
+// ====================================================================
+// Verificação automática de publicações novas ao abrir o app:
+//   - Se djenAutoCheckEnabled === true e última verificação > N horas atrás
+//   - Roda djenFetchAll silenciosamente (sem modal de progresso)
+//   - Classifica resultados
+//   - Se houver publicações novas vinculadas a processos → banner no topo
+//     + Notification API local (se permitida)
+//   - NÃO importa nada automaticamente — só notifica.
+//
+// Fase 2 (futuro): Cloudflare Worker Cron Trigger pra rodar mesmo com o
+// app fechado. Fica como sprint separado quando este aqui maturar.
+
+async function djenMaybeAutoCheck() {
+  // Guard 1: só roda se ativo
+  const enabled = await DB.getSetting('djenAutoCheckEnabled', true);
+  if (!enabled) return;
+  // Guard 2: throttle por horas
+  const hours = await DB.getSetting('djenAutoCheckHours', 12);
+  const last = await DB.getSetting('djenLastAutoCheck', 0);
+  const minIntervalMs = hours * 60 * 60 * 1000;
+  if (last && (Date.now() - last) < minIntervalMs) {
+    console.log(`[DJEN auto] pulando — último check há ${Math.round((Date.now() - last) / 1000 / 60)} min, intervalo mínimo ${hours}h`);
+    return;
+  }
+  // Guard 3: OABs cadastradas + ativas
+  const allOabs = await DB.getSetting('djenOabs', DJEN_DEFAULT_OABS);
+  const oabs = (allOabs || []).filter(o => o.enabled !== false);
+  if (oabs.length === 0) {
+    console.log('[DJEN auto] sem OABs ativas — pulando');
+    return;
+  }
+
+  // Janela curta: desde último auto-check OU últimos 3 dias (o que for menor)
+  const today = new Date();
+  const fim = new Date(today); fim.setDate(today.getDate() - 1);
+  const inicioDate = last
+    ? new Date(Math.max(last - 24*60*60*1000, today.getTime() - 7*24*60*60*1000))
+    : (() => { const d = new Date(today); d.setDate(today.getDate() - 3); return d; })();
+  const fmtDate = d => d.toISOString().slice(0, 10);
+
+  console.log(`[DJEN auto] consultando ${oabs.length} OAB(s) · período ${fmtDate(inicioDate)} → ${fmtDate(fim)}`);
+  try {
+    const pubs = await djenFetchAll(oabs, fmtDate(inicioDate), fmtDate(fim), null);
+    const classified = await djenClassify(pubs);
+    await DB.setSetting('djenLastAutoCheck', Date.now());
+    // Stash pra abrir modal sob demanda quando user clicar no banner
+    window._djenAutoCheckCache = { classified, oabs, inicio: fmtDate(inicioDate), fim: fmtDate(fim) };
+    const novas = classified.matched?.length || 0;
+    const orfas = classified.unmatched?.length || 0;
+    if (novas > 0 || orfas > 0) {
+      _djenMostrarBannerAutoCheck(novas, orfas);
+    }
+    console.log(`[DJEN auto] ${novas} vinculadas + ${orfas} órfãs encontradas`);
+  } catch (e) {
+    console.warn('[DJEN auto] falhou (silencioso pro user):', e);
+  }
+}
+
+// Banner discreto no topo da app indicando que há publicações novas pra revisar.
+// Click abre o modal de resultados DJEN. Fecha em ✕ ou após 5min auto.
+function _djenMostrarBannerAutoCheck(novas, orfas) {
+  // Remove banner anterior (se houver, evita acúmulo)
+  document.getElementById('_djenAutoBanner')?.remove();
+  const banner = document.createElement('div');
+  banner.id = '_djenAutoBanner';
+  const msg = novas > 0
+    ? `🔔 <strong>${novas} publicação${novas > 1 ? 'ões' : ''} nova${novas > 1 ? 's' : ''}</strong> vinculada${novas > 1 ? 's' : ''} a seus processos${orfas > 0 ? ` · ${orfas} de processo${orfas > 1 ? 's' : ''} não cadastrado${orfas > 1 ? 's' : ''}` : ''}`
+    : `🔔 <strong>${orfas} publicação${orfas > 1 ? 'ões' : ''}</strong> nova${orfas > 1 ? 's' : ''} de processo${orfas > 1 ? 's' : ''} não cadastrado${orfas > 1 ? 's' : ''}`;
+  banner.style.cssText = [
+    'position:fixed', 'top:0', 'left:0', 'right:0',
+    'background:linear-gradient(90deg, #b87f1c 0%, #c9a14c 100%)',
+    'color:#fff', 'padding:10px 16px',
+    'font:500 13px/1.4 "EB Garamond", Georgia, serif',
+    'text-align:center', 'z-index:999',
+    'box-shadow:0 2px 8px rgba(0,0,0,0.15)',
+    'cursor:pointer', 'transition:transform .15s'
+  ].join(';');
+  banner.innerHTML = `${msg} · <span style="text-decoration:underline;">Ver agora →</span> <button onclick="event.stopPropagation(); this.parentElement.remove();" style="background:none;border:none;color:#fff;cursor:pointer;font-size:18px;padding:0 4px;margin-left:8px;line-height:1;" title="Dispensar">×</button>`;
+  banner.onclick = () => {
+    const c = window._djenAutoCheckCache;
+    if (!c) { toast('Cache expirado', 'Re-execute a busca DJEN manualmente.', 'info'); banner.remove(); return; }
+    banner.remove();
+    djenShowResultsModal(c.classified, c.oabs, c.inicio, c.fim);
+  };
+  document.body.appendChild(banner);
+  // Auto-dismiss em 5 min (evita banner perpétuo)
+  setTimeout(() => { banner.remove(); }, 5 * 60 * 1000);
+
+  // Tenta tambem notification API local (se user já permitiu pra outras coisas)
+  try {
+    if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+      new Notification('UC Jurídico — DJEN', { body: msg.replace(/<[^>]+>/g, ''), icon: '/icon-192.png', tag: 'djen-auto' });
+    }
+  } catch (_) {}
+}
+
 async function djenRunSearch() {
   // Load config
   const allOabs = await DB.getSetting('djenOabs', DJEN_DEFAULT_OABS);
@@ -18305,6 +18444,15 @@ async function bootApp() {
     setTimeout(() => {
       verificarLembretesPendentes().catch(err => console.warn('verificarLembretesPendentes:', err));
     }, 5000);
+  }
+
+  // DJEN auto-check (MNI.4 fase 1): consulta automática silenciosa de
+  // publicações novas ao abrir o app. Throttled pelo intervalo configurado
+  // (default 12h). Roda após 10s pra não competir com a boot inicial.
+  if (!window._ucDjenAutoTimeout) {
+    window._ucDjenAutoTimeout = setTimeout(() => {
+      djenMaybeAutoCheck().catch(err => console.warn('[DJEN auto] erro:', err));
+    }, 10000);
   }
 
   // FCM (Sprint 3 Fase B.2) — registra token e handler foreground se já há
