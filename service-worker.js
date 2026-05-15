@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.55.1 (Dashboard limpo pro cliente — sem backup, urgentes, vencidos, tarefas)
-const CACHE_NAME = 'uc-juridico-v6-55-1';
+// Service Worker — UC Jurídico v6.55.2 (FIX: hide sweep pra cliente — antes só pegava role viewer)
+const CACHE_NAME = 'uc-juridico-v6-55-2';
 const APP_SHELL = [
   './',
   './index.html',

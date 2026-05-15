@@ -15486,9 +15486,10 @@ const _VIEWER_HIDE_PATTERNS = [
 
 // Esconde dentro de `root` (default: document) os botões cujo onclick bate
 // com algum padrão de write. Idempotente — pode ser chamado várias vezes
-// no mesmo elemento sem efeito colateral.
+// no mesmo elemento sem efeito colateral. Aplica pra viewer E cliente
+// (ambos read-only).
 function _viewerHideWriteButtons(root) {
-  if (!_isViewerOnly()) return;
+  if (!_isReadOnly()) return;
   const scope = root || document;
   const els = scope.querySelectorAll ? scope.querySelectorAll('button[onclick], a[onclick]') : [];
   els.forEach(el => {
