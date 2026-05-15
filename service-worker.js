@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.55.9 (cliente: tab Segurança mostra só card Sessão atual)
-const CACHE_NAME = 'uc-juridico-v6-55-9';
+// Service Worker — UC Jurídico v6.55.10 (admin: botão Excluir usuário em Acessos + UC_admin.deleteUser)
+const CACHE_NAME = 'uc-juridico-v6-55-10';
 const APP_SHELL = [
   './',
   './index.html',

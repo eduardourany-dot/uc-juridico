@@ -12,7 +12,7 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
 import {
   getFirestore, collection, doc,
-  getDoc, getDocs, setDoc, updateDoc,
+  getDoc, getDocs, setDoc, updateDoc, deleteDoc,
   query, where, writeBatch, addDoc, Timestamp
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
 
@@ -695,6 +695,21 @@ window.UC_admin = {
     requireAdmin_();
     const e = String(email || '').toLowerCase().trim();
     await updateDoc(doc(db, 'users', e), { role: String(role) });
+    return e;
+  },
+  // Exclusão definitiva — apaga o doc da coleção users. Diferente de setActive(false),
+  // que só desativa. Use com cuidado: se o user logar de novo e o allowlist não tiver
+  // o doc, ele é rejeitado pelo guard de auth (mesmo efeito de bloqueado), mas o
+  // histórico (escritorioId, clienteId, etc.) é perdido.
+  async deleteUser(email) {
+    requireAdmin_();
+    const e = String(email || '').toLowerCase().trim();
+    if (!e) throw new Error('email_required');
+    // Guard: não permite admin excluir a si mesmo (evita lockout do escritório).
+    if (currentUserDoc && (currentUserDoc.email || '').toLowerCase() === e) {
+      throw new Error('cannot_delete_self: você não pode excluir o próprio user');
+    }
+    await deleteDoc(doc(db, 'users', e));
     return e;
   }
 };

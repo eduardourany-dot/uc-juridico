@@ -15574,6 +15574,7 @@ async function adminRenderUsersList() {
                   ${isMe ? '<span style="font-size:10px;color:var(--uc-warm-gray);font-style:italic;">próprio user</span>' : `
                     <button class="btn btn-ghost btn-sm" style="padding: 2px 6px; font-size: 11px;" onclick="adminToggleAtivo('${escapeHtml(u.email)}', ${!u.ativo})" title="${u.ativo ? 'Bloquear acesso' : 'Liberar acesso'}">${u.ativo ? '🚫 Bloquear' : '✓ Liberar'}</button>
                     <button class="btn btn-ghost btn-sm" style="padding: 2px 6px; font-size: 11px;" onclick="adminChangeRoleFlow('${escapeHtml(u.email)}', '${u.role || 'user'}')" title="Alterar role (admin/user/viewer)">⇅ Role</button>
+                    <button class="btn btn-ghost btn-sm" style="padding: 2px 6px; font-size: 11px; color: var(--uc-red);" onclick="adminDeleteUserFlow('${escapeHtml(u.email)}', '${escapeHtml(u.nome || '')}')" title="Excluir definitivamente do allowlist">🗑 Excluir</button>
                   `}
                 </td>
               </tr>
@@ -15582,7 +15583,7 @@ async function adminRenderUsersList() {
         </tbody>
       </table>
       <p class="help-text" style="margin-top: 10px; font-size: 11px;">
-        <strong>Bloquear</strong>: desativa <code>ativo</code> → user não consegue logar. Reverte com "Liberar".<br>
+        <strong>Bloquear</strong>: desativa <code>ativo</code> → user não consegue logar. Reverte com "Liberar". · <strong>Excluir</strong>: apaga o registro do allowlist (irreversível, perde histórico).<br>
         <strong>Roles</strong>:
         ${_roleBadge('admin')} ${ROLES_META.admin.desc} ·
         ${_roleBadge('user')} ${ROLES_META.user.desc} ·
@@ -15657,6 +15658,31 @@ async function adminChangeRoleFlow(email, atualRole) {
     adminRenderUsersList();
   } catch (e) {
     toast('Falha', e.message || String(e), 'error');
+  }
+}
+
+// Exclusão definitiva — apaga o doc da coleção `users`. Diferente de "Bloquear"
+// (setActive=false), que mantém o histórico (role, clienteId, escritorioId, etc.).
+// Pede dupla confirmação porque é irreversível.
+async function adminDeleteUserFlow(email, nome) {
+  const c1 = await confirmDialog(
+    `Excluir usuário?`,
+    `Vai remover ${nome ? nome + ' (' + email + ')' : email} do allowlist permanentemente. O usuário não vai conseguir mais logar.\n\nDiferença vs Bloquear: exclusão APAGA o registro (perde histórico, vínculo cliente, etc). Bloquear só desativa.\n\nDica: se for cliente externo, considere desmarcar "Habilitar acesso ao sistema" no cadastro do Cliente em vez de excluir aqui.`,
+    true
+  );
+  if (!c1) return;
+  const c2 = await confirmDialog(
+    `Confirmar exclusão?`,
+    `Última chance. ${email} será removido permanentemente da coleção users.`,
+    true
+  );
+  if (!c2) return;
+  try {
+    await window.UC_admin.deleteUser(email);
+    toast('Usuário excluído', email, 'success');
+    adminRenderUsersList();
+  } catch (e) {
+    toast('Falha ao excluir', e.message || String(e), 'error');
   }
 }
 
