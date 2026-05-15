@@ -3301,13 +3301,13 @@ async function renderProcessDetail() {
       <button class="detail-tab ${state._processView.activeTab === 'overview' ? 'active' : ''}" onclick="setProcessTab('overview')">Visão geral</button>
       <button class="detail-tab ${state._processView.activeTab === 'cliente' ? 'active' : ''}" onclick="setProcessTab('cliente')">Cliente</button>
       <button class="detail-tab ${state._processView.activeTab === 'honorarios' ? 'active' : ''}" onclick="setProcessTab('honorarios')">Honorários · ${honorarios.length}</button>
-      <button class="detail-tab ${state._processView.activeTab === 'jurisprudence' ? 'active' : ''}" onclick="setProcessTab('jurisprudence')">Jurisprudência · ${jurisprudence.length}</button>
-      <button class="detail-tab ${state._processView.activeTab === 'peticoes' ? 'active' : ''}" onclick="setProcessTab('peticoes')">Petições · ${peticoes.length}</button>
+      ${_isClienteMode() ? '' : `<button class="detail-tab ${state._processView.activeTab === 'jurisprudence' ? 'active' : ''}" onclick="setProcessTab('jurisprudence')">Jurisprudência · ${jurisprudence.length}</button>`}
+      ${_isClienteMode() ? '' : `<button class="detail-tab ${state._processView.activeTab === 'peticoes' ? 'active' : ''}" onclick="setProcessTab('peticoes')">Petições · ${peticoes.length}</button>`}
       ${/* Tabs 'atalho-cards' só aparecem quando ativas (acessadas via clique nos cards da visão geral). */ ''}
       ${state._processView.activeTab === 'events' ? `<button class="detail-tab active" onclick="setProcessTab('events')">Eventos · ${events.length}</button>` : ''}
       ${state._processView.activeTab === 'deadlines' ? `<button class="detail-tab active" onclick="setProcessTab('deadlines')">Publicações · ${deadlines.filter(d => prazoEstaAtivo(d)).length}</button>` : ''}
       ${state._processView.activeTab === 'compromissos' ? `<button class="detail-tab active" onclick="setProcessTab('compromissos')">Compromissos · ${compromissos.length}</button>` : ''}
-      ${state._processView.activeTab === 'notes' ? `<button class="detail-tab active" onclick="setProcessTab('notes')">Notas · ${notes.length}</button>` : ''}
+      ${(state._processView.activeTab === 'notes' && !_isClienteMode()) ? `<button class="detail-tab active" onclick="setProcessTab('notes')">Notas · ${notes.length}</button>` : ''}
       ${state._processView.activeTab === 'analysis' ? `<button class="detail-tab active" onclick="setProcessTab('analysis')">Análise IA</button>` : ''}
     </div>
 
@@ -3528,7 +3528,7 @@ function renderProcessOverview(p, events, deadlines, notes, jurisprudence) {
       <div class="stat-card stat-card-link" onclick="setProcessTab('events')" title="Ver eventos do processo"><div class="stat-label">Eventos</div><div class="stat-value">${events.length}</div></div>
       <div class="stat-card stat-card-link" onclick="setProcessTab('deadlines')" title="Ver publicações do processo"><div class="stat-label">Publicações ativas</div><div class="stat-value">${activeDeadlines.length}</div></div>
       <div class="stat-card stat-card-link" onclick="setProcessTab('compromissos')" title="Ver compromissos vinculados"><div class="stat-label">Compromissos</div><div class="stat-value">${compromissos.length}</div></div>
-      <div class="stat-card stat-card-link" onclick="setProcessTab('notes')" title="Ver notas do processo"><div class="stat-label">Notas</div><div class="stat-value">${notes.length}</div></div>
+      ${_isClienteMode() ? '' : `<div class="stat-card stat-card-link" onclick="setProcessTab('notes')" title="Ver notas do processo"><div class="stat-label">Notas</div><div class="stat-value">${notes.length}</div></div>`}
     </div>
 
     ${nextDeadline ? `

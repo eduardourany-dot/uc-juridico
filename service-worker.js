@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.55.4 (cliente: esconde Análise IA + Editar + Gerar ficha + Gerar petição no topo + seção Ações no rodapé do detalhe)
-const CACHE_NAME = 'uc-juridico-v6-55-4';
+// Service Worker — UC Jurídico v6.55.5 (cliente: esconde tabs Jurisprudência + Petições + Notas no detalhe + stat-card Notas)
+const CACHE_NAME = 'uc-juridico-v6-55-5';
 const APP_SHELL = [
   './',
   './index.html',
