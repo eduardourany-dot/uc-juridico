@@ -5,6 +5,7 @@
 //
 // Ambiente escolhido automaticamente pelo hostname:
 //   - localhost / 127.0.0.1            → staging (banco isolado)
+//   - *.pages.dev                      → staging (Cloudflare Pages = sandbox compartilhável)
 //   - eduardourany-dot.github.io       → produção
 //   - qualquer URL com ?staging        → força staging (escape hatch)
 //
@@ -17,6 +18,7 @@
     || location.hostname.startsWith('192.168.')
     || location.hostname.startsWith('10.')
     || location.hostname.endsWith('.local')
+    || location.hostname.endsWith('.pages.dev')  // Cloudflare Pages → ambiente sandbox compartilhado
     || new URLSearchParams(location.search).has('staging');
 
   // ============ STAGING — projeto Firebase isolado pra testes ============

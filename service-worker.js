@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.50.0 (Multi-cliente: schema novo + multiselect chips + migração não-destrutiva)
-const CACHE_NAME = 'uc-juridico-v6-50-0';
+// Service Worker — UC Jurídico v6.50.1 (config: *.pages.dev → staging Firebase pra sandbox isolado de prod)
+const CACHE_NAME = 'uc-juridico-v6-50-1';
 const APP_SHELL = [
   './',
   './index.html',
