@@ -2274,7 +2274,7 @@ function renderClienteComunicacoesSection(cli, comunicacoes, processos) {
     <div class="card mb-3">
       <div class="flex justify-between items-center mb-3">
         <h3 class="font-serif text-lg font-semibold smallcaps" style="color: var(--uc-black);">Comunicação</h3>
-        <button class="btn btn-primary btn-sm" onclick="novaComunicacaoFlow({ clienteIdFixo: '${cli.id}' })">+ Nova comunicação</button>
+        ${_isClienteMode() ? '' : `<button class="btn btn-primary btn-sm" onclick="novaComunicacaoFlow({ clienteIdFixo: '${cli.id}' })">+ Nova comunicação</button>`}
       </div>
 
       ${pendentes.length > 0 ? `

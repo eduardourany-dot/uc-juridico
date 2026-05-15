@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.55.6 (cliente: esconde menu Publicações do sidebar/mobile-nav)
-const CACHE_NAME = 'uc-juridico-v6-55-6';
+// Service Worker — UC Jurídico v6.55.7 (cliente: esconde botão Nova comunicação no dashboard do cliente)
+const CACHE_NAME = 'uc-juridico-v6-55-7';
 const APP_SHELL = [
   './',
   './index.html',
