@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.50.2 (MNI: loading modal com timer + worker v0.9.3 timeout)
-const CACHE_NAME = 'uc-juridico-v6-50-2';
+// Service Worker — UC Jurídico v6.50.3 (FIX bug: showModal aninhado lia ID do modal errado — destravar cofre travava)
+const CACHE_NAME = 'uc-juridico-v6-50-3';
 const APP_SHELL = [
   './',
   './index.html',

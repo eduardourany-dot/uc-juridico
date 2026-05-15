@@ -925,7 +925,12 @@ function showModal(title, fields, options = {}) {
     const cleanup = () => modal.remove();
 
     // Helpers de acesso pra callbacks dinâmicos (onChange).
-    const getField = idx => document.getElementById('_mf_' + idx);
+    // IMPORTANTE: queryScopada ao `modal` atual — IDs `_mf_${i}`, `_modalConfirm`
+    // e `_modalCancel` se duplicam quando dois showModal estão abertos
+    // simultaneamente (caso: showModal de "Destravar cofre" dentro do showModal
+    // de "Editar processo"). document.getElementById pega só o primeiro, que
+    // pode ser do modal ERRADO — corrige usando modal.querySelector.
+    const getField = idx => modal.querySelector('#_mf_' + idx);
     const getValue = idx => {
       const el = getField(idx);
       if (!el) return null;
@@ -1008,13 +1013,15 @@ function showModal(title, fields, options = {}) {
       if (el) _renderMultiselectChips(el);
     });
 
-    const cancelBtn = $('_modalCancel');
+    // Scoped ao modal atual (não global) — evita conflito de ID com outro
+    // modal aberto simultaneamente (showModal aninhado).
+    const cancelBtn = modal.querySelector('#_modalCancel');
     if (cancelBtn) cancelBtn.onclick = () => { cleanup(); resolve(null); };
-    $('_modalConfirm').onclick = () => {
+    modal.querySelector('#_modalConfirm').onclick = () => {
       const values = fields.map((f, i) => getValue(i));
       cleanup(); resolve(values);
     };
-    document.getElementById('_mf_0')?.focus();
+    modal.querySelector('#_mf_0')?.focus();
   });
 }
 
