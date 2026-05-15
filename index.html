@@ -3533,7 +3533,7 @@ function renderProcessOverview(p, events, deadlines, notes, jurisprudence) {
       <h3 class="font-serif text-lg font-semibold smallcaps mb-3" style="color: var(--uc-black);">Parte adversa (manual)</h3>
       <div class="grid gap-2" style="grid-template-columns: 160px 1fr; font-size: 13px;">
         ${p.advNome ? `<div style="color: var(--uc-warm-gray);">Nome:</div><div>${escapeHtml(p.advNome)}${p.advDoc ? ` <span style="color: var(--uc-warm-gray);">(${escapeHtml(p.advDoc)})</span>` : ''}</div>` : ''}
-        ${p.advLawyer ? `<div style="color: var(--uc-warm-gray);">Advogado:</div><div>${escapeHtml(p.advLawyer)}${p.advLawyerOab ? ` <span style="color: var(--uc-warm-gray);">(OAB ${escapeHtml(p.advLawyerOab)})</span>` : ''}</div>` : ''}
+        ${p.advLawyer ? `<div style="color: var(--uc-warm-gray);">Advogado:</div><div>${escapeHtml(_mergeAdvLawyer(p.advLawyer, p.advLawyerOab))}</div>` : ''}
       </div>
       <p class="help-text" style="margin-top: 8px;">Dados informados manualmente. A extração automática do DJEN aparece em card separado.</p>
     </div>
@@ -4359,6 +4359,32 @@ async function obterDestinatariosPrazo(processo, marco, hoje) {
 // — ver após appendLogPrazo. Foi movido pra lá pra que marcoDoPrazo possa
 // referenciar STATUS_PRAZO sem TDZ.
 
+// Normaliza polo do cliente pra nomenclatura atual ('Ativo' / 'Passivo').
+// Aceita os valores antigos do schema legacy ('Ataque' = ativo, 'Defesa' =
+// passivo) e os novos. Útil tanto pro default no form quanto pra checks
+// de polo adverso em código que ainda recebe dados antigos do Firestore.
+function _normalizarPolo(polo) {
+  if (!polo) return null;
+  const p = String(polo).trim();
+  if (p === 'Ativo' || p === 'Passivo') return p;
+  if (p === 'Ataque') return 'Ativo';
+  if (p === 'Defesa') return 'Passivo';
+  return null;
+}
+
+// Combina nome do advogado + OAB num campo único pra display/edição.
+// Aceita campos legacy separados (advLawyer + advLawyerOab) e devolve
+// "Nome · OAB/UF 12345". Se OAB já estiver dentro do nome, retorna como está.
+function _mergeAdvLawyer(nome, oab) {
+  const n = String(nome || '').trim();
+  const o = String(oab || '').trim();
+  if (!n) return o ? `OAB/${o}` : '';
+  if (!o) return n;
+  // Se OAB já aparece no nome (mesmo número), evita duplicar
+  if (n.toUpperCase().includes(o.toUpperCase())) return n;
+  return `${n} · OAB/${o}`;
+}
+
 async function editProcessFlow() {
   const p = state._processView.p;
   const me = (window.UC_Auth?.getUser?.() || {}).email || '';
@@ -4381,18 +4407,22 @@ async function editProcessFlow() {
 
     { label: 'Clientes', name: 'clienteIds', type: 'multiselect', default: clienteIdsDefault, options: cliOpts, help: 'Selecione um ou mais clientes (litisconsórcio, co-réus, co-autores). Pra adicionar cliente novo, vá em Clientes → + Novo cliente.' },
 
-    { label: 'Polo', name: 'polo', type: 'select', default: p.polo || 'Defesa', options: [
-      { value: 'Defesa', label: 'Defesa (executado/réu)' },
-      { value: 'Ataque', label: 'Ataque (autor/exequente)' }
+    { label: 'Polo do cliente', name: 'polo', type: 'select',
+      // Migração label: aceita valores legacy 'Defesa'/'Ataque' como default
+      // (auto-mapeados via _normalizarPolo no save), exibe nomenclatura nova.
+      default: _normalizarPolo(p.polo) || 'Passivo', options: [
+      { value: 'Ativo', label: 'Ativo (autor/exequente)' },
+      { value: 'Passivo', label: 'Passivo (réu/executado)' }
     ]},
 
     { label: 'Parte adversa — Nome', name: 'advNome', default: p.advNome || '', placeholder: 'opcional, se DJEN não extraiu' },
     { label: 'Parte adversa — CPF/CNPJ', name: 'advDoc', default: p.advDoc || '', placeholder: 'opcional' },
-    { label: 'Advogado adverso — Nome', name: 'advLawyer', default: p.advLawyer || '', placeholder: 'opcional' },
-    { label: 'Advogado adverso — OAB', name: 'advLawyerOab', default: p.advLawyerOab || '', placeholder: 'ex: GO 12345' },
+    { label: 'Advogado adverso', name: 'advLawyer',
+      // Migração: junta advLawyer + advLawyerOab legacy num campo só.
+      default: _mergeAdvLawyer(p.advLawyer, p.advLawyerOab),
+      placeholder: 'ex: João Silva · OAB/GO 12345' },
 
     { label: 'Tribunal/Vara', name: 'court', default: p.court || '', placeholder: 'ex: TJGO 1ª Vara · TRF1 7ª Turma' },
-    { label: 'Comarca', name: 'comarca', default: p.comarca || '', placeholder: 'ex: Goiânia/GO' },
     { label: 'Sistema', name: 'sistema', type: 'select', default: p.sistema || '', options: SISTEMA_OPTIONS },
 
     { label: 'Área', name: 'area', type: 'select', default: p.area || 'Tributário', options: AREA_OPTIONS },
@@ -4414,15 +4444,6 @@ async function editProcessFlow() {
       { value: 'medio', label: 'Médio · perda parcial' },
       { value: 'alto', label: 'Alto · perda provável' }
     ]},
-
-    { label: 'Honorários — tipo', name: 'honTipo', type: 'select', default: p.honTipo || '', options: [
-      { value: '', label: '— não definido —' },
-      { value: 'fixo', label: 'Fixo (R$)' },
-      { value: 'percentual', label: 'Percentual sobre valor da causa' },
-      { value: 'exito', label: 'Êxito (success fee)' },
-      { value: 'misto', label: 'Misto' }
-    ]},
-    { label: 'Honorários — valor', name: 'honValor', default: p.honValor || '', placeholder: 'ex: R$ 5.000 · 20% · misto' },
 
     { label: 'Advogado responsável (titular)', name: 'advogadoResponsavel', type: 'select', default: p.advogadoResponsavel || defaultAdvogado(me), options: ADVOGADO_OPTIONS },
     { label: 'Advogado suplente (cobertura de ausência)', name: 'advogadoSuplente', type: 'select', default: p.advogadoSuplente || '', options: ADVOGADO_OPTIONS }
@@ -4596,19 +4617,20 @@ async function editProcessFlow() {
           const match = _matchSelectOption(poloSelEl, polo);
           if (match) _setByName('polo', match);
         }
-        // Parte adversa: extrai do polo OPOSTO ao do cliente. Polo "Defesa"
-        // significa cliente no passivo → adversária no ATIVO; "Ataque"
-        // significa cliente no ativo → adversária no PASSIVO.
-        const meuPolo = _getByName('polo') || p.polo || 'Defesa';
-        const poloAdverso = meuPolo === 'Defesa' ? 'AT' : 'PA';
+        // Parte adversa: extrai do polo OPOSTO ao do cliente.
+        // Nova nomenclatura: 'Passivo' (cliente é réu → adversária ATIVO)
+        // ou 'Ativo' (cliente é autor → adversária PASSIVO). Tolera legacy
+        // 'Defesa'/'Ataque' via _normalizarPolo.
+        const meuPolo = _normalizarPolo(_getByName('polo') || p.polo) || 'Passivo';
+        const poloAdverso = meuPolo === 'Passivo' ? 'AT' : 'PA';
         const partesAdversas = (data.partes || []).filter(x => x.polo === poloAdverso);
         if (partesAdversas.length) {
           if (!_getByName('advNome')) _setByName('advNome', partesAdversas[0].nome || '');
           if (!_getByName('advDoc')) _setByName('advDoc', partesAdversas[0].cpfCnpj || '');
           const advAdv = partesAdversas[0]?.advogados?.[0];
-          if (advAdv) {
-            if (!_getByName('advLawyer')) _setByName('advLawyer', advAdv.nome || '');
-            if (!_getByName('advLawyerOab')) _setByName('advLawyerOab', advAdv.oab || '');
+          if (advAdv && !_getByName('advLawyer')) {
+            // Campo único combina nome + OAB ("João Silva · OAB/GO 12345")
+            _setByName('advLawyer', _mergeAdvLawyer(advAdv.nome, advAdv.oab));
           }
         }
         // Valor da causa
@@ -4648,19 +4670,22 @@ async function editProcessFlow() {
 
   const r = await modalPromise;
   if (!r) return;
+  // Destructuring atualizado pra nova ordem dos fields:
+  // 0:name, 1:cnj, 2:clienteIds, 3:polo, 4:advNome, 5:advDoc, 6:advLawyer,
+  // 7:court, 8:sistema, 9:area, 10:type, 11:fase, 12:valorCausa,
+  // 13:dataDistribuicao, 14:risco, 15:advogadoResponsavel, 16:advogadoSuplente,
+  // 17+: tributário (condicional)
   const [
     name, cnj,
-    clienteIds,  // array de FKs (multiselect)
+    clienteIds,
     polo,
-    advNome, advDoc, advLawyer, advLawyerOab,
-    court, comarca, sistema,
+    advNome, advDoc, advLawyer,
+    court, sistema,
     area, type, fase,
     valorCausa, dataDistribuicao,
     risco,
-    honTipo, honValor,
     advogadoResponsavel,
     advogadoSuplente,
-    // Fase B (só presentes se isTributario(p.area) era true ao abrir)
     tipoExec, tributoPrincipal, periodoBase, statusFiscal, garantia, garantiaDetalhe, cdasRaw
   ] = r;
   // Resolve snapshot de nomes dos clientes selecionados. Mantém também os
@@ -4675,13 +4700,13 @@ async function editProcessFlow() {
     clientes: nomesArray,                   // novo: array de nomes snapshot
     clienteId: idsArray[0] || null,         // legacy: 1º do array
     client: nomesArray.join(', ') || null,  // legacy: string concatenada
-    polo,
+    polo: polo || null,                     // 'Ativo' ou 'Passivo' (nova nomenclatura)
     advNome: advNome || null,
     advDoc: advDoc || null,
-    advLawyer: advLawyer || null,
-    advLawyerOab: advLawyerOab || null,
+    advLawyer: advLawyer || null,           // agora inclui nome + OAB juntos no mesmo campo
+    advLawyerOab: null,                     // legacy: limpa pra evitar duplicação visual em display
     court: court || null,
-    comarca: comarca || null,
+    comarca: null,                          // campo removido do form — limpa pra coerência
     sistema: sistema || null,
     area,
     type: type || null,
@@ -4689,8 +4714,8 @@ async function editProcessFlow() {
     valorCausa: valorCausa === '' ? null : Number(valorCausa),
     dataDistribuicao: dataDistribuicao || null,
     risco: risco || null,
-    honTipo: honTipo || null,
-    honValor: honValor || null,
+    honTipo: null,                          // campo removido do form
+    honValor: null,                         // campo removido do form
     advogadoResponsavel: advogadoResponsavel || null,
     advogadoSuplente: advogadoSuplente || null
   });
@@ -14156,8 +14181,8 @@ function _mniSugerirPolo(data, cpfConsultante) {
     for (const adv of (parte.advogados || [])) {
       const advCpfNorm = String(adv.cpf || '').replace(/\D/g, '');
       if (advCpfNorm && advCpfNorm === cpfNorm) {
-        if (parte.polo === 'AT') return 'Ataque';
-        if (parte.polo === 'PA') return 'Defesa';
+        if (parte.polo === 'AT') return 'Ativo';   // antes: 'Ataque'
+        if (parte.polo === 'PA') return 'Passivo'; // antes: 'Defesa'
         return null;
       }
     }
@@ -17017,7 +17042,9 @@ async function djenEnrichProcessFromPublication(processId, pub) {
   // Se cliente ainda não foi preenchido, sugere a partir do polo correto
   // (assumindo que o cliente é do polo da defesa ou ataque conforme cadastrado)
   if (!proc.client && proc.polo) {
-    const meuPolo = proc.polo === 'Ataque' ? partes.poloAtivo : partes.poloPassivo;
+    // Tolera nomenclatura nova ('Ativo'/'Passivo') e legacy ('Ataque'/'Defesa')
+    const _pn = _normalizarPolo(proc.polo);
+    const meuPolo = _pn === 'Ativo' ? partes.poloAtivo : partes.poloPassivo;
     if (meuPolo && meuPolo.length) {
       proc.client = meuPolo[0]; // primeira parte do nosso polo
       changed = true;
@@ -17074,7 +17101,9 @@ async function djenReExtractParties(processId) {
 
   // Se cliente vazio e temos polo, tenta inferir
   if (!proc.client && proc.polo) {
-    const meuPolo = proc.polo === 'Ataque' ? proc.partes.ativo : proc.partes.passivo;
+    // Tolera nomenclatura nova ('Ativo'/'Passivo') e legacy ('Ataque'/'Defesa')
+    const _pn = _normalizarPolo(proc.polo);
+    const meuPolo = _pn === 'Ativo' ? proc.partes.ativo : proc.partes.passivo;
     if (meuPolo && meuPolo.length) {
       proc.client = meuPolo[0];
     }

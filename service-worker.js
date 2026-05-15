@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.50.4 (FIX preenchimento MNI: comarca, sistema case-insensitive, parte adversa)
-const CACHE_NAME = 'uc-juridico-v6-50-4';
+// Service Worker — UC Jurídico v6.51.0 (Editar processo: remove honorários/comarca, polo Ativo/Passivo, adv adverso único)
+const CACHE_NAME = 'uc-juridico-v6-51-0';
 const APP_SHELL = [
   './',
   './index.html',
