@@ -14377,9 +14377,27 @@ function _mniMakeLoadingModal(codigo, cnj) {
       <div style="display:inline-block;border:3px solid #d4cfc0;border-top-color:var(--uc-gold);border-radius:50%;width:32px;height:32px;animation:spin 0.8s linear infinite;margin-bottom:12px;"></div>
       <h3 class="modal-title" style="margin: 0 0 4px;">Consultando ${escapeHtml(codigo)}…</h3>
       <p class="help-text" style="margin: 0 0 8px;">${escapeHtml(cnj || '')}</p>
-      <p class="help-text" style="font-size: 11px;">SOAP/MNI 2.2.2 via Cloudflare Worker · pode levar 5–30s</p>
+      <p class="help-text" style="font-size: 13px; font-weight: 600; color: var(--uc-gold); margin: 12px 0;">
+        <span id="_mniLoadingTimer">0</span>s decorridos
+      </p>
+      <p class="help-text" style="font-size: 11px;" id="_mniLoadingHint">SOAP/MNI 2.2.2 via Cloudflare Worker · típico 5–15s</p>
       <style>@keyframes spin { to { transform: rotate(360deg); } }</style>
     </div>`;
+  // Inicia contador + atualiza dica conforme decorre — feedback visual pro
+  // user saber que NÃO travou (Projudi pode demorar 30-60s em horários
+  // ruins). Cleanup automático quando modal sai do DOM.
+  const t0 = Date.now();
+  const timer = setInterval(() => {
+    const timerEl = modal.querySelector('#_mniLoadingTimer');
+    const hintEl = modal.querySelector('#_mniLoadingHint');
+    if (!timerEl || !modal.isConnected) { clearInterval(timer); return; }
+    const elapsed = Math.floor((Date.now() - t0) / 1000);
+    timerEl.textContent = String(elapsed);
+    if (hintEl) {
+      if (elapsed > 30) hintEl.innerHTML = '⚠ <span style="color:var(--uc-amber);">Projudi está engasgado hoje. Vou aguardar mais um pouco antes de cancelar.</span>';
+      else if (elapsed > 15) hintEl.innerHTML = 'Processos grandes (muitos movimentos) podem levar até 45s.';
+    }
+  }, 1000);
   return modal;
 }
 

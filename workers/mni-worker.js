@@ -1,4 +1,7 @@
 // UC Jurídico — MNI Worker genérico (multi-tribunal)
+// Versão: 0.9.3 · timeout (45s sem docs, 90s com) + timing detalhado
+//   - signal: AbortSignal.timeout() pra falhar rápido quando Projudi engasga
+//   - tempoSoapMs / tempoParseMs / elapsedMs no JSON pra diagnóstico
 // Versão: 0.9.2 · parser de documentos calibrado pro TJGO Projudi
 //   - <documento> usa atributo `movimento="ID"` (não <vinculacaoDocumento>)
 //   - <outroParametro nome="NomeArquivo"> tem o filename real
@@ -144,7 +147,7 @@ export default {
       const validados = codigos.filter(c => TRIBUNAIS_REGISTRY[c].validado);
       const naoSuportados = codigos.filter(c => TRIBUNAIS_REGISTRY[c].naoSuportado);
       return json({
-        worker: 'uc-mni', versao: '0.9.2',
+        worker: 'uc-mni', versao: '0.9.3',
         total: codigos.length,
         validados, naoSuportados,
         operacoes: ['consultarProcesso', 'health', 'listarTribunais', 'detectarPorCnj']
@@ -267,30 +270,68 @@ async function consultarProcesso(conf, endpoint, { cnj, cpf, senha, debug, inclu
     <incluirDocumentos>${flagDocs}</incluirDocumentos>
   `);
 
+  // Timeout: incluirDocumentos=true pode levar 30-60s pro Projudi devolver
+  // a resposta inteira; sem docs, esperamos 5-15s típicos. Damos uma margem
+  // generosa mas evitamos travar o user indefinidamente quando o tribunal
+  // está engasgado. AbortError vira mensagem clara abaixo.
   const t0 = Date.now();
-  const resp = await fetch(endpoint, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'text/xml; charset=utf-8',
-      'SOAPAction': conf.soapAction === '' || conf.soapAction == null
-        ? '""'
-        : `"${conf.soapAction}"`,
-      'User-Agent': 'UC-Juridico-MNI/0.5'
-    },
-    body: envelope
-  });
-  const elapsed = Date.now() - t0;
+  const timeoutMs = incluirDocumentos ? 90000 : 45000;
+  let resp;
+  try {
+    resp = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'text/xml; charset=utf-8',
+        'SOAPAction': conf.soapAction === '' || conf.soapAction == null
+          ? '""'
+          : `"${conf.soapAction}"`,
+        'User-Agent': 'UC-Juridico-MNI/0.5'
+      },
+      body: envelope,
+      signal: AbortSignal.timeout(timeoutMs)
+    });
+  } catch (e) {
+    const elapsed = Date.now() - t0;
+    if (e?.name === 'TimeoutError' || e?.name === 'AbortError') {
+      return {
+        sucesso: false,
+        erro: 'timeout',
+        mensagem: `Timeout após ${(timeoutMs/1000).toFixed(0)}s. O ${conf.codigo || 'tribunal'} demorou demais pra responder (provável congestionamento). Tente de novo em alguns minutos.`,
+        elapsedMs: elapsed
+      };
+    }
+    return {
+      sucesso: false,
+      erro: 'rede',
+      mensagem: String(e?.message || e),
+      elapsedMs: elapsed
+    };
+  }
   const text = await resp.text();
+  const tDownload = Date.now();
+  const tempoSoapMs = tDownload - t0;
 
   if (!resp.ok) {
-    return { sucesso: false, erro: 'http_' + resp.status, httpStatus: resp.status, elapsedMs: elapsed, raw: text.slice(0, 4000) };
+    return { sucesso: false, erro: 'http_' + resp.status, httpStatus: resp.status, elapsedMs: tempoSoapMs, raw: text.slice(0, 4000) };
   }
   const fault = extractFault(text);
   if (fault) {
-    return { sucesso: false, erro: 'soap_fault', mensagem: fault, elapsedMs: elapsed, raw: text.slice(0, 4000) };
+    return { sucesso: false, erro: 'soap_fault', mensagem: fault, elapsedMs: tempoSoapMs, raw: text.slice(0, 4000) };
   }
   const parsed = parseConsultarProcesso(text);
-  const result = { sucesso: parsed.sucesso !== false, elapsedMs: elapsed, ...parsed, rawSize: text.length };
+  const tempoParseMs = Date.now() - tDownload;
+  // Timing detalhado pra diagnosticar onde fica o gargalo:
+  //   tempoSoapMs   = roundtrip + download da resposta XML (Projudi + rede)
+  //   tempoParseMs  = parser regex local (Worker CPU)
+  //   elapsedMs     = total (compat com clientes antigos)
+  const result = {
+    sucesso: parsed.sucesso !== false,
+    elapsedMs: tempoSoapMs + tempoParseMs,
+    tempoSoapMs,
+    tempoParseMs,
+    rawSize: text.length,
+    ...parsed
+  };
   if (debug) result.rawXml = text;
   return result;
 }

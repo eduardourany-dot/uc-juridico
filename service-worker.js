@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.50.1 (config: *.pages.dev → staging Firebase pra sandbox isolado de prod)
-const CACHE_NAME = 'uc-juridico-v6-50-1';
+// Service Worker — UC Jurídico v6.50.2 (MNI: loading modal com timer + worker v0.9.3 timeout)
+const CACHE_NAME = 'uc-juridico-v6-50-2';
 const APP_SHELL = [
   './',
   './index.html',
