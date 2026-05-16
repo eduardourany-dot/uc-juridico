@@ -417,6 +417,40 @@ const RemoteDB = {
       await cascadeSoftDelete_(col, 'processId', id);
     }
   },
+  // Query restrita por clienteId — usada pelo bootApp do cliente.
+  // Firestore não aceita OR — fazemos 2 queries (campo legado `clienteId`
+  // e campo novo `clienteIds[]`) e mergemos por id. Security Rules
+  // permitem cliente ler apenas docs onde o campo bate.
+  async getProcessosByClienteId(clienteId) {
+    if (!clienteId) return [];
+    const cid = String(clienteId);
+    const [s1, s2] = await Promise.all([
+      getDocs(query(collection(db, 'processos'), where('clienteId', '==', cid))),
+      getDocs(query(collection(db, 'processos'), where('clienteIds', 'array-contains', cid)))
+    ]);
+    const map = new Map();
+    s1.forEach(d => { const p = d.data(); if (!p.deletedAt) map.set(p.id, p); });
+    s2.forEach(d => { const p = d.data(); if (!p.deletedAt) map.set(p.id, p); });
+    return Array.from(map.values());
+  },
+  // Compromissos filtrados por clienteId (rule permite cliente ler só os dele)
+  async getCompromissosByClienteIdRemote(clienteId) {
+    if (!clienteId) return [];
+    const snap = await getDocs(query(collection(db, 'compromissos'),
+      where('clienteId', '==', String(clienteId))));
+    const out = [];
+    snap.forEach(d => { const v = d.data(); if (!v.deletedAt) out.push(v); });
+    return out;
+  },
+  // Honorários filtrados por clienteId (rule permite cliente ler só os dele)
+  async getHonorariosByClienteIdRemote(clienteId) {
+    if (!clienteId) return [];
+    const snap = await getDocs(query(collection(db, 'honorarios'),
+      where('clienteId', '==', String(clienteId))));
+    const out = [];
+    snap.forEach(d => { const v = d.data(); if (!v.deletedAt) out.push(v); });
+    return out;
+  },
 
   // Eventos
   async getEventsByProcess(pid) {

@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.57.2 (limpeza completa de DataJud: bloco principal + handlers + settings + backup)
-const CACHE_NAME = 'uc-juridico-v6-57-2';
+// Service Worker — UC Jurídico v6.58.0 (Firestore Security Rules estritas por role + app cliente migrado pra queries Firestore)
+const CACHE_NAME = 'uc-juridico-v6-58-0';
 const APP_SHELL = [
   './',
   './index.html',

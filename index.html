@@ -17936,17 +17936,19 @@ async function bootApp() {
     document.body.classList.add('viewer-mode');
     _viewerInitHideSweep();
 
-    // Cliente mode: além do read-only, FILTRA dados pra mostrar só processos
-    // vinculados ao clienteId do user. Wraps em DB.getAll*/get* aplicam o
-    // filtro antes do retorno — todas as telas reusam os mesmos call sites
-    // e ficam automaticamente filtradas.
+    // Cliente mode: além do read-only, SUBSTITUI métodos DB.getAll*/get*
+    // por queries Firestore com where(clienteId == X). Isso é necessário
+    // pelas Security Rules: cliente não pode ler collections inteiras —
+    // só docs onde o clienteId bate. getDocs sem filter daria
+    // permission-denied. Internos (eventos, prazos, notas, jurisprudência,
+    // djen, comunicações, petições, financeiro, settings) ficam bloqueados
+    // pra cliente — wraps retornam [] direto sem tocar no Firestore.
     const _me = window.UC_Auth?.getUser?.() || {};
     if (_me.role === 'cliente' && _me.clienteId) {
       document.body.classList.add('cliente-mode');
       const meuClienteId = _me.clienteId;
 
-      // Predicate: processo pertence ao cliente atual?
-      // Aceita schema novo (p.clienteIds: []) e legacy (p.clienteId: string).
+      // Predicate local (usado em getProcess single — depois do read OK)
       const _proCliente = (p) => {
         if (!p) return false;
         if (Array.isArray(p.clienteIds) && p.clienteIds.includes(meuClienteId)) return true;
@@ -17954,76 +17956,105 @@ async function bootApp() {
         return false;
       };
 
-      // Wrap getAllProcesses
-      const _origGetAllProcesses = DB.getAllProcesses.bind(DB);
-      DB.getAllProcesses = async () => (await _origGetAllProcesses()).filter(_proCliente);
+      // Processos: query Firestore com where(clienteId / clienteIds)
+      DB.getAllProcesses = async () => {
+        try { return await DB.getProcessosByClienteId(meuClienteId); }
+        catch (e) { console.warn('[cliente] getAllProcesses falhou', e); return []; }
+      };
 
-      // Wrap getProcess(id) — devolve null se não pertencer (404 pra rota tentando abrir)
+      // getProcess(id) — read direto (rule libera SE clienteId bate; senão null)
       const _origGetProcess = DB.getProcess.bind(DB);
       DB.getProcess = async (id) => {
-        const p = await _origGetProcess(id);
-        return p && _proCliente(p) ? p : null;
+        try {
+          const p = await _origGetProcess(id);
+          return p && _proCliente(p) ? p : null;
+        } catch (e) {
+          // permission-denied = não pertence ao cliente
+          return null;
+        }
       };
 
-      // Cache local dos processIds permitidos (TTL 2 min) — evita refetch
-      // a cada call de getAllDeadlines/getAllCompromissos/etc.
-      let _allowedIdsCache = null;
-      let _allowedIdsAt = 0;
-      const _ALLOWED_TTL = 2 * 60 * 1000;
-      const _getAllowedIds = async () => {
-        if (_allowedIdsCache && (Date.now() - _allowedIdsAt < _ALLOWED_TTL)) return _allowedIdsCache;
-        _allowedIdsCache = new Set((await DB.getAllProcesses()).map(p => p.id));
-        _allowedIdsAt = Date.now();
-        return _allowedIdsCache;
-      };
-
-      // Wrap listas que dependem de processId
-      const _origGetAllDeadlines = DB.getAllDeadlines.bind(DB);
-      DB.getAllDeadlines = async () => {
-        const ids = await _getAllowedIds();
-        return (await _origGetAllDeadlines()).filter(d => ids.has(d.processId));
-      };
-
-      if (typeof DB.getAllCompromissos === 'function') {
-        const _origGetAllCompromissos = DB.getAllCompromissos.bind(DB);
+      // Compromissos: query Firestore com where(clienteId)
+      if (typeof DB.getCompromissosByClienteIdRemote === 'function') {
         DB.getAllCompromissos = async () => {
-          const ids = await _getAllowedIds();
-          return (await _origGetAllCompromissos()).filter(c => ids.has(c.processoId));
+          try { return await DB.getCompromissosByClienteIdRemote(meuClienteId); }
+          catch (e) { console.warn('[cliente] getAllCompromissos falhou', e); return []; }
         };
       }
-
-      // Wrap métodos por-processo: bloqueia retorno se pid não autorizado
-      const _origGetEventsByProcess = DB.getEventsByProcess.bind(DB);
-      DB.getEventsByProcess = async (pid) => {
-        const ids = await _getAllowedIds();
-        if (!ids.has(pid)) return [];
-        return _origGetEventsByProcess(pid);
-      };
-
-      const _origGetDeadlinesByProcess = DB.getDeadlinesByProcess.bind(DB);
-      DB.getDeadlinesByProcess = async (pid) => {
-        const ids = await _getAllowedIds();
-        if (!ids.has(pid)) return [];
-        return _origGetDeadlinesByProcess(pid);
-      };
-
       if (typeof DB.getCompromissosByProcess === 'function') {
-        const _origGetCompromissosByProcess = DB.getCompromissosByProcess.bind(DB);
         DB.getCompromissosByProcess = async (pid) => {
-          const ids = await _getAllowedIds();
-          if (!ids.has(pid)) return [];
-          return _origGetCompromissosByProcess(pid);
+          // Cliente só vê compromissos próprios; filtra por processo
+          const todos = await DB.getAllCompromissos();
+          return todos.filter(c => c.processoId === pid);
         };
       }
 
-      // getAllClientes: cliente só vê o próprio doc (pra preencher próprio
-      // perfil em telas que mostram dados de cliente)
-      const _origGetAllClientes = DB.getAllClientes.bind(DB);
+      // Honorários: query Firestore com where(clienteId)
+      if (typeof DB.getHonorariosByClienteIdRemote === 'function') {
+        DB.getAllHonorarios = async () => {
+          try { return await DB.getHonorariosByClienteIdRemote(meuClienteId); }
+          catch (e) { console.warn('[cliente] getAllHonorarios falhou', e); return []; }
+        };
+        DB.getHonorariosByCliente = async (_cid) => DB.getAllHonorarios();
+        DB.getHonorariosByProcess = async (pid) => {
+          const todos = await DB.getAllHonorarios();
+          return todos.filter(h =>
+            h.processoId === pid ||
+            (Array.isArray(h.processosCobertos) && h.processosCobertos.includes(pid))
+          );
+        };
+      }
+
+      // Clientes: cliente vê só o próprio doc (rule libera só esse id)
       DB.getAllClientes = async () => {
-        return (await _origGetAllClientes()).filter(c => c.id === meuClienteId);
+        try {
+          const c = await getById_('clientes', meuClienteId);
+          return c ? [c] : [];
+        } catch (e) { console.warn('[cliente] getAllClientes falhou', e); return []; }
       };
 
-      console.warn('[cliente-mode] filtros aplicados pra clienteId =', meuClienteId);
+      // Coleções INTERNAS bloqueadas pra cliente nas rules → retornar [] direto
+      // (evita 100+ permission-denied no console).
+      const _empty = async () => [];
+      const _emptyByPid = async (_pid) => [];
+      DB.getAllDeadlines = _empty;
+      DB.getDeadlinesByProcess = _emptyByPid;
+      DB.getEventsByProcess = _emptyByPid;
+      DB.getNotesByProcess = _emptyByPid;
+      DB.getJurisprudenceByProcess = _emptyByPid;
+      DB.getDjenPublicationsByProcess = _emptyByPid;
+      DB.getAllDjenPublications = _empty;
+      DB.getAllComunicacoes = _empty;
+      DB.getComunicacoesByCliente = _emptyByPid;
+      DB.getAllPeticoes = _empty;
+      DB.getPeticoesByProcess = _emptyByPid;
+      DB.getAllPeticaoModelos = _empty;
+      DB.getAllBancos = _empty;
+      DB.getAllCartoes = _empty;
+      DB.getAllCategoriasFin = _empty;
+      DB.getAllTransacoes = _empty;
+      DB.getTransacoesByProcess = _emptyByPid;
+      DB.getAllRecorrencias = _empty;
+
+      // Settings: rule bloqueia settings/* pra cliente (fcmTokens contém
+      // tokens de todos os users). Stub local pra não inundar console.
+      // Preferências do app (tema, etc.) ficam em localStorage pra cliente.
+      DB.getSetting = async (key, defaultVal) => {
+        try {
+          // Tema é único setting que cliente precisa persistir entre sessões
+          if (key === 'theme') {
+            return localStorage.getItem('uc_cliente_theme') || defaultVal || 'light';
+          }
+        } catch (_) {}
+        return defaultVal === undefined ? null : defaultVal;
+      };
+      DB.setSetting = async (key, value) => {
+        try {
+          if (key === 'theme') localStorage.setItem('uc_cliente_theme', String(value));
+        } catch (_) {}
+      };
+
+      console.warn('[cliente-mode] queries restritas a clienteId =', meuClienteId);
     }
   }
 
