@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.62.6 (Calculadora Fiscal: decomposição da cobrança Fazenda — Fazenda × Devido)
-const CACHE_NAME = 'uc-juridico-v6-62-6';
+// Service Worker — UC Jurídico v6.62.7 (Calculadora: memória exportada inclui decomposição comparativa Fazenda × Devido)
+const CACHE_NAME = 'uc-juridico-v6-62-7';
 const APP_SHELL = [
   './',
   './index.html',
