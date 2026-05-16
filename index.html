@@ -11565,6 +11565,7 @@ function _calcExportarMemoria() {
 
   const brl = v => 'R$ ' + (v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const indiceLabel = r.indiceLabel || '—';
+  const ehFiscal = _calcState.tab === 'fiscal';
 
   // Resolve processo/cliente vinculados (se houver)
   const proc = _calcState.processoId ? (_calcState._processosCache || []).find(p => p.id === _calcState.processoId) : null;
@@ -11761,6 +11762,82 @@ ${r.parciais.map((p, idx) => {
   `;
 }).join('')}
 `}
+
+${ehFiscal ? `
+<h2>Anexo · Fundamentação legal</h2>
+<p style="font-size:11pt;line-height:1.5;">Os parâmetros aplicados neste cálculo decorrem dos seguintes
+dispositivos legais e da jurisprudência consolidada dos Tribunais Superiores, vinculantes em matéria
+tributária. Apresenta-se a seguir o repositório argumentativo pertinente à defesa.</p>
+
+<h3>1. Limitação constitucional — Teto da SELIC (Temas 1062 e 1217 do STF)</h3>
+${r.esfera === 'estadual' ? `
+<p style="font-size:10.5pt;line-height:1.5;"><strong>Tema 1062 — STF (Repercussão Geral · ARE 1216078):</strong>
+"Os estados-membros e o Distrito Federal podem legislar sobre índices de correção monetária e taxas
+de juros de mora incidentes sobre seus créditos fiscais, limitando-se, porém, aos percentuais
+estabelecidos pela União para os mesmos fins." Aplicação: <strong>SELIC como teto constitucional</strong>
+para créditos estaduais. Acórdão paradigma — Lei Estadual SP 6.374/89 declarada inconstitucional na
+parte que excedia a SELIC.</p>
+` : r.esfera === 'municipal' ? `
+<p style="font-size:10.5pt;line-height:1.5;"><strong>Tema 1217 — STF (Repercussão Geral · RE 1346152):</strong>
+"Os municípios não podem adotar índices de correção monetária e taxas de juros de mora em percentuais
+que excedam a SELIC praticada pela União para os mesmos fins." A vedação aplica-se com ainda maior
+rigor aos municípios, pois a Constituição não lhes confere competência concorrente (CF art. 24),
+limitando sua atuação suplementar nos termos do art. 30, II. Acórdão paradigma — Município de São
+Paulo × Pro Manager (ISS 2017).</p>
+` : `
+<p style="font-size:10.5pt;line-height:1.5;"><strong>Tema 1062 STF (estados) e Tema 1217 STF (municípios):</strong>
+Estabelecem que estados, DF e municípios não podem adotar índices de correção e juros que excedam a
+SELIC praticada pela União, sob pena de inconstitucionalidade. Crédito federal: aplica-se a SELIC
+unicamente, na forma do art. 39 §4º da Lei 9.250/95.</p>
+`}
+
+<h3>2. CTN — Código Tributário Nacional</h3>
+<table>
+  <tr><th width="100">Dispositivo</th><th>Texto e aplicação</th></tr>
+  <tr><td><strong>Art. 142</strong></td><td>Compete privativamente à autoridade administrativa constituir o crédito tributário pelo lançamento (definição da hipótese de incidência, do sujeito passivo e do montante).</td></tr>
+  <tr><td><strong>Art. 161 §1º</strong></td><td>Os juros de mora, salvo disposição legal em sentido diverso, serão calculados à taxa de 1% (um por cento) ao mês. <em>Limitação: Temas 1062/1217 STF (SELIC como teto).</em></td></tr>
+  <tr><td><strong>Art. 173, I</strong></td><td>O direito de a Fazenda Pública constituir o crédito tributário extingue-se em 5 anos contados do primeiro dia do exercício seguinte àquele em que o lançamento poderia ter sido efetuado. <em>(Prazo decadencial)</em></td></tr>
+  <tr><td><strong>Art. 174</strong></td><td>A ação para a cobrança do crédito tributário prescreve em 5 anos, contados da data da sua constituição definitiva. <em>(Prazo prescricional)</em></td></tr>
+</table>
+
+<h3>3. Súmulas vinculantes — STJ</h3>
+<table>
+  <tr><th width="90">Súmula</th><th>Enunciado</th></tr>
+  <tr><td><strong>106/STJ</strong></td><td>Proposta a ação no prazo fixado para o seu exercício, a demora na citação, por motivos inerentes ao mecanismo da Justiça, não justifica o acolhimento da arguição de prescrição ou decadência.</td></tr>
+  <tr><td><strong>168/TFR</strong></td><td>O encargo de 20% do Decreto-lei 1.025/69 é sempre devido nas execuções fiscais da União e substitui, nos embargos, a condenação do devedor em honorários advocatícios. <em>(Recepcionada e aplicada pelo STJ)</em></td></tr>
+  <tr><td><strong>314/STJ</strong></td><td>Em execução fiscal, não localizados bens penhoráveis, suspende-se o processo por um ano, findo o qual se inicia o prazo da prescrição quinquenal intercorrente. <em>(Hoje aplicado conforme Lei 14.195/2021 + Tema 566 STJ)</em></td></tr>
+  <tr><td><strong>392/STJ</strong></td><td>A Fazenda Pública pode substituir a CDA até a prolação da sentença de embargos, quando se tratar de correção de erro material ou formal, <strong>vedada a modificação do sujeito passivo da execução</strong>.</td></tr>
+  <tr><td><strong>555/STJ</strong></td><td>Quando não houver declaração do débito, o prazo decadencial quinquenal para o Fisco constituir o crédito tributário conta-se exclusivamente na forma do art. 173, I, do CTN.</td></tr>
+  <tr><td><strong>622/STJ</strong></td><td>A notificação do auto de infração faz cessar a contagem da decadência para a constituição do crédito tributário; exaurida a instância administrativa com o decurso do prazo para a impugnação ou com a notificação de seu julgamento definitivo e esgotado o prazo concedido pela Administração para o pagamento voluntário, inicia-se o prazo prescricional para a cobrança judicial.</td></tr>
+</table>
+
+<h3>4. Defesa por excesso de execução — CPC art. 525, §1º, V</h3>
+<p style="font-size:10.5pt;line-height:1.5;">Nos termos do art. 525, §1º, V, do CPC, é cabível a impugnação ao
+cumprimento de sentença/embargos à execução com fundamento em <strong>excesso de execução</strong>, devendo o
+embargante declarar de imediato o valor que entende correto, sob pena de rejeição liminar da
+alegação. ${r.cenarioFazenda && r.cenarioFazenda.diferenca > 0 ?
+`A divergência apontada nesta memória — ${brl(r.cenarioFazenda.diferenca)} de excesso identificado —
+serve de fundamento direto à defesa, com decomposição por componente discriminada.` : ''}</p>
+
+${r.aplicarDL1025 ? `
+<h3>5. Encargo legal — Decreto-Lei 1.025/69</h3>
+<p style="font-size:10.5pt;line-height:1.5;"><strong>DL 1.025/69 (art. 1º):</strong> aplicação do encargo legal de
+${r.dl1025Taxa}% sobre dívida ativa da União inscrita pela PGFN. Constitucionalidade confirmada
+pelo STF no <strong>Tema 969 (RE 1029007)</strong>, com tese: "É constitucional a previsão do encargo de
+20% prevista no DL 1.025/69."</p>
+` : ''}
+
+${r.jurosTipo === 'legal_cc406' ? `
+<h3>${r.aplicarDL1025 ? '6' : '5'}. Taxa legal — Lei 14.905/2024 (CC art. 406)</h3>
+<p style="font-size:10.5pt;line-height:1.5;"><strong>Código Civil, art. 406 §1º (com redação dada pela Lei
+14.905/2024):</strong> "A taxa legal corresponderá à taxa referencial do Sistema Especial de Liquidação
+e de Custódia (Selic), deduzido o índice de atualização monetária de que trata o parágrafo único do
+art. 389 deste Código." §3º: "Caso a taxa legal apresente resultado negativo, este será considerado
+igual a 0 (zero) para efeito de cálculo dos juros no período de referência." Aplicação adotada nesta
+memória: para cada mês do período, taxa = max(0, SELIC mensal − IPCA mensal), somada e aplicada
+como juros simples.</p>
+` : ''}
+` : ''}
 
 <div class="box">
   <strong>Fontes:</strong> Séries históricas da API pública do Banco Central do Brasil (BCB) — sistema SGS.
