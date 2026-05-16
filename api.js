@@ -495,6 +495,12 @@ const RemoteDB = {
   // Cálculos monetários (atualização monetária, juros, multa, honorários)
   async getAllCalculos() { return await getAll_('calculos'); },
   async getCalculo(id) { return await getById_('calculos', id); },
+  async getCalculosByProcess(pid) {
+    return (await getAll_('calculos')).filter(c => c.processoId === pid);
+  },
+  async getCalculosByCliente(cid) {
+    return (await getAll_('calculos')).filter(c => c.clienteId === cid);
+  },
   async saveCalculo(c) { return await upsert_('calculos', c); },
   async deleteCalculo(id) { return await softDelete_('calculos', id); },
   async deleteCliente(id) { return await softDelete_('clientes', id); },

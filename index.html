@@ -3248,6 +3248,8 @@ async function renderProcessDetail() {
   try { compromissos = await DB.getCompromissosByProcess(p.id); } catch (e) { console.warn('compromissos não disponíveis', e); }
   let peticoes = [];
   try { peticoes = await DB.getPeticoesByProcess(p.id); } catch (e) { console.warn('peticoes não disponíveis', e); }
+  let calculos = [];
+  try { calculos = await DB.getCalculosByProcess(p.id); } catch (e) { console.warn('calculos não disponíveis', e); }
 
   // Update counts (skip pra read-only — não pode escrever; eventCount/
   // noteCount são metadados que continuam corretos derivados em runtime).
@@ -3258,7 +3260,7 @@ async function renderProcessDetail() {
     try { await DB.saveProcess(p); } catch (e) { console.warn('saveProcess (counts) falhou', e); }
   }
 
-  state._processView = { p, events, deadlines, notes, jurisprudence, honorarios, compromissos, peticoes, activeTab: state._processView?.activeTab || 'overview' };
+  state._processView = { p, events, deadlines, notes, jurisprudence, honorarios, compromissos, peticoes, calculos, activeTab: state._processView?.activeTab || 'overview' };
 
   $('appContent').innerHTML = `
     <div class="page-header">
@@ -3285,6 +3287,7 @@ async function renderProcessDetail() {
       <button class="detail-tab ${state._processView.activeTab === 'overview' ? 'active' : ''}" onclick="setProcessTab('overview')">Visão geral</button>
       <button class="detail-tab ${state._processView.activeTab === 'cliente' ? 'active' : ''}" onclick="setProcessTab('cliente')">Cliente</button>
       <button class="detail-tab ${state._processView.activeTab === 'honorarios' ? 'active' : ''}" onclick="setProcessTab('honorarios')">Honorários · ${honorarios.length}</button>
+      ${_isClienteMode() ? '' : `<button class="detail-tab ${state._processView.activeTab === 'calculos' ? 'active' : ''}" onclick="setProcessTab('calculos')">Cálculos · ${calculos.length}</button>`}
       ${_isClienteMode() ? '' : `<button class="detail-tab ${state._processView.activeTab === 'jurisprudence' ? 'active' : ''}" onclick="setProcessTab('jurisprudence')">Jurisprudência · ${jurisprudence.length}</button>`}
       ${_isClienteMode() ? '' : `<button class="detail-tab ${state._processView.activeTab === 'peticoes' ? 'active' : ''}" onclick="setProcessTab('peticoes')">Petições · ${peticoes.length}</button>`}
       ${/* Tabs 'atalho-cards' só aparecem quando ativas (acessadas via clique nos cards da visão geral). */ ''}
@@ -3349,6 +3352,7 @@ async function renderProcessTabContent() {
   else if (activeTab === 'honorarios') c.innerHTML = renderProcessHonorarios(p, honorarios || []);
   else if (activeTab === 'compromissos') c.innerHTML = await renderProcessCompromissos(p, compromissos || []);
   else if (activeTab === 'peticoes') c.innerHTML = renderProcessPeticoes(p, state._processView.peticoes || []);
+  else if (activeTab === 'calculos') c.innerHTML = renderProcessCalculos(p, state._processView.calculos || []);
   else if (activeTab === 'analysis') c.innerHTML = renderProcessAnalysis(p, events, deadlines, jurisprudence);
 }
 
@@ -4067,6 +4071,137 @@ function renderDeadlineRow(d, p, compactInsidePub) {
       </div>
     </div>
   `;
+}
+
+// Renderiza a tab "Cálculos" do detalhe do processo.
+// Lista cálculos vinculados a este processo + botão pra criar um novo
+// (que abre a Calculadora pré-vinculada via processId/clienteId).
+function renderProcessCalculos(p, calculos) {
+  const brl = v => 'R$ ' + (v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const lista = (calculos || []).filter(c => !c.deletedAt).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+
+  return `
+    <div class="card mb-3">
+      <div class="flex justify-between items-center mb-3">
+        <h3 class="font-serif text-lg font-semibold smallcaps" style="color: var(--uc-black);">Cálculos vinculados · ${lista.length}</h3>
+        <button class="btn btn-primary btn-sm" onclick="_calcNovoVinculado('${p.id}')" title="Abre a Calculadora pré-vinculada a este processo">+ Novo cálculo</button>
+      </div>
+
+      ${lista.length === 0 ? `
+        <div class="empty-state">
+          <p class="empty-state-msg">Nenhum cálculo vinculado a este processo. Clique em <strong>+ Novo cálculo</strong> pra abrir a Calculadora já vinculada (processo + cliente).</p>
+        </div>
+      ` : `
+        <table style="width:100%;font-size:13px;border-collapse:collapse;">
+          <thead style="background:var(--uc-cream);font-size:11px;text-transform:uppercase;letter-spacing:0.04em;">
+            <tr>
+              <th style="text-align:left;padding:8px;">Nome</th>
+              <th style="text-align:left;padding:8px;">Salvo em</th>
+              <th style="text-align:left;padding:8px;">Índice</th>
+              <th style="text-align:right;padding:8px;">Lanç.</th>
+              <th style="text-align:right;padding:8px;">Total devido</th>
+              <th style="width:160px;"></th>
+            </tr>
+          </thead>
+          <tbody>
+            ${lista.map(c => {
+              const indiceCurto = (c.resultado?.indiceLabel || '').split(' ')[0] || '—';
+              const nLanc = (c.input?.lancamentos || []).length;
+              const total = c.resultado?.totalGeral || 0;
+              const dt = new Date(c.createdAt || 0);
+              const dtStr = `${String(dt.getDate()).padStart(2,'0')}/${String(dt.getMonth()+1).padStart(2,'0')}/${dt.getFullYear()} ${String(dt.getHours()).padStart(2,'0')}:${String(dt.getMinutes()).padStart(2,'0')}`;
+              return `
+                <tr style="border-bottom:1px solid var(--uc-line-soft);">
+                  <td style="padding:8px;font-weight:500;">${escapeHtml(c.nome || 'sem nome')}</td>
+                  <td style="padding:8px;font-size:12px;color:var(--uc-warm-gray);">${dtStr}</td>
+                  <td style="padding:8px;">${escapeHtml(indiceCurto)}</td>
+                  <td style="padding:8px;text-align:right;">${nLanc}</td>
+                  <td style="padding:8px;text-align:right;font-weight:600;color:var(--uc-green);">${brl(total)}</td>
+                  <td style="padding:8px;text-align:right;white-space:nowrap;">
+                    <button class="btn btn-outline btn-sm" onclick="_calcAbrirCalculoNoModulo('${c.id}')" title="Reabrir na Calculadora" style="padding:4px 10px;font-size:11px;">↗ Abrir</button>
+                    <button class="btn btn-ghost btn-sm" onclick="_calcExcluirCalculoNoProcesso('${c.id}', '${escapeHtml((c.nome || '').replace(/'/g, '\\\''))}')" title="Excluir" style="padding:4px 8px;font-size:11px;color:var(--uc-red);">🗑</button>
+                  </td>
+                </tr>
+              `;
+            }).join('')}
+          </tbody>
+        </table>
+      `}
+    </div>
+  `;
+}
+
+// Abre a Calculadora pré-vinculada ao processo atual.
+// Reseta state pra um cálculo novo + pré-preenche processoId + clienteId.
+function _calcNovoVinculado(processoId) {
+  // Carrega processo pra pegar cliente padrão
+  const proc = state._processView?.p;
+  if (!proc || proc.id !== processoId) {
+    toast('Processo não encontrado', '', 'error');
+    return;
+  }
+  const clienteId = proc.clienteId || (Array.isArray(proc.clienteIds) && proc.clienteIds[0]) || '';
+
+  // Reseta state de cálculo (sem perder caches)
+  const cacheP = _calcState._processosCache;
+  const cacheC = _calcState._clientesCache;
+  _calcState.lancamentos = [{ id: 'l_' + Date.now(), data: '', dataJuros: '', valor: '', descricao: '', tipo: 'principal' }];
+  _calcState.dataFinal = new Date().toISOString().slice(0, 10);
+  _calcState.indice = 'INPC';
+  _calcState.jurosTaxa = '1';
+  _calcState.jurosPeriodo = 'mensal';
+  _calcState.jurosTipo = 'simples';
+  _calcState.termoQuoJuros = 'vencimento';
+  _calcState.dataJurosGlobal = '';
+  _calcState.multaTaxa = '';
+  _calcState.honSucumbenciaTaxa = '';
+  _calcState.aplicarArt523 = false;
+  _calcState.art523MultaTaxa = '10';
+  _calcState.art523HonTaxa = '10';
+  _calcState.nome = proc.name ? `Cálculo · ${proc.name}` : '';
+  _calcState.processoId = processoId;
+  _calcState.clienteId = clienteId;
+  _calcState.resultado = null;
+  _calcState.tab = 'civil';
+  _calcState._processosCache = cacheP;
+  _calcState._clientesCache = cacheC;
+  navigate('calculadora');
+}
+
+// Abre cálculo existente na Calculadora (vindo da tab do processo).
+// Reusa o _calcAbrirCalculo, mas precisa carregar o cálculo já que o
+// histórico pode não estar populado no _calcState quando vem direto do
+// processo. Por isso buscamos pelo id no banco.
+async function _calcAbrirCalculoNoModulo(id) {
+  try {
+    const c = await DB.getCalculo(id);
+    if (!c) { toast('Cálculo não encontrado', '', 'error'); return; }
+    // Garante que está no cache de histórico pra _calcAbrirCalculo achar
+    if (!_calcState.historico) _calcState.historico = [];
+    if (!_calcState.historico.find(x => x.id === id)) _calcState.historico.push(c);
+    await _calcAbrirCalculo(id);
+    navigate('calculadora');
+  } catch (e) {
+    toast('Falha ao abrir', e.message || String(e), 'error');
+  }
+}
+
+// Exclui cálculo do dentro do detalhe do processo e re-renderiza a tab.
+async function _calcExcluirCalculoNoProcesso(id, nome) {
+  const ok = await confirmDialog('Excluir cálculo?', `O cálculo "${nome || 'sem nome'}" será removido permanentemente.`, true);
+  if (!ok) return;
+  try {
+    await DB.deleteCalculo(id);
+    toast('Cálculo excluído', '', 'success');
+    // Recarrega o state._processView.calculos e re-renderiza a tab
+    const p = state._processView?.p;
+    if (p) {
+      state._processView.calculos = await DB.getCalculosByProcess(p.id);
+      renderProcessTabContent();
+    }
+  } catch (e) {
+    toast('Falha ao excluir', e.message || String(e), 'error');
+  }
 }
 
 function renderProcessJurisprudence(p, jurisprudence) {
@@ -19339,6 +19474,9 @@ async function bootApp() {
       DB.getAllTransacoes = _empty;
       DB.getTransacoesByProcess = _emptyByPid;
       DB.getAllRecorrencias = _empty;
+      DB.getAllCalculos = _empty;
+      DB.getCalculosByProcess = _emptyByPid;
+      DB.getCalculosByCliente = _emptyByPid;
 
       // Settings: rule bloqueia settings/* pra cliente (fcmTokens contém
       // tokens de todos os users). Stub local pra não inundar console.

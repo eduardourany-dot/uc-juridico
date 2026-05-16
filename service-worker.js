@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.61.4 (HOTFIX: vírgula faltando em _calcState quebrava todo o JS do app)
-const CACHE_NAME = 'uc-juridico-v6-61-4';
+// Service Worker — UC Jurídico v6.62.0 (Detalhe do processo: tab 'Cálculos' com lista vinculada + botão '+ Novo cálculo')
+const CACHE_NAME = 'uc-juridico-v6-62-0';
 const APP_SHELL = [
   './',
   './index.html',
