@@ -10739,7 +10739,9 @@ const _calcState = {
   // SEM as custas. Default legal: 10% + 10%.
   aplicarArt523: false,
   art523MultaTaxa: '10',
-  art523HonTaxa: '10'
+  art523HonTaxa: '10',
+  // Tab Fiscal — esfera tributária (afeta preset de índice/juros legais)
+  esfera: 'federal'  // 'federal' | 'estadual' | 'municipal'
 };
 
 // Aplica correção+juros pra UMA LISTA de lançamentos (cada um com data
@@ -10915,12 +10917,13 @@ async function renderCalculadora() {
 
     <div class="tabs" style="margin-bottom: 16px;">
       <button class="tab ${tab === 'civil' ? 'active' : ''}" onclick="_calcSetTab('civil')">Cível (atualização + juros)</button>
-      <button class="tab ${tab === 'fiscal' ? 'active' : ''}" onclick="_calcSetTab('fiscal')" title="Em desenvolvimento (fase 2)" disabled style="opacity:.5;cursor:not-allowed;">Fiscal (fase 2)</button>
+      <button class="tab ${tab === 'fiscal' ? 'active' : ''}" onclick="_calcSetTab('fiscal')">⚖ Fiscal (execuções tributárias)</button>
       <button class="tab ${tab === 'historico' ? 'active' : ''}" onclick="_calcSetTab('historico')">📋 Histórico</button>
     </div>
 
     ${tab === 'historico' ? _calcRenderHistorico() : ''}
-    ${tab !== 'civil' ? '' : `
+    ${(tab !== 'civil' && tab !== 'fiscal') ? '' : `
+    ${tab === 'fiscal' ? _calcRenderEsferaCard() : ''}
 
     <!-- ===== Configurações globais (data final, índice, juros) ===== -->
     <div class="card mb-4">
@@ -11098,7 +11101,8 @@ async function renderCalculadora() {
             <th style="text-align:left;padding:8px 6px;width:110px;">Tipo</th>
             <th style="text-align:left;padding:8px 6px;width:125px;">Data correção</th>
             ${_calcState.termoQuoJuros === 'manual' ? '<th style="text-align:left;padding:8px 6px;width:125px;">Data juros</th>' : ''}
-            <th style="text-align:right;padding:8px 6px;width:115px;">Valor (R$)</th>
+            <th style="text-align:right;padding:8px 6px;width:115px;">Valor origin. (R$)</th>
+            ${tab === 'fiscal' ? '<th style="text-align:right;padding:8px 6px;width:120px;" title="Valor cobrado pela Fazenda — opcional pra confronto">Cobrado Fazenda (R$)</th>' : ''}
             <th style="text-align:left;padding:8px 6px;">Descrição</th>
             <th style="width:40px;"></th>
           </tr>
@@ -11119,7 +11123,8 @@ async function renderCalculadora() {
                 <td style="padding:6px;"><input type="date" class="input" style="padding:6px 8px;${ehCustas ? 'opacity:.4;cursor:not-allowed;' : ''}" placeholder="${ehCustas ? '—' : '(igual)'}" value="${l.dataJuros || ''}" onchange="_calcUpdateLancamento('${l.id}', 'dataJuros', this.value)" ${ehCustas ? 'disabled title="Custas não geram juros — campo ignorado"' : 'title="Opcional. Se vazio, usa a data de correção."'}></td>
               ` : ''}
               <td style="padding:6px;"><input type="number" class="input" step="0.01" min="0" placeholder="0.00" style="padding:6px 8px;text-align:right;" value="${l.valor || ''}" onchange="_calcUpdateLancamento('${l.id}', 'valor', this.value)"></td>
-              <td style="padding:6px;"><input type="text" class="input" placeholder="${ehCustas ? 'Ex.: Custas iniciais' : 'Ex.: Parcela ' + (i+1)}" style="padding:6px 8px;" value="${escapeHtml(l.descricao || '')}" onchange="_calcUpdateLancamento('${l.id}', 'descricao', this.value)"></td>
+              ${tab === 'fiscal' ? `<td style="padding:6px;"><input type="number" class="input" step="0.01" min="0" placeholder="(opcional)" style="padding:6px 8px;text-align:right;" value="${l.valorCobrado || ''}" onchange="_calcUpdateLancamento('${l.id}', 'valorCobrado', this.value)" title="Valor cobrado pela Fazenda — opcional pra confronto"></td>` : ''}
+              <td style="padding:6px;"><input type="text" class="input" placeholder="${ehCustas ? 'Ex.: Custas iniciais' : (tab === 'fiscal' ? 'Ex.: CDA 12345/2020' : 'Ex.: Parcela ' + (i+1))}" style="padding:6px 8px;" value="${escapeHtml(l.descricao || '')}" onchange="_calcUpdateLancamento('${l.id}', 'descricao', this.value)"></td>
               <td style="padding:6px;text-align:center;white-space:nowrap;">
                 <button class="btn btn-ghost btn-sm" onclick="_calcReplicarLancamento('${l.id}')" title="Replicar linha (mesma data + 1 mês)" style="padding:4px 6px;color:var(--uc-warm-gray);">↻</button>
                 ${lancs.length > 1 ? `<button class="btn btn-ghost btn-sm" onclick="_calcRemoveLancamento('${l.id}')" title="Remover" style="padding:4px 6px;color:var(--uc-red);">✕</button>` : ''}
@@ -11151,6 +11156,80 @@ function _calcSetTab(t) {
     _calcCarregarHistorico();
     return;
   }
+  renderCalculadora();
+}
+
+// Card "Esfera tributária" exibido só na tab Fiscal. Permite aplicar
+// presets de índice + juros conforme a esfera, alinhados com a
+// legislação vigente:
+//
+// FEDERAL (CTN art. 161 §1º + Lei 9.250/95 art. 39 §4º + Lei 9.430/96):
+//   - SELIC acumulada mensal (série 4390) — única taxa, juros+correção
+//     combinados pra créditos federais. Sem multa moratória adicional
+//     no nosso cálculo (Fazenda aplica em separado se for o caso).
+//
+// ESTADUAL (varia por UF; padrão Goiás CTE/GO + súmulas TJGO):
+//   - Correção: IPCA (433) ou INPC (188)
+//   - Juros: 1% a.m. simples (taxa legal default)
+//
+// MUNICIPAL (varia; configurável):
+//   - Correção: IPCA-E ou INPC ou IGP-M
+//   - Juros: 1% a.m. simples ou Selic (depende do município)
+function _calcRenderEsferaCard() {
+  const esfera = _calcState.esfera || 'federal';
+  return `
+    <div class="card mb-4" style="background:linear-gradient(135deg,#faf7f0 0%,#fff 100%);border-left:3px solid var(--uc-gold);">
+      <h3 class="font-serif text-lg font-semibold smallcaps mb-2" style="color: var(--uc-black);">⚖ Esfera tributária</h3>
+      <p class="help-text" style="margin-bottom:10px;">Aplica preset legal de índice + juros conforme a esfera. Você pode ajustar depois nos Parâmetros se o caso exigir.</p>
+      <div class="flex gap-2" style="flex-wrap:wrap;">
+        <button class="btn ${esfera === 'federal' ? 'btn-primary' : 'btn-outline'} btn-sm" onclick="_calcAplicarPresetFiscal('federal')" title="SELIC acumulada (taxa única juros+correção). CTN art. 161 §1º + Lei 9.250/95 art. 39 §4º.">
+          🇧🇷 Federal (SELIC única)
+        </button>
+        <button class="btn ${esfera === 'estadual' ? 'btn-primary' : 'btn-outline'} btn-sm" onclick="_calcAplicarPresetFiscal('estadual')" title="IPCA + juros 1% a.m. simples — padrão da maioria dos estados.">
+          🏛 Estadual (IPCA + 1% a.m.)
+        </button>
+        <button class="btn ${esfera === 'municipal' ? 'btn-primary' : 'btn-outline'} btn-sm" onclick="_calcAplicarPresetFiscal('municipal')" title="IPCA + juros 1% a.m. simples — varia por município, ajuste se necessário.">
+          🏘 Municipal (IPCA + 1% a.m.)
+        </button>
+      </div>
+      ${esfera === 'federal' ? `
+        <div class="box" style="margin-top:10px;font-size:11px;background:rgba(184,127,28,0.08);padding:8px 12px;border-radius:4px;border-left:3px solid var(--uc-gold);">
+          <strong>Federal:</strong> SELIC mensal acumulada (série BCB 4390) é a única taxa aplicada (juros + correção combinados, Lei 9.250/95 art. 39 §4º).
+          <strong>Não combine</strong> com outros índices ou juros separados.
+        </div>
+      ` : esfera === 'estadual' ? `
+        <div class="box" style="margin-top:10px;font-size:11px;background:rgba(184,127,28,0.08);padding:8px 12px;border-radius:4px;border-left:3px solid var(--uc-gold);">
+          <strong>Estadual (preset Goiás/padrão STJ):</strong> IPCA pra correção + juros 1% a.m. simples.
+          Cada UF pode ter regra própria — confira a legislação estadual aplicável e ajuste se necessário.
+        </div>
+      ` : `
+        <div class="box" style="margin-top:10px;font-size:11px;background:rgba(184,127,28,0.08);padding:8px 12px;border-radius:4px;border-left:3px solid var(--uc-gold);">
+          <strong>Municipal:</strong> Cada município define suas regras (Código Tributário Municipal).
+          Preset padrão: IPCA + 1% a.m. simples. Verifique a legislação do município e ajuste.
+        </div>
+      `}
+    </div>
+  `;
+}
+
+function _calcAplicarPresetFiscal(esfera) {
+  _calcState.esfera = esfera;
+  if (esfera === 'federal') {
+    // SELIC mensal acumulada como única taxa (juros + correção combinados)
+    _calcState.indice = 'SELIC';
+    _calcState.jurosTaxa = '0';      // SELIC já é a taxa total
+    _calcState.jurosTipo = 'simples';
+    _calcState.jurosPeriodo = 'mensal';
+    _calcState.termoQuoJuros = 'vencimento';
+  } else {
+    // Estadual e Municipal: IPCA + 1% a.m. simples
+    _calcState.indice = 'IPCA';
+    _calcState.jurosTaxa = '1';
+    _calcState.jurosTipo = 'simples';
+    _calcState.jurosPeriodo = 'mensal';
+    _calcState.termoQuoJuros = 'vencimento';
+  }
+  toast(`Preset ${esfera} aplicado`, 'Verifique os parâmetros e ajuste se necessário.', 'success');
   renderCalculadora();
 }
 
@@ -11520,6 +11599,7 @@ function _calcRenderResultado(r) {
         <p style="font-size:22px;font-weight:700;color:var(--uc-green);margin:0;">${brl(r.totalGeral)}</p>
         <p class="help-text" style="margin-top:4px;">em ${_brDate(r.dataFinal)}</p>
       </div>
+      ${_calcRenderConfronto(r)}
     </div>
 
     <!-- Tabela de parciais (1 linha por lançamento) -->
@@ -11644,6 +11724,7 @@ function _calcAddLancamento() {
     data: '',
     dataJuros: '',
     valor: '',
+    valorCobrado: '',
     descricao: '',
     tipo: 'principal'
   });
@@ -11790,7 +11871,7 @@ function _calcUpdateLancamento(id, field, value) {
 }
 
 function _calcLimparLancamentos() {
-  _calcState.lancamentos = [{ id: 'l_' + Date.now(), data: '', dataJuros: '', valor: '', descricao: '', tipo: 'principal' }];
+  _calcState.lancamentos = [{ id: 'l_' + Date.now(), data: '', dataJuros: '', valor: '', valorCobrado: '', descricao: '', tipo: 'principal' }];
   _calcState.resultado = null;
   _calcState.processoId = '';
   _calcState.clienteId = '';
@@ -11802,6 +11883,38 @@ function _brDate(iso) {
   if (!iso) return '';
   const [y, m, d] = iso.split('-');
   return `${d}/${m}/${y}`;
+}
+
+// Card de confronto entre o cálculo devido e o valor cobrado pela Fazenda.
+// Só aparece quando algum lançamento tem valorCobrado preenchido (modo Fiscal).
+function _calcRenderConfronto(r) {
+  if (!r) return '';
+  // Soma valores cobrados dos lançamentos (Fiscal)
+  let totalCobrado = 0;
+  let temCobrado = false;
+  for (const p of r.parciais) {
+    const v = parseFloat(String(p.lancamento?.valorCobrado || '').replace(',', '.'));
+    if (!isNaN(v) && v > 0) { totalCobrado += v; temCobrado = true; }
+  }
+  if (!temCobrado) return '';
+
+  const diff = totalCobrado - r.totalGeral;
+  const ehExcesso = diff > 0;
+  const pctDiff = r.totalGeral > 0 ? Math.abs(diff) / r.totalGeral * 100 : 0;
+  const brl = v => 'R$ ' + (v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+  return `
+    <div class="card" style="border-left:3px solid ${ehExcesso ? 'var(--uc-red)' : 'var(--uc-amber)'};">
+      <p class="text-xs smallcaps" style="color:var(--uc-warm-gray);margin:0 0 4px;">⚖ Confronto Fazenda</p>
+      <p style="font-size:14px;margin:0 0 4px;">Cobrado: <strong>${brl(totalCobrado)}</strong></p>
+      <p style="font-size:14px;font-weight:600;color:${ehExcesso ? 'var(--uc-red)' : 'var(--uc-amber)'};margin:0;">
+        ${ehExcesso ? '+' : ''}${brl(diff)}
+      </p>
+      <p class="help-text" style="margin-top:4px;">
+        ${ehExcesso ? 'EXCESSO de cobrança' : 'Cobrança inferior ao devido'} · ${pctDiff.toFixed(2)}%
+      </p>
+    </div>
+  `;
 }
 
 async function _calcExecutar() {
@@ -11842,7 +11955,7 @@ async function _calcExecutar() {
       toast('Data juros inválida', `Lançamento em ${l.data}: data de juros (${l.dataJuros}) deve ser ANTES da data final.`, 'error');
       return;
     }
-    lancsValid.push({ id: l.id, data: l.data, dataJuros: l.dataJuros || '', valor: v, descricao: l.descricao || '', tipo: l.tipo || 'principal' });
+    lancsValid.push({ id: l.id, data: l.data, dataJuros: l.dataJuros || '', valor: v, valorCobrado: l.valorCobrado || '', descricao: l.descricao || '', tipo: l.tipo || 'principal' });
   }
   if (lancsValid.length === 0) { toast('Nenhum lançamento', 'Adicione pelo menos 1 lançamento válido.', 'error'); return; }
 

@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.62.1 (Calculadora P1 fase 2 3/4: exportar memória de cálculo em .doc — abre no Word)
-const CACHE_NAME = 'uc-juridico-v6-62-1';
+// Service Worker — UC Jurídico v6.62.2 (Calculadora P1 fase 2 4/4: Tab Fiscal — esfera + presets + confronto Fazenda)
+const CACHE_NAME = 'uc-juridico-v6-62-2';
 const APP_SHELL = [
   './',
   './index.html',
