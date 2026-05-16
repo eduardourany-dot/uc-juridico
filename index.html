@@ -10741,12 +10741,18 @@ const _calcState = {
   art523MultaTaxa: '10',
   art523HonTaxa: '10',
   // Tab Fiscal — esfera tributária (afeta preset de índice/juros legais)
-  esfera: 'federal'  // 'federal' | 'estadual' | 'municipal'
+  esfera: 'federal',  // 'federal' | 'estadual' | 'municipal'
+  // Encargo legal do Decreto-Lei 1.025/69: 20% sobre o débito tributário
+  // federal inscrito em dívida ativa, aplicado pela PGFN/PFN ao ajuizar.
+  // STJ Súmula 168 + Tema 969 STJ confirmaram constitucionalidade.
+  // Aplicado sobre o débito atualizado (sem custas).
+  aplicarDL1025: false,
+  dl1025Taxa: '20'  // % default legal
 };
 
 // Aplica correção+juros pra UMA LISTA de lançamentos (cada um com data
 // e valor próprios), tudo até uma data final comum. Soma os parciais.
-async function calcularLancamentosMultiplos({ lancamentos, dataFinal, indice, jurosTaxa, jurosTipo, jurosPeriodo, termoQuoJuros, dataJurosGlobal, multaTaxa, honSucumbenciaTaxa, aplicarArt523, art523MultaTaxa, art523HonTaxa }) {
+async function calcularLancamentosMultiplos({ lancamentos, dataFinal, indice, jurosTaxa, jurosTipo, jurosPeriodo, termoQuoJuros, dataJurosGlobal, multaTaxa, honSucumbenciaTaxa, aplicarArt523, art523MultaTaxa, art523HonTaxa, aplicarDL1025, dl1025Taxa }) {
   const parciais = [];
   let totalOriginal = 0, totalCorrigido = 0, totalJuros = 0;
   // Subtotais separados pra base de cálculo da multa e sucumbência:
@@ -10847,8 +10853,20 @@ async function calcularLancamentosMultiplos({ lancamentos, dataFinal, indice, ju
     valorHon523 = debitoConhecimento * (pctHon523 / 100);
   }
 
-  // Total devido = débito da fase de conhecimento + art. 523 (se aplicado) + custas
-  const totalGeral = debitoConhecimento + valorMulta523 + valorHon523 + subtotalCustasCorrigido;
+  // Encargo legal DL 1.025/69 (PGFN — federal): aplicado sobre o débito
+  // atualizado de todos os lançamentos principais (sem custas). Substitui
+  // honorários sucumbenciais segundo STJ Súmula 168.
+  let valorDL1025 = 0;
+  let pctDL1025 = 0;
+  if (aplicarDL1025) {
+    pctDL1025 = parseFloat(String(dl1025Taxa || '20').replace(',', '.')) || 0;
+    // Base: principal corrigido + juros + multa contratual (sem sucumbência,
+    // que não se aplica em fiscal federal porque é substituída pelo DL 1025)
+    valorDL1025 = subtotalComMulta * (pctDL1025 / 100);
+  }
+
+  // Total devido = débito da fase de conhecimento + art. 523 + DL 1025 + custas
+  const totalGeral = debitoConhecimento + valorMulta523 + valorHon523 + valorDL1025 + subtotalCustasCorrigido;
 
   return {
     parciais,
@@ -10867,6 +10885,9 @@ async function calcularLancamentosMultiplos({ lancamentos, dataFinal, indice, ju
     valorHon523,
     art523MultaTaxa: pctMulta523,
     art523HonTaxa: pctHon523,
+    aplicarDL1025: !!aplicarDL1025,
+    valorDL1025,
+    dl1025Taxa: pctDL1025,
     totalGeral,
     indiceLabel,
     dataFinal,
@@ -11197,6 +11218,26 @@ function _calcRenderEsferaCard() {
           <strong>Federal:</strong> SELIC mensal acumulada (série BCB 4390) é a única taxa aplicada (juros + correção combinados, Lei 9.250/95 art. 39 §4º).
           <strong>Não combine</strong> com outros índices ou juros separados.
         </div>
+        <!-- Encargo DL 1.025/69 — só federal -->
+        <div style="margin-top:10px;padding:10px;background:rgba(178,34,52,0.04);border-radius:4px;border-left:3px solid var(--uc-red);">
+          <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;">
+            <input type="checkbox" id="calcAplicarDL1025" ${_calcState.aplicarDL1025 ? 'checked' : ''} onchange="_calcState.aplicarDL1025 = this.checked; renderCalculadora();" style="margin-top:3px;">
+            <div style="flex:1;">
+              <strong style="font-size:13px;color:var(--uc-red);">⚖ Encargo legal Decreto-Lei 1.025/69 (PGFN)</strong>
+              <p class="help-text" style="margin:2px 0 6px;font-size:11px;">
+                Acréscimo padrão da PGFN sobre dívida ativa federal inscrita (substitui honorários sucumbenciais — STJ Súmula 168, Tema 969).
+                Aplicado sobre o débito atualizado (sem custas).
+              </p>
+              ${_calcState.aplicarDL1025 ? `
+                <div style="margin-top:4px;display:flex;align-items:center;gap:8px;">
+                  <label style="font-size:11px;color:var(--uc-warm-gray);">Taxa (%):</label>
+                  <input type="number" id="calcDL1025Taxa" step="0.01" min="0" max="100" value="${_calcState.dl1025Taxa || '20'}" onchange="_calcState.dl1025Taxa = this.value" style="width:80px;padding:4px 8px;font-size:12px;border:1px solid var(--uc-line);border-radius:3px;">
+                  <span style="font-size:10px;color:var(--uc-warm-gray);">(default legal: 20%)</span>
+                </div>
+              ` : ''}
+            </div>
+          </label>
+        </div>
       ` : esfera === 'estadual' ? `
         <div class="box" style="margin-top:10px;font-size:11px;background:rgba(184,127,28,0.08);padding:8px 12px;border-radius:4px;border-left:3px solid var(--uc-gold);">
           <strong>Estadual (preset Goiás/padrão STJ):</strong> IPCA pra correção + juros 1% a.m. simples.
@@ -11346,6 +11387,9 @@ async function _calcAbrirCalculo(id) {
   _calcState.aplicarArt523 = !!input.aplicarArt523;
   _calcState.art523MultaTaxa = input.art523MultaTaxa != null ? String(input.art523MultaTaxa) : '10';
   _calcState.art523HonTaxa = input.art523HonTaxa != null ? String(input.art523HonTaxa) : '10';
+  _calcState.aplicarDL1025 = !!input.aplicarDL1025;
+  _calcState.dl1025Taxa = input.dl1025Taxa != null ? String(input.dl1025Taxa) : '20';
+  _calcState.esfera = input.esfera || 'federal';
   _calcState.nome = c.nome || '';
   _calcState.processoId = c.processoId || '';
   _calcState.clienteId = c.clienteId || '';
@@ -11537,6 +11581,13 @@ function _calcRenderResultado(r) {
   const brl = v => 'R$ ' + (v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const indiceCurto = (r.indiceLabel || '').split(' ')[0];
   const semCorrecao = r.indice === 'NENHUM';
+  // Tab Fiscal: temos colunas extras de confronto. Só quando estamos na
+  // tab Fiscal E há pelo menos 1 lançamento com valorCobrado preenchido.
+  const ehFiscal = _calcState.tab === 'fiscal';
+  const temConfrontoLinha = ehFiscal && r.parciais.some(p => {
+    const v = parseFloat(String(p.lancamento?.valorCobrado || '').replace(',', '.'));
+    return !isNaN(v) && v > 0;
+  });
 
   return `
     <!-- Cards consolidados -->
@@ -11588,6 +11639,12 @@ function _calcRenderResultado(r) {
         <p style="font-size:20px;font-weight:600;color:var(--uc-red);margin:0;">${brl(r.valorHon523)}</p>
         <p class="help-text" style="margin-top:4px;">${r.art523HonTaxa}% · cumprimento não pago</p>
       </div>` : ''}
+      ${r.valorDL1025 > 0 ? `
+      <div class="card" style="border-top:2px solid var(--uc-red);">
+        <p class="text-xs smallcaps" style="color:var(--uc-warm-gray);margin:0 0 4px;">+ Encargo DL 1.025/69</p>
+        <p style="font-size:20px;font-weight:600;color:var(--uc-red);margin:0;">${brl(r.valorDL1025)}</p>
+        <p class="help-text" style="margin-top:4px;">${r.dl1025Taxa}% · PGFN · STJ Súmula 168</p>
+      </div>` : ''}
       ${r.subtotalCustasCorrigido > 0 ? `
       <div class="card">
         <p class="text-xs smallcaps" style="color:var(--uc-warm-gray);margin:0 0 4px;">+ Custas corrigidas</p>
@@ -11615,12 +11672,19 @@ function _calcRenderResultado(r) {
             <th style="text-align:right;padding:8px;">Fator</th>
             <th style="text-align:right;padding:8px;">Corrigido</th>
             <th style="text-align:right;padding:8px;">Juros</th>
-            <th style="text-align:right;padding:8px;">Total</th>
+            <th style="text-align:right;padding:8px;">Total devido</th>
+            ${temConfrontoLinha ? '<th style="text-align:right;padding:8px;background:rgba(178,34,52,0.06);">Cobrado Fazenda</th>' : ''}
+            ${temConfrontoLinha ? '<th style="text-align:right;padding:8px;background:rgba(178,34,52,0.06);">Diferença</th>' : ''}
           </tr>
         </thead>
         <tbody>
           ${r.parciais.map((p, i) => {
             const ehCustas = p.tipo === 'custas';
+            // Confronto por linha (só Fiscal com valorCobrado preenchido)
+            const vCobrado = parseFloat(String(p.lancamento?.valorCobrado || '').replace(',', '.'));
+            const temCob = !isNaN(vCobrado) && vCobrado > 0;
+            const diff = temCob ? (vCobrado - p.valorTotal) : 0;
+            const pctDiff = (temCob && p.valorTotal > 0) ? Math.abs(diff) / p.valorTotal * 100 : 0;
             return `
             <tr style="border-bottom:1px solid var(--uc-line-soft);${ehCustas ? 'background:rgba(184,127,28,0.06);' : (i % 2 === 0 ? '' : 'background:var(--uc-cream-soft, #faf7f0);')}">
               <td style="padding:8px;">
@@ -11634,6 +11698,8 @@ function _calcRenderResultado(r) {
               <td style="padding:8px;text-align:right;">${brl(p.valorCorrigido)}</td>
               <td style="padding:8px;text-align:right;color:${ehCustas ? 'var(--uc-warm-gray)' : 'inherit'};">${ehCustas ? '—' : brl(p.valorJuros)}</td>
               <td style="padding:8px;text-align:right;font-weight:600;color:var(--uc-green);">${brl(p.valorTotal)}</td>
+              ${temConfrontoLinha ? `<td style="padding:8px;text-align:right;background:rgba(178,34,52,0.04);">${temCob ? brl(vCobrado) : '<span style="color:var(--uc-warm-gray);">—</span>'}</td>` : ''}
+              ${temConfrontoLinha ? `<td style="padding:8px;text-align:right;background:rgba(178,34,52,0.04);font-weight:500;${temCob ? `color:${diff > 0 ? 'var(--uc-red)' : 'var(--uc-amber)'};` : 'color:var(--uc-warm-gray);'}">${temCob ? `${diff > 0 ? '+' : ''}${brl(diff)}<br><span style="font-size:10px;font-weight:400;">(${pctDiff.toFixed(2)}%)</span>` : '—'}</td>` : ''}
             </tr>
           `;}).join('')}
         </tbody>
@@ -11645,6 +11711,18 @@ function _calcRenderResultado(r) {
             <td style="padding:10px 8px;text-align:right;">${brl(r.totalCorrigido)}</td>
             <td style="padding:10px 8px;text-align:right;">${brl(r.totalJuros)}</td>
             <td style="padding:10px 8px;text-align:right;">${brl(r.totalCorrigido + r.totalJuros)}</td>
+            ${temConfrontoLinha ? (() => {
+              let totalCob = 0;
+              for (const p of r.parciais) {
+                const v = parseFloat(String(p.lancamento?.valorCobrado || '').replace(',', '.'));
+                if (!isNaN(v) && v > 0) totalCob += v;
+              }
+              const diffTotal = totalCob - (r.totalCorrigido + r.totalJuros);
+              return `
+              <td style="padding:10px 8px;text-align:right;background:rgba(178,34,52,0.06);">${brl(totalCob)}</td>
+              <td style="padding:10px 8px;text-align:right;background:rgba(178,34,52,0.06);color:${diffTotal > 0 ? 'var(--uc-red)' : 'var(--uc-amber)'};">${diffTotal > 0 ? '+' : ''}${brl(diffTotal)}</td>
+              `;
+            })() : ''}
           </tr>
           ${(r.valorMulta > 0 || r.valorHonSucumbencia > 0) ? `
           <tr style="background:rgba(184,127,28,0.08);">
@@ -11655,7 +11733,7 @@ function _calcRenderResultado(r) {
               ${r.valorHonSucumbencia > 0 ? `+ Honor. sucumb. (${r.honSucumbenciaTaxa}%)` : ''}
               ${r.valorHonSucumbencia > 0 ? `<strong style="color:var(--uc-black);"> ${brl(r.valorHonSucumbencia)}</strong>` : ''}
             </td>
-            <td></td>
+            <td colspan="${temConfrontoLinha ? 3 : 1}"></td>
           </tr>` : ''}
           ${r.aplicarArt523 ? `
           <tr style="background:rgba(178,34,52,0.08);">
@@ -11667,11 +11745,19 @@ function _calcRenderResultado(r) {
               ${r.valorHon523 > 0 ? `+ Honor. ${r.art523HonTaxa}%` : ''}
               ${r.valorHon523 > 0 ? `<strong style="color:var(--uc-red);"> ${brl(r.valorHon523)}</strong>` : ''}
             </td>
-            <td></td>
+            <td colspan="${temConfrontoLinha ? 3 : 1}"></td>
+          </tr>` : ''}
+          ${r.valorDL1025 > 0 ? `
+          <tr style="background:rgba(178,34,52,0.08);">
+            <td colspan="7" style="padding:8px;text-align:right;font-weight:500;color:var(--uc-red);">
+              ⚖ DL 1.025/69 — Encargo legal PGFN (${r.dl1025Taxa}%): <strong style="color:var(--uc-red);"> ${brl(r.valorDL1025)}</strong>
+            </td>
+            <td colspan="${temConfrontoLinha ? 3 : 1}"></td>
           </tr>` : ''}
           <tr style="background:var(--uc-green);color:white;">
             <td colspan="7" style="padding:10px 8px;text-align:right;font-weight:700;">TOTAL DEVIDO em ${_brDate(r.dataFinal)}</td>
             <td style="padding:10px 8px;text-align:right;font-weight:700;font-size:14px;">${brl(r.totalGeral)}</td>
+            ${temConfrontoLinha ? '<td colspan="2"></td>' : ''}
           </tr>
         </tfoot>
       </table>
@@ -11977,7 +12063,9 @@ async function _calcExecutar() {
       honSucumbenciaTaxa: _calcState.honSucumbenciaTaxa,
       aplicarArt523: _calcState.aplicarArt523,
       art523MultaTaxa: _calcState.art523MultaTaxa,
-      art523HonTaxa: _calcState.art523HonTaxa
+      art523HonTaxa: _calcState.art523HonTaxa,
+      aplicarDL1025: _calcState.aplicarDL1025,
+      dl1025Taxa: _calcState.dl1025Taxa
     });
     _calcState.resultado = resultado;
     _calcState.erro = null;
@@ -12009,7 +12097,17 @@ async function _calcSalvar() {
       indice: _calcState.indice,
       jurosTaxa: r.jurosTaxa,
       jurosTipo: r.jurosTipo,
-      jurosPeriodo: r.jurosPeriodo
+      jurosPeriodo: r.jurosPeriodo,
+      termoQuoJuros: r.termoQuoJuros,
+      dataJurosGlobal: r.dataJurosGlobal,
+      multaTaxa: r.multaTaxa,
+      honSucumbenciaTaxa: r.honSucumbenciaTaxa,
+      aplicarArt523: r.aplicarArt523,
+      art523MultaTaxa: r.art523MultaTaxa,
+      art523HonTaxa: r.art523HonTaxa,
+      aplicarDL1025: r.aplicarDL1025,
+      dl1025Taxa: r.dl1025Taxa,
+      esfera: _calcState.esfera
     },
     resultado: {
       totalOriginal: r.totalOriginal,

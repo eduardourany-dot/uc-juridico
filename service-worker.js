@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.62.2 (Calculadora P1 fase 2 4/4: Tab Fiscal — esfera + presets + confronto Fazenda)
-const CACHE_NAME = 'uc-juridico-v6-62-2';
+// Service Worker — UC Jurídico v6.62.3 (Calculadora Fiscal: confronto por linha + Encargo DL 1.025/69 PGFN)
+const CACHE_NAME = 'uc-juridico-v6-62-3';
 const APP_SHELL = [
   './',
   './index.html',
