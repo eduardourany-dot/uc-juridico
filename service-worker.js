@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.56.0 (MNI.4 fase 2: cron DJEN no Apps Script + app lê pré-fetch do Firestore)
-const CACHE_NAME = 'uc-juridico-v6-56-0';
+// Service Worker — UC Jurídico v6.56.1 (MNI.4 fase 2: cron DJEN migrado pra Cloud Functions em São Paulo)
+const CACHE_NAME = 'uc-juridico-v6-56-1';
 const APP_SHELL = [
   './',
   './index.html',

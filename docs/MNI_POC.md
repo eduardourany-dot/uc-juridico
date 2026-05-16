@@ -167,49 +167,38 @@ A POC TJGO foi **bem-sucedida** em 11/05/2026:
 - ✓ **MNI.4 fase 2** · Cron Apps Script diário (08h, dias úteis) → varre DJEN com app fechado → pre-fetch em `djen/{hash}` (status=`pending`) → push FCM. Setup em `backend/DjenCron.gs`.
 - ⏳ **MNI.5** · `entregarManifestacaoProcessual` — peticionar direto do app
 
-## Setup MNI.4 fase 2 (Apps Script cron DJEN)
+## Setup MNI.4 fase 2 — Cloud Functions em São Paulo
 
-### IMPORTANTE — API DJEN é geo-bloqueada
+### Histórico: por que não foi Apps Script nem Cloudflare Worker
 
-A API pública DJEN (`comunicaapi.pje.jus.br`) é hospedada em AWS CloudFront com geo-restriction: **bloqueia requests fora do Brasil** (HTTP 403 com body "The Amazon CloudFront distribution is configured to block access from your country.").
+A API pública DJEN (`comunicaapi.pje.jus.br`) é hospedada em AWS CloudFront com **geo-restriction**: aceita só requests do Brasil. Resposta de fora: `HTTP 403 · "The Amazon CloudFront distribution is configured to block access from your country."`
 
-Apps Script roda em IPs Google Cloud (datacenters EUA, POP Atlanta) → bloqueado.
+Tentativas que falharam:
 
-**Solução:** Cloudflare Worker proxy. Cloudflare tem POPs no Brasil (SAO/GIG), o request sai de IP BR e passa.
+1. **Apps Script direto** → IPs Google Cloud nos EUA → 403.
+2. **Apps Script → Cloudflare Worker proxy** (`workers/djen-proxy-worker.js`) → também 403. Causa: Worker roda no POP mais próximo de quem chama. Apps Script (IP EUA) → Worker roda em POP EUA → fetch outbound sai com IP EUA → bloqueado. Smart Placement pra forçar BR é feature paga ($5/mo) sem garantia.
 
-### Passo 1 · Deploy do worker proxy
+**Solução adotada:** Google Cloud Functions em `southamerica-east1` (São Paulo). IP brasileiro garantido. Rodou no mesmo projeto Firebase (`uc-juridico`) — acesso direto a Firestore + FCM via Admin SDK, sem JWT manual nem service account JSON em script properties.
 
-Arquivo: `workers/djen-proxy-worker.js`
+> `backend/DjenCron.gs` e `workers/djen-proxy-worker.js` ficam no repo como referência histórica, mas **não são usados em produção**. Pode deletar do Apps Script Editor.
 
-1. `dash.cloudflare.com` → **Workers & Pages** → **Create application** → **Create Worker**
-2. Nome: `uc-djen-proxy` → Deploy
-3. Edit code → apaga template → cola **tudo** de `workers/djen-proxy-worker.js`
-4. Save and deploy
-5. Anota a URL: `https://uc-djen-proxy.SEU-USUARIO.workers.dev`
-6. Testa abrindo no browser: `https://uc-djen-proxy.SEU.workers.dev/health` → deve retornar JSON `{ service: 'uc-djen-proxy', ok: true }`
+### Setup (uma vez)
 
-### Passo 2 · Cron Apps Script
+Detalhe completo em `functions/README.md`. Resumo:
 
-Arquivo: `backend/DjenCron.gs`
+1. **Habilita Blaze plan no Firebase** (free tier cobre o uso: ~22 invocations/mês × 22 dias úteis = R$0)
+   - https://console.firebase.google.com/project/uc-juridico/usage/details
+   - Recomendado setar orçamento mensal R$5 como alerta de segurança
+2. **Firebase CLI**: `npm install -g firebase-tools && firebase login`
+3. **Dependências**: `cd functions && npm install`
+4. **Deploy**: `firebase deploy --only functions`
+5. **Teste manual**: forçar execução no Firebase Console ou via `curl` no endpoint HTTP
 
-1. Cola o arquivo no Apps Script Editor (script.google.com → **UC Jurídico Backend**)
-2. **⚙ Configurações do projeto → Propriedades do script → Adicionar**:
-   - Propriedade: `DJEN_PROXY_URL`
-   - Valor: a URL do worker (passo anterior)
-3. Confirma que `FCM_SERVICE_ACCOUNT_JSON` também está nas Script Properties (já está, do cron de Lembretes)
-4. Testa o proxy:
-   - Execute → `_diagDjenApi` → deve mostrar `HTTP 200 · OK — items recebidos: N`
-5. Testa o cron sem efeitos colaterais:
-   - Execute → `_previewDjenCron` → mostra quantas pubs seriam encontradas, sem gravar
-6. Testa com efeitos (cuidado: vai mandar push real):
-   - Execute → `_testarDjenCron`
-7. Cria trigger:
-   - Acionadores (⏰) → **+ Adicionar acionador**
-   - Função: `cron_djenAutoCheck`
-   - Tipo de fonte: **Time-driven**
-   - Tipo: **Day timer**
-   - Hora: **8h - 9h**
-   - Notificações: **Notificar imediatamente** (manda email se falhar)
+### Schedule
+
+`0 8 * * 1-5` America/Sao_Paulo = **08h00 de segunda a sexta**.
+
+Pra mudar, editar `functions/index.js` linha `onSchedule({ schedule: ... })` e re-deploy.
 
 ### Schema novo no Firestore
 
