@@ -16,13 +16,13 @@ Plataforma interna de gestão jurídica do escritório **Urany de Castro Advocac
 |---|---|
 | **Processos** | Cadastro completo (CNJ, cliente, parte adversa, tribunal, advogado titular, suplente, risco, honorários, área tributária com CDAs) |
 | **Prazos** | Captura via DJEN + cálculo de data fatal (art. 224 CPC, dias úteis, recesso forense, prazo em dobro) + cumprimento explícito (data + protocolo) + auto-perdido + push 24/7 |
-| **Eventos** | Timeline de movimentações (DataJud / DJEN / manual) |
+| **Eventos** | Timeline de movimentações (MNI / DJEN / manual) |
 | **Notas** | Anotações livres por processo, vinculáveis a eventos |
 | **Jurisprudência** | Catalogação por tipo (REsp, Tema, Súmula…) |
 | **PDFs** | 12 ferramentas (extração, dividir, juntar, OCR via Tesseract, indexar autos…) |
 | **Diligência rápida** | Modo otimizado mobile pra audiência/fórum |
-| **DJEN** | Monitoramento automático via API CNJ pelas OABs do escritório |
-| **DataJud** | Sincronização de movimentos por CNJ |
+| **DJEN** | Monitoramento automático via API CNJ pelas OABs do escritório + cron diário 08h |
+| **MNI** | Consulta de processos SOAP/MNI 2.2.2 multi-tribunal + protocolo de petições direto do app |
 | **Configurações > Equipe** | Sócio padrão, status de ausência, sub-aba de notificações neste dispositivo |
 
 ---

@@ -608,7 +608,7 @@
       "soapAction": null,
       "validado": false,
       "naoSuportado": true,
-      "motivo": "TJAP usa Tucujuris (sistema próprio) — sem MNI. Usar DataJud."
+      "motivo": "TJAP usa Tucujuris (sistema próprio) — sem MNI público."
     },
     "TJRO": {
       "codigo": "TJRO",

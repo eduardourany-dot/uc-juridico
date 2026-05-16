@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.57.1 (modal DJEN: remove botão DataJud órfão — DataJud foi descontinuado)
-const CACHE_NAME = 'uc-juridico-v6-57-1';
+// Service Worker — UC Jurídico v6.57.2 (limpeza completa de DataJud: bloco principal + handlers + settings + backup)
+const CACHE_NAME = 'uc-juridico-v6-57-2';
 const APP_SHELL = [
   './',
   './index.html',
