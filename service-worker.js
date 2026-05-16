@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.60.6 (Calculadora: multa + honorários CPC art. 523 §1º — cumprimento de sentença não pago)
-const CACHE_NAME = 'uc-juridico-v6-60-6';
+// Service Worker — UC Jurídico v6.60.7 (Calculadora: opção 'Sem correção monetária' pra contratos bancários com juros embutidos)
+const CACHE_NAME = 'uc-juridico-v6-60-7';
 const APP_SHELL = [
   './',
   './index.html',

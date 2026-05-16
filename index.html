@@ -10391,6 +10391,7 @@ function _renderDelta(d, casas) {
 // produto (1 + var/100) mês a mês.
 
 const BCB_INDICES = {
+  NENHUM:  { codigo: null, label: '— Sem correção monetária —',     tipo: 'nenhum' },
   INPC:    { codigo: 188,  label: 'INPC (IBGE)',                   tipo: 'mensal_pct' },
   IGPM:    { codigo: 189,  label: 'IGP-M (FGV)',                   tipo: 'mensal_pct' },
   IPCA:    { codigo: 433,  label: 'IPCA (IBGE)',                   tipo: 'mensal_pct' },
@@ -10444,23 +10445,37 @@ async function calcularCorrecaoMonetaria(p) {
   const ind = BCB_INDICES[p.indice];
   if (!ind) throw new Error('Índice não suportado: ' + p.indice);
 
-  const serie = await bcbFetchSerie(ind.codigo, p.dataInicial, p.dataFinal);
-  if (!serie || serie.length === 0) {
-    throw new Error('BCB retornou série vazia. Verifique se o período tem dados publicados.');
-  }
-
-  // Acumula variação mensal: fator = produto de (1 + var/100)
+  // Modo "Sem correção" — comum em contratos bancários onde os juros
+  // elevados já absorvem a correção monetária. Pula fetch BCB e mantém
+  // valor original; só os juros (se houver) são aplicados depois.
+  const semCorrecao = ind.tipo === 'nenhum';
+  let serie = [];
   let fator = 1;
   const memoria = [];
-  for (const item of serie) {
-    const varMes = parseFloat(item.valor.replace(',', '.'));
-    if (isNaN(varMes)) continue;
-    fator *= (1 + varMes / 100);
-    memoria.push({
-      data: item.data,         // 'DD/MM/YYYY'
-      indiceMes: varMes,       // % do mês
-      fatorAcumulado: fator    // multiplicador acumulado até esse mês
-    });
+
+  if (semCorrecao) {
+    // Conta meses entre dataInicial e dataFinal pra reportar mesesPeriodo
+    const di = new Date(p.dataInicial);
+    const df = new Date(p.dataFinal);
+    const mesesAprox = (df.getFullYear() - di.getFullYear()) * 12 + (df.getMonth() - di.getMonth());
+    // Memória vazia, fator 1
+    serie = new Array(Math.max(0, mesesAprox));
+  } else {
+    serie = await bcbFetchSerie(ind.codigo, p.dataInicial, p.dataFinal);
+    if (!serie || serie.length === 0) {
+      throw new Error('BCB retornou série vazia. Verifique se o período tem dados publicados.');
+    }
+    // Acumula variação mensal: fator = produto de (1 + var/100)
+    for (const item of serie) {
+      const varMes = parseFloat(item.valor.replace(',', '.'));
+      if (isNaN(varMes)) continue;
+      fator *= (1 + varMes / 100);
+      memoria.push({
+        data: item.data,         // 'DD/MM/YYYY'
+        indiceMes: varMes,       // % do mês
+        fatorAcumulado: fator    // multiplicador acumulado até esse mês
+      });
+    }
   }
 
   const valorCorrigido = p.valorInicial * fator;
@@ -10927,6 +10942,7 @@ function _calcRenderResultado(r) {
 
   const brl = v => 'R$ ' + (v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const indiceCurto = (r.indiceLabel || '').split(' ')[0];
+  const semCorrecao = r.indice === 'NENHUM';
 
   return `
     <!-- Cards consolidados -->
@@ -10936,10 +10952,18 @@ function _calcRenderResultado(r) {
         <p style="font-size:20px;font-weight:600;margin:0;">${brl(r.totalOriginal)}</p>
         <p class="help-text" style="margin-top:4px;">${r.parciais.length} lançamento(s)</p>
       </div>
+      ${semCorrecao ? `
+      <div class="card" style="opacity:.7;">
+        <p class="text-xs smallcaps" style="color:var(--uc-warm-gray);margin:0 0 4px;">Sem correção monetária</p>
+        <p style="font-size:14px;font-weight:500;color:var(--uc-warm-gray);margin:0;">Valor mantido</p>
+        <p class="help-text" style="margin-top:4px;">Comum em contratos bancários (juros embutidos)</p>
+      </div>
+      ` : `
       <div class="card">
         <p class="text-xs smallcaps" style="color:var(--uc-warm-gray);margin:0 0 4px;">+ Correção (${indiceCurto})</p>
         <p style="font-size:20px;font-weight:600;color:var(--uc-amber);margin:0;">${brl(r.totalCorrigido - r.totalOriginal)}</p>
       </div>
+      `}
       ${r.totalJuros > 0 ? `
       <div class="card">
         <p class="text-xs smallcaps" style="color:var(--uc-warm-gray);margin:0 0 4px;">+ Juros</p>
@@ -11058,7 +11082,8 @@ function _calcRenderResultado(r) {
       </table>
     </div>
 
-    <!-- Memória detalhada de UM lançamento (expansível) -->
+    <!-- Memória detalhada de UM lançamento (expansível) — só faz sentido se houve correção -->
+    ${semCorrecao ? '' : `
     <details class="card">
       <summary style="cursor:pointer;font-weight:600;color:var(--uc-black);">📊 Ver memória mensal completa de cada lançamento</summary>
       <div style="margin-top:12px;">
@@ -11093,6 +11118,7 @@ function _calcRenderResultado(r) {
         `).join('')}
       </div>
     </details>
+    `}
   `;
 }
 
