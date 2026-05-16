@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.58.0 (Firestore Security Rules estritas por role + app cliente migrado pra queries Firestore)
-const CACHE_NAME = 'uc-juridico-v6-58-0';
+// Service Worker — UC Jurídico v6.58.1 (Security Rules: cliente vê eventos/prazos/djen do próprio processo via lookup rule)
+const CACHE_NAME = 'uc-juridico-v6-58-1';
 const APP_SHELL = [
   './',
   './index.html',

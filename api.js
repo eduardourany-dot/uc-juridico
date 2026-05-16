@@ -442,6 +442,19 @@ const RemoteDB = {
     snap.forEach(d => { const v = d.data(); if (!v.deletedAt) out.push(v); });
     return out;
   },
+  // Lista docs filtrados por processId — usado por cliente com Security
+  // Rules estritas (rule só libera doc se processoIdDoCliente bate).
+  // Como TODOS os docs retornados têm o mesmo processId, o lookup
+  // `get(/processos/X)` em rules é cached (1 read total, não N).
+  async getByProcessIdRemote(collectionName, processId, field) {
+    if (!processId) return [];
+    const f = field || 'processId';
+    const snap = await getDocs(query(collection(db, collectionName),
+      where(f, '==', String(processId))));
+    const out = [];
+    snap.forEach(d => { const v = d.data(); if (!v.deletedAt) out.push(v); });
+    return out;
+  },
   // Honorários filtrados por clienteId (rule permite cliente ler só os dele)
   async getHonorariosByClienteIdRemote(clienteId) {
     if (!clienteId) return [];

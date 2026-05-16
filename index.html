@@ -18013,17 +18013,37 @@ async function bootApp() {
         } catch (e) { console.warn('[cliente] getAllClientes falhou', e); return []; }
       };
 
-      // Coleções INTERNAS bloqueadas pra cliente nas rules → retornar [] direto
-      // (evita 100+ permission-denied no console).
+      // Eventos / prazos / djen do PROCESSO: cliente pode ler (rule
+      // libera via processoIdDoCliente lookup). App faz query Firestore
+      // com where('processId', '==', X) — TODOS os docs retornados
+      // batem o mesmo X → cache hit em rules (1 read total).
+      // getAll* não funciona pra cliente (precisa de filtro), então
+      // retornamos [] e cada chamada por-processo faz query específica.
       const _empty = async () => [];
       const _emptyByPid = async (_pid) => [];
+
+      DB.getEventsByProcess = async (pid) => {
+        try { return await DB.getByProcessIdRemote('eventos', pid); }
+        catch (e) { console.warn('[cliente] getEventsByProcess', e); return []; }
+      };
+      DB.getDeadlinesByProcess = async (pid) => {
+        try { return await DB.getByProcessIdRemote('prazos', pid); }
+        catch (e) { console.warn('[cliente] getDeadlinesByProcess', e); return []; }
+      };
+      DB.getDjenPublicationsByProcess = async (pid) => {
+        try { return await DB.getByProcessIdRemote('djen', pid); }
+        catch (e) { console.warn('[cliente] getDjenPublicationsByProcess', e); return []; }
+      };
+
+      // getAllDeadlines (visão global) não funciona pra cliente — só por processo.
+      // Quem precisar listar prazos do cliente faria union de getDeadlinesByProcess
+      // pra cada processo dele, mas as UIs de listagem global já estão escondidas.
       DB.getAllDeadlines = _empty;
-      DB.getDeadlinesByProcess = _emptyByPid;
-      DB.getEventsByProcess = _emptyByPid;
+      DB.getAllDjenPublications = _empty;
+
+      // Internos do escritório — bloqueados pra cliente nas rules. Stub direto.
       DB.getNotesByProcess = _emptyByPid;
       DB.getJurisprudenceByProcess = _emptyByPid;
-      DB.getDjenPublicationsByProcess = _emptyByPid;
-      DB.getAllDjenPublications = _empty;
       DB.getAllComunicacoes = _empty;
       DB.getComunicacoesByCliente = _emptyByPid;
       DB.getAllPeticoes = _empty;

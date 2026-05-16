@@ -87,6 +87,22 @@ service cloud.firestore {
             || meuClienteId() in p.get('clienteIds', []));
     }
 
+    // Cliente está vinculado ao processo de ID `pid`? Faz lookup.
+    // Custo: 1 read em /processos/{pid} por avaliação. Firestore faz cache
+    // por path dentro de 1 request — se app fizer query
+    // `where('processId', '==', X)` retornando N docs filhos, só 1 lookup
+    // é cobrado (cache hit). Por isso o app DEVE filtrar por processId
+    // quando role=cliente — sem filtro, Firestore tenta N lookups diferentes
+    // e bate o limite de 10 reads em rules por query.
+    function processoIdDoCliente(pid) {
+      return isCliente()
+        && meuClienteId() != ''
+        && pid != null
+        && pid != ''
+        && exists(/databases/$(database)/documents/processos/$(pid))
+        && isProcDoCliente(get(/databases/$(database)/documents/processos/$(pid)).data);
+    }
+
     // ============================================================
     // users (allowlist)
     // ============================================================
@@ -156,14 +172,33 @@ service cloud.firestore {
     }
 
     // ============================================================
+    // COLEÇÕES DE HISTÓRICO DO PROCESSO
+    // ============================================================
+    // Eventos (movimentos), prazos (publicações com data fatal) e djen
+    // (publicações cruas) são informações do processo que cliente vê
+    // legitimamente — não são interno-escritório. Rule libera SE o
+    // processId está vinculado ao cliente (via lookup).
+
+    match /eventos/{id} {
+      allow read: if isInternal() || processoIdDoCliente(resource.data.processId);
+      allow create, update, delete: if canWrite();
+    }
+    match /prazos/{id} {
+      allow read: if isInternal() || processoIdDoCliente(resource.data.processId);
+      allow create, update, delete: if canWrite();
+    }
+    match /djen/{hash} {
+      allow read: if isInternal() || processoIdDoCliente(resource.data.get('processId', ''));
+      allow create, update, delete: if canWrite();
+    }
+
+    // ============================================================
     // COLEÇÕES INTERNAS (cliente bloqueado)
     // ============================================================
+    // Notas, jurisprudência, comunicações, petições — escritório.
 
-    match /prazos/{id}              { allow read: if isInternal(); allow create, update, delete: if canWrite(); }
-    match /eventos/{id}             { allow read: if isInternal(); allow create, update, delete: if canWrite(); }
     match /notas/{id}               { allow read: if isInternal(); allow create, update, delete: if canWrite(); }
     match /jurisprudencia/{id}      { allow read: if isInternal(); allow create, update, delete: if canWrite(); }
-    match /djen/{hash}              { allow read: if isInternal(); allow create, update, delete: if canWrite(); }
     match /comunicacoes/{id}        { allow read: if isInternal(); allow create, update, delete: if canWrite(); }
     match /peticao_modelos/{id}     { allow read: if isInternal(); allow create, update, delete: if canWrite(); }
     match /peticoes/{id}            { allow read: if isInternal(); allow create, update, delete: if canWrite(); }
