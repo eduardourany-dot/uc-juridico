@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.60.5 (Calculadora: multa contratual + honorários sucumbência sobre bases legais corretas)
-const CACHE_NAME = 'uc-juridico-v6-60-5';
+// Service Worker — UC Jurídico v6.60.6 (Calculadora: multa + honorários CPC art. 523 §1º — cumprimento de sentença não pago)
+const CACHE_NAME = 'uc-juridico-v6-60-6';
 const APP_SHELL = [
   './',
   './index.html',

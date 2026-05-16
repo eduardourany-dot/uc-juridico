@@ -10551,12 +10551,19 @@ const _calcState = {
   multaTaxa: '',
   // Honorários sucumbência (CPC art. 85): aplicados sobre o total final
   // do crédito (principal corrigido + juros + multa). Não incide sobre custas.
-  honSucumbenciaTaxa: ''
+  honSucumbenciaTaxa: '',
+  // Multa e honorários do CPC art. 523 §1º: cumprimento de sentença
+  // não pago voluntariamente em 15 dias úteis. Incidem sobre o débito
+  // (corrigido + juros + multa contratual + honorários originários),
+  // SEM as custas. Default legal: 10% + 10%.
+  aplicarArt523: false,
+  art523MultaTaxa: '10',
+  art523HonTaxa: '10'
 };
 
 // Aplica correção+juros pra UMA LISTA de lançamentos (cada um com data
 // e valor próprios), tudo até uma data final comum. Soma os parciais.
-async function calcularLancamentosMultiplos({ lancamentos, dataFinal, indice, jurosTaxa, jurosTipo, jurosPeriodo, termoQuoJuros, dataJurosGlobal, multaTaxa, honSucumbenciaTaxa }) {
+async function calcularLancamentosMultiplos({ lancamentos, dataFinal, indice, jurosTaxa, jurosTipo, jurosPeriodo, termoQuoJuros, dataJurosGlobal, multaTaxa, honSucumbenciaTaxa, aplicarArt523, art523MultaTaxa, art523HonTaxa }) {
   const parciais = [];
   let totalOriginal = 0, totalCorrigido = 0, totalJuros = 0;
   // Subtotais separados pra base de cálculo da multa e sucumbência:
@@ -10640,8 +10647,25 @@ async function calcularLancamentosMultiplos({ lancamentos, dataFinal, indice, ju
   const honPct = parseFloat(String(honSucumbenciaTaxa || '0').replace(',', '.')) || 0;
   const valorHonSucumbencia = honPct > 0 ? subtotalComMulta * (honPct / 100) : 0;
 
-  // Total devido = principal corrigido com juros + multa + sucumbência + custas
-  const totalGeral = subtotalComMulta + valorHonSucumbencia + subtotalCustasCorrigido;
+  // Débito da fase de conhecimento (sem custas) — base do art. 523 CPC
+  const debitoConhecimento = subtotalComMulta + valorHonSucumbencia;
+
+  // Multa e honorários do CPC art. 523 §1º (cumprimento de sentença não pago
+  // voluntariamente em 15 dias úteis). Calculados sobre o débito da fase
+  // de conhecimento. Defaults legais: 10% + 10%.
+  let valorMulta523 = 0;
+  let valorHon523 = 0;
+  let pctMulta523 = 0;
+  let pctHon523 = 0;
+  if (aplicarArt523) {
+    pctMulta523 = parseFloat(String(art523MultaTaxa || '10').replace(',', '.')) || 0;
+    pctHon523 = parseFloat(String(art523HonTaxa || '10').replace(',', '.')) || 0;
+    valorMulta523 = debitoConhecimento * (pctMulta523 / 100);
+    valorHon523 = debitoConhecimento * (pctHon523 / 100);
+  }
+
+  // Total devido = débito da fase de conhecimento + art. 523 (se aplicado) + custas
+  const totalGeral = debitoConhecimento + valorMulta523 + valorHon523 + subtotalCustasCorrigido;
 
   return {
     parciais,
@@ -10654,6 +10678,12 @@ async function calcularLancamentosMultiplos({ lancamentos, dataFinal, indice, ju
     multaTaxa: multaPct,
     valorHonSucumbencia,
     honSucumbenciaTaxa: honPct,
+    debitoConhecimento,
+    aplicarArt523: !!aplicarArt523,
+    valorMulta523,
+    valorHon523,
+    art523MultaTaxa: pctMulta523,
+    art523HonTaxa: pctHon523,
     totalGeral,
     indiceLabel,
     dataFinal,
@@ -10768,6 +10798,34 @@ async function renderCalculadora() {
             <p class="help-text" style="margin-top:4px;font-size:11px;">CPC art. 85 · sobre total final do crédito (principal + juros + multa).</p>
           </div>
         </div>
+      </div>
+
+      <!-- Art. 523 §1º CPC (cumprimento de sentença não pago) -->
+      <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--uc-line-soft);">
+        <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;">
+          <input type="checkbox" id="calcAplicarArt523" ${_calcState.aplicarArt523 ? 'checked' : ''} onchange="_calcState.aplicarArt523 = this.checked; renderCalculadora();" style="margin-top:3px;">
+          <div>
+            <strong style="font-size:13px;">⚖ Cumprimento de sentença não pago (CPC art. 523 §1º)</strong>
+            <p class="help-text" style="margin:2px 0 0;font-size:11px;">
+              Marcar quando devedor não pagou voluntariamente no prazo de 15 dias úteis após intimação.
+              Acresce multa + honorários adicionais sobre o débito (sem custas).
+            </p>
+          </div>
+        </label>
+        ${_calcState.aplicarArt523 ? `
+          <div class="grid gap-3" style="grid-template-columns: 1fr 1fr;margin-top:10px;margin-left:24px;">
+            <div>
+              <label class="label">Multa art. 523 §1º (%)</label>
+              <input type="number" id="calcArt523MultaTaxa" class="input" step="0.01" min="0" max="100" value="${_calcState.art523MultaTaxa || '10'}" onchange="_calcState.art523MultaTaxa = this.value">
+              <p class="help-text" style="margin-top:4px;font-size:11px;">Default legal: 10%.</p>
+            </div>
+            <div>
+              <label class="label">Honorários art. 523 §1º (%)</label>
+              <input type="number" id="calcArt523HonTaxa" class="input" step="0.01" min="0" max="100" value="${_calcState.art523HonTaxa || '10'}" onchange="_calcState.art523HonTaxa = this.value">
+              <p class="help-text" style="margin-top:4px;font-size:11px;">Default legal: 10%.</p>
+            </div>
+          </div>
+        ` : ''}
       </div>
 
       <div style="margin-top:12px;">
@@ -10900,6 +10958,18 @@ function _calcRenderResultado(r) {
         <p style="font-size:20px;font-weight:600;color:var(--uc-amber);margin:0;">${brl(r.valorHonSucumbencia)}</p>
         <p class="help-text" style="margin-top:4px;">${r.honSucumbenciaTaxa}% sobre total c/ multa</p>
       </div>` : ''}
+      ${r.valorMulta523 > 0 ? `
+      <div class="card" style="border-top:2px solid var(--uc-red);">
+        <p class="text-xs smallcaps" style="color:var(--uc-warm-gray);margin:0 0 4px;">+ Multa art. 523</p>
+        <p style="font-size:20px;font-weight:600;color:var(--uc-red);margin:0;">${brl(r.valorMulta523)}</p>
+        <p class="help-text" style="margin-top:4px;">${r.art523MultaTaxa}% · cumprimento não pago</p>
+      </div>` : ''}
+      ${r.valorHon523 > 0 ? `
+      <div class="card" style="border-top:2px solid var(--uc-red);">
+        <p class="text-xs smallcaps" style="color:var(--uc-warm-gray);margin:0 0 4px;">+ Honor. art. 523</p>
+        <p style="font-size:20px;font-weight:600;color:var(--uc-red);margin:0;">${brl(r.valorHon523)}</p>
+        <p class="help-text" style="margin-top:4px;">${r.art523HonTaxa}% · cumprimento não pago</p>
+      </div>` : ''}
       ${r.subtotalCustasCorrigido > 0 ? `
       <div class="card">
         <p class="text-xs smallcaps" style="color:var(--uc-warm-gray);margin:0 0 4px;">+ Custas corrigidas</p>
@@ -10960,11 +11030,23 @@ function _calcRenderResultado(r) {
           ${(r.valorMulta > 0 || r.valorHonSucumbencia > 0) ? `
           <tr style="background:rgba(184,127,28,0.08);">
             <td colspan="7" style="padding:8px;text-align:right;font-weight:500;color:var(--uc-warm-gray);">
-              ${r.valorMulta > 0 ? `+ Multa (${r.multaTaxa}% sobre principal+juros)` : ''}
+              ${r.valorMulta > 0 ? `+ Multa contratual (${r.multaTaxa}%)` : ''}
               ${r.valorMulta > 0 ? `<strong style="color:var(--uc-black);"> ${brl(r.valorMulta)}</strong>` : ''}
               ${r.valorMulta > 0 && r.valorHonSucumbencia > 0 ? ' · ' : ''}
-              ${r.valorHonSucumbencia > 0 ? `+ Honorários (${r.honSucumbenciaTaxa}%)` : ''}
+              ${r.valorHonSucumbencia > 0 ? `+ Honor. sucumb. (${r.honSucumbenciaTaxa}%)` : ''}
               ${r.valorHonSucumbencia > 0 ? `<strong style="color:var(--uc-black);"> ${brl(r.valorHonSucumbencia)}</strong>` : ''}
+            </td>
+            <td></td>
+          </tr>` : ''}
+          ${r.aplicarArt523 ? `
+          <tr style="background:rgba(178,34,52,0.08);">
+            <td colspan="7" style="padding:8px;text-align:right;font-weight:500;color:var(--uc-red);">
+              ⚖ CPC art. 523 §1º — débito não pago em 15 dias:
+              ${r.valorMulta523 > 0 ? `+ Multa ${r.art523MultaTaxa}%` : ''}
+              ${r.valorMulta523 > 0 ? `<strong style="color:var(--uc-red);"> ${brl(r.valorMulta523)}</strong>` : ''}
+              ${r.valorMulta523 > 0 && r.valorHon523 > 0 ? ' · ' : ''}
+              ${r.valorHon523 > 0 ? `+ Honor. ${r.art523HonTaxa}%` : ''}
+              ${r.valorHon523 > 0 ? `<strong style="color:var(--uc-red);"> ${brl(r.valorHon523)}</strong>` : ''}
             </td>
             <td></td>
           </tr>` : ''}
@@ -11111,7 +11193,10 @@ async function _calcExecutar() {
       termoQuoJuros,
       dataJurosGlobal,
       multaTaxa: _calcState.multaTaxa,
-      honSucumbenciaTaxa: _calcState.honSucumbenciaTaxa
+      honSucumbenciaTaxa: _calcState.honSucumbenciaTaxa,
+      aplicarArt523: _calcState.aplicarArt523,
+      art523MultaTaxa: _calcState.art523MultaTaxa,
+      art523HonTaxa: _calcState.art523HonTaxa
     });
     _calcState.resultado = resultado;
     _calcState.erro = null;
