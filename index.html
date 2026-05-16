@@ -10747,12 +10747,17 @@ const _calcState = {
   // STJ Súmula 168 + Tema 969 STJ confirmaram constitucionalidade.
   // Aplicado sobre o débito atualizado (sem custas).
   aplicarDL1025: false,
-  dl1025Taxa: '20'  // % default legal
+  dl1025Taxa: '20',  // % default legal
+  // Teto SELIC dos Temas 1062 (estados) e 1217 (municípios) do STF:
+  // débitos estaduais/municipais não podem ter correção + juros que
+  // excedam a SELIC praticada pela União. Quando ligado, app compara
+  // o método local com a SELIC e aplica o menor (limita ao teto).
+  aplicarTetoSelic: true
 };
 
 // Aplica correção+juros pra UMA LISTA de lançamentos (cada um com data
 // e valor próprios), tudo até uma data final comum. Soma os parciais.
-async function calcularLancamentosMultiplos({ lancamentos, dataFinal, indice, jurosTaxa, jurosTipo, jurosPeriodo, termoQuoJuros, dataJurosGlobal, multaTaxa, honSucumbenciaTaxa, aplicarArt523, art523MultaTaxa, art523HonTaxa, aplicarDL1025, dl1025Taxa }) {
+async function calcularLancamentosMultiplos({ lancamentos, dataFinal, indice, jurosTaxa, jurosTipo, jurosPeriodo, termoQuoJuros, dataJurosGlobal, multaTaxa, honSucumbenciaTaxa, aplicarArt523, art523MultaTaxa, art523HonTaxa, aplicarDL1025, dl1025Taxa, aplicarTetoSelic, esfera }) {
   const parciais = [];
   let totalOriginal = 0, totalCorrigido = 0, totalJuros = 0;
   // Subtotais separados pra base de cálculo da multa e sucumbência:
@@ -10826,10 +10831,65 @@ async function calcularLancamentosMultiplos({ lancamentos, dataFinal, indice, ju
     indiceLabel = r.indiceLabel;
   }
 
-  // Multa contratual (CC art. 412): sobre (principal corrigido + juros)
+  // === TETO SELIC dos Temas 1062 (estados) e 1217 (municípios) ===
+  // Quando aplicarTetoSelic e esfera é estadual/municipal, calcula
+  // paralelamente o "subtotal SELIC" (valor inicial atualizado pela
+  // SELIC mensal acumulada entre dataLanc e dataFinal) e compara com
+  // o subtotal pelo método local. Se método local > SELIC, aplica
+  // SELIC como teto.
+  let subtotalSelicPrincipal = 0;
+  let usouTetoSelic = false;
+  let excessoTeto = 0;
+  const ehEsferaSubFederal = (esfera === 'estadual' || esfera === 'municipal');
+  if (aplicarTetoSelic && ehEsferaSubFederal && parciais.length > 0) {
+    try {
+      // Pega data mais antiga entre os lançamentos principais pra fetch único
+      const dataMaisAntiga = parciais
+        .filter(p => p.tipo !== 'custas')
+        .map(p => p.lancamento.data)
+        .sort()[0];
+      if (dataMaisAntiga) {
+        const serieSelic = await bcbFetchSerie(BCB_INDICES.SELIC.codigo, dataMaisAntiga, dataFinal);
+        // Pra cada lançamento principal, computa o fator SELIC acumulado
+        // entre a data do lançamento e dataFinal
+        for (const p of parciais) {
+          if (p.tipo === 'custas') continue;
+          let fator = 1;
+          const dataLancISO = p.lancamento.data;
+          for (const item of serieSelic) {
+            // item.data está em DD/MM/YYYY — converter pra ISO
+            const [d, m, y] = item.data.split('/');
+            const itemISO = `${y}-${m}-${d}`;
+            if (itemISO >= dataLancISO) {
+              const varMes = parseFloat(item.valor.replace(',', '.'));
+              if (!isNaN(varMes)) fator *= (1 + varMes / 100);
+            }
+          }
+          const valorComSelic = p.valorInicial * fator;
+          subtotalSelicPrincipal += valorComSelic;
+          // Guarda no parcial pra exibição no card de Confronto Tema
+          p.valorComSelicTeto = valorComSelic;
+          p.fatorSelicTeto = fator;
+        }
+        // Compara: se método local supera SELIC, há excesso
+        if (subtotalSelicPrincipal > 0 && subtotalSelicPrincipal < subtotalPrincipalCorrJuros) {
+          usouTetoSelic = true;
+          excessoTeto = subtotalPrincipalCorrJuros - subtotalSelicPrincipal;
+        }
+      }
+    } catch (e) {
+      console.warn('[calc] falha ao buscar série SELIC pra teto Tema 1062/1217', e);
+    }
+  }
+
+  // BASE EFETIVA pra multa/sucumbência/art523/dl1025:
+  // se aplicou teto SELIC, usa subtotalSelicPrincipal; senão, o local
+  const baseEfetiva = usouTetoSelic ? subtotalSelicPrincipal : subtotalPrincipalCorrJuros;
+
+  // Multa contratual (CC art. 412): sobre (principal corrigido + juros), com teto se aplicável
   const multaPct = parseFloat(String(multaTaxa || '0').replace(',', '.')) || 0;
-  const valorMulta = multaPct > 0 ? subtotalPrincipalCorrJuros * (multaPct / 100) : 0;
-  const subtotalComMulta = subtotalPrincipalCorrJuros + valorMulta;
+  const valorMulta = multaPct > 0 ? baseEfetiva * (multaPct / 100) : 0;
+  const subtotalComMulta = baseEfetiva + valorMulta;
 
   // Honorários sucumbência (CPC art. 85): sobre total final do crédito
   // (principal + juros + multa). Não incide sobre custas.
@@ -10888,6 +10948,12 @@ async function calcularLancamentosMultiplos({ lancamentos, dataFinal, indice, ju
     aplicarDL1025: !!aplicarDL1025,
     valorDL1025,
     dl1025Taxa: pctDL1025,
+    // Teto SELIC dos Temas 1062 (estados) e 1217 (municípios)
+    aplicarTetoSelic: !!aplicarTetoSelic,
+    esfera: esfera || 'federal',
+    subtotalSelicPrincipal,  // valor com SELIC aplicada (pra confronto)
+    usouTetoSelic,           // se houve limitação pelo teto
+    excessoTeto,             // diferença local − SELIC (excesso identificado)
     totalGeral,
     indiceLabel,
     dataFinal,
@@ -11249,6 +11315,24 @@ function _calcRenderEsferaCard() {
           Preset padrão: IPCA + 1% a.m. simples. Verifique a legislação do município e ajuste.
         </div>
       `}
+
+      ${(esfera === 'estadual' || esfera === 'municipal') ? `
+        <!-- Teto SELIC dos Temas 1062 e 1217 STF -->
+        <div style="margin-top:10px;padding:10px;background:rgba(74,124,74,0.06);border-radius:4px;border-left:3px solid var(--uc-green);">
+          <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;">
+            <input type="checkbox" id="calcAplicarTetoSelic" ${_calcState.aplicarTetoSelic ? 'checked' : ''} onchange="_calcState.aplicarTetoSelic = this.checked; renderCalculadora();" style="margin-top:3px;">
+            <div style="flex:1;">
+              <strong style="font-size:13px;color:var(--uc-green);">⚖ Aplicar teto SELIC (Tema ${esfera === 'estadual' ? '1062' : '1217'} STF)</strong>
+              <p class="help-text" style="margin:2px 0 0;font-size:11px;">
+                ${esfera === 'estadual'
+                  ? 'STF Tema 1062 (ARE 1216078): estados não podem cobrar correção + juros que excedam a SELIC praticada pela União.'
+                  : 'STF Tema 1217 (RE 1346152): municípios não podem cobrar correção + juros que excedam a SELIC praticada pela União.'}
+                Quando ligado, app compara o método local com a SELIC e aplica o MENOR valor + identifica o excesso pra defesa.
+              </p>
+            </div>
+          </label>
+        </div>
+      ` : ''}
     </div>
   `;
 }
@@ -11654,9 +11738,10 @@ function _calcRenderResultado(r) {
       <div class="card" style="border-left:3px solid var(--uc-green);">
         <p class="text-xs smallcaps" style="color:var(--uc-warm-gray);margin:0 0 4px;">Total devido</p>
         <p style="font-size:22px;font-weight:700;color:var(--uc-green);margin:0;">${brl(r.totalGeral)}</p>
-        <p class="help-text" style="margin-top:4px;">em ${_brDate(r.dataFinal)}</p>
+        <p class="help-text" style="margin-top:4px;">em ${_brDate(r.dataFinal)}${r.usouTetoSelic ? ' · ⚖ Teto SELIC aplicado' : ''}</p>
       </div>
       ${_calcRenderConfronto(r)}
+      ${_calcRenderConfrontoTema(r)}
     </div>
 
     <!-- Tabela de parciais (1 linha por lançamento) -->
@@ -11971,6 +12056,42 @@ function _brDate(iso) {
   return `${d}/${m}/${y}`;
 }
 
+// Card de confronto método local vs SELIC (Tema 1062 estados / 1217 municípios STF).
+// Mostra os 2 cálculos lado a lado + identifica EXCESSO da legislação local.
+function _calcRenderConfrontoTema(r) {
+  if (!r || !r.aplicarTetoSelic) return '';
+  if (r.esfera !== 'estadual' && r.esfera !== 'municipal') return '';
+  if (!r.subtotalSelicPrincipal || r.subtotalSelicPrincipal <= 0) return '';
+
+  const brl = v => 'R$ ' + (v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const tema = r.esfera === 'estadual' ? '1062' : '1217';
+  const tipoEnte = r.esfera === 'estadual' ? 'estados' : 'municípios';
+  const subtotalLocal = r.totalCorrigido + r.totalJuros - r.subtotalCustasCorrigido;
+  // Corrige pra extrair só o principal corrigido + juros (sem custas que somam em totalCorrigido)
+  // Como r.totalCorrigido e r.totalJuros já incluem custas, vamos pegar direto subtotalPrincipalCorrJuros
+  // (mas esse não está sempre no retorno; usamos a soma das parciais não-custas)
+  let subtotalLocalCalc = 0;
+  for (const p of r.parciais) {
+    if (p.tipo !== 'custas') subtotalLocalCalc += (p.valorCorrigido + p.valorJuros);
+  }
+  const pctExcesso = subtotalLocalCalc > 0 ? (r.excessoTeto / subtotalLocalCalc * 100) : 0;
+
+  return `
+    <div class="card" style="border-left:3px solid ${r.usouTetoSelic ? 'var(--uc-red)' : 'var(--uc-green)'};${r.usouTetoSelic ? '' : 'opacity:.85;'}">
+      <p class="text-xs smallcaps" style="color:var(--uc-warm-gray);margin:0 0 4px;">⚖ Tema ${tema} STF</p>
+      <p style="font-size:11px;line-height:1.3;margin:0 0 6px;">Método local: <strong>${brl(subtotalLocalCalc)}</strong></p>
+      <p style="font-size:11px;line-height:1.3;margin:0 0 6px;">Pela SELIC: <strong>${brl(r.subtotalSelicPrincipal)}</strong></p>
+      ${r.usouTetoSelic ? `
+        <p style="font-size:13px;font-weight:700;color:var(--uc-red);margin:0;">Excesso: +${brl(r.excessoTeto)}</p>
+        <p class="help-text" style="margin-top:4px;font-size:10px;">Reduzido pelo teto (${pctExcesso.toFixed(2)}% de excesso identificado)</p>
+      ` : `
+        <p style="font-size:13px;font-weight:600;color:var(--uc-green);margin:0;">✓ Dentro do teto</p>
+        <p class="help-text" style="margin-top:4px;font-size:10px;">Método local ≤ SELIC · ${tipoEnte} OK</p>
+      `}
+    </div>
+  `;
+}
+
 // Card de confronto entre o cálculo devido e o valor cobrado pela Fazenda.
 // Só aparece quando algum lançamento tem valorCobrado preenchido (modo Fiscal).
 function _calcRenderConfronto(r) {
@@ -12065,7 +12186,9 @@ async function _calcExecutar() {
       art523MultaTaxa: _calcState.art523MultaTaxa,
       art523HonTaxa: _calcState.art523HonTaxa,
       aplicarDL1025: _calcState.aplicarDL1025,
-      dl1025Taxa: _calcState.dl1025Taxa
+      dl1025Taxa: _calcState.dl1025Taxa,
+      aplicarTetoSelic: _calcState.aplicarTetoSelic,
+      esfera: _calcState.esfera
     });
     _calcState.resultado = resultado;
     _calcState.erro = null;
