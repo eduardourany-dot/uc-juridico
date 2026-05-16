@@ -53,8 +53,9 @@ body{background:var(--uc-paper);color:var(--uc-graphite);font-size:15px;-webkit-
 .sidebar{background:white;border-right:1px solid var(--uc-line);padding:20px 0;position:sticky;top:0;height:100vh;overflow-y:auto;display:flex;flex-direction:column}
 [data-theme="dark"] .sidebar{background:#1c1a14}
 .sidebar-logo{padding:0 20px 20px;border-bottom:1px solid var(--uc-line-soft);margin-bottom:16px}
-.sidebar-logo img{width:100%;max-width:180px}
+.sidebar-logo img,.sidebar-logo video{width:100%;max-width:180px;display:block}
 [data-theme="dark"] .sidebar-logo img{filter:invert(1) brightness(0.95)}
+/* Não invertemos o vídeo no dark — vídeo é colorido/animado, inverter degrada. */
 .nav-section{padding:8px 12px 4px;font-size:11px;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;color:var(--uc-warm-gray)}
 .nav-item{display:flex;align-items:center;gap:12px;padding:10px 20px;color:var(--uc-graphite);text-decoration:none;border-left:3px solid transparent;transition:all 0.15s;cursor:pointer;font-size:14px}
 .nav-item:hover{background:var(--uc-cream)}
@@ -273,7 +274,10 @@ body.cliente-mode .nav-section { display: none !important; }
 
   <aside class="sidebar">
     <div class="sidebar-logo">
-      <img src="logo.png" alt="Urany de Castro Advocacia">
+      <video autoplay loop muted playsinline poster="logo.png" aria-label="Urany de Castro Advocacia">
+        <source src="logo.mp4" type="video/mp4">
+        <img src="logo.png" alt="Urany de Castro Advocacia">
+      </video>
     </div>
 
     <div class="nav-section">Carteira</div>

@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.58.3 (cliente: tab Honorários sem orientação de cadastro/financeiro)
-const CACHE_NAME = 'uc-juridico-v6-58-3';
+// Service Worker — UC Jurídico v6.59.0 (logo animada — substitui logo.png por logo.mp4 no sidebar)
+const CACHE_NAME = 'uc-juridico-v6-59-0';
 const APP_SHELL = [
   './',
   './index.html',
@@ -8,6 +8,7 @@ const APP_SHELL = [
   './api.js',
   './messaging.js',
   './logo.png',
+  './logo.mp4',
   './icon-192.png',
   './icon-512.png',
   './icon-maskable-512.png',
