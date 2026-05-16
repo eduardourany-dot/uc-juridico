@@ -64,6 +64,8 @@ body{background:var(--uc-paper);color:var(--uc-graphite);font-size:15px;-webkit-
    na whitelist [dashboard, processes, deadlines, agenda, tools]. Esconde
    também os labels de seção ("Carteira", "Operacional", "Sistema") pra
    visual limpo. Aplicado quando body.cliente-mode (setado em bootApp). */
+/* Cliente vê só: dashboard, processes, agenda, tools, settings.
+   Calculadora, Financeiro, Relatório, Modelos, Equipe, Diligência são interno-escritório. */
 body.cliente-mode .sidebar .nav-item:not([data-route="dashboard"]):not([data-route="processes"]):not([data-route="agenda"]):not([data-route="tools"]):not([data-route="settings"]),
 body.cliente-mode .mobile-nav .nav-item:not([data-route="dashboard"]):not([data-route="processes"]):not([data-route="agenda"]):not([data-route="tools"]):not([data-route="settings"]),
 body.cliente-mode .nav-section { display: none !important; }
@@ -308,6 +310,10 @@ body.cliente-mode .nav-section { display: none !important; }
     <a class="nav-item" data-route="financeiro">
       <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
       <span>Financeiro</span>
+    </a>
+    <a class="nav-item" data-route="calculadora">
+      <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 7h6m-6 4h6m-6 4h4m1 5H7a2 2 0 01-2-2V5a2 2 0 012-2h10a2 2 0 012 2v14a2 2 0 01-2 2z"/></svg>
+      <span>Calculadora</span>
     </a>
     <a class="nav-item" data-route="relatorio">
       <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
@@ -758,6 +764,7 @@ const routes = {
   deadlines: renderDeadlines,
   agenda: renderAgenda,
   financeiro: renderFinanceiro,
+  calculadora: renderCalculadora,
   relatorio: renderRelatorio,
   modelos: renderModelosPeticao,
   equipe: renderEquipe,
@@ -10366,6 +10373,396 @@ function _renderDelta(d, casas) {
   const s = (d > 0 ? '+' : '') + d.toFixed(casas || 1) + '%';
   const cor = d > 0 ? 'var(--uc-green)' : 'var(--uc-red)';
   return `<span style="color: ${cor}; font-weight: 600;">${s}</span>`;
+}
+
+// ====================================================================
+// === CALCULADORA — Atualização monetária + juros + multa
+// ====================================================================
+// P1 do roadmap. Substitui planilhas externas / Bacen-Jus pra correção
+// de valores em cobrança/execução. Busca índices da API pública BCB
+// (https://api.bcb.gov.br/dados/serie/bcdata.sgs.{codigo}/dados).
+//
+// Códigos SGS suportados:
+//   188 = INPC          433  = IPCA           4189 = SELIC mensal (% a.m.)
+//   189 = IGP-M         226  = TR             1178 = SELIC acumulada anual
+//                       4391 = CDI mensal
+//
+// API BCB retorna variação MENSAL (%) — pra correção, acumulamos via
+// produto (1 + var/100) mês a mês.
+
+const BCB_INDICES = {
+  INPC:    { codigo: 188,  label: 'INPC (IBGE)',                   tipo: 'mensal_pct' },
+  IGPM:    { codigo: 189,  label: 'IGP-M (FGV)',                   tipo: 'mensal_pct' },
+  IPCA:    { codigo: 433,  label: 'IPCA (IBGE)',                   tipo: 'mensal_pct' },
+  SELIC:   { codigo: 4189, label: 'SELIC mensal (% a.m.)',         tipo: 'mensal_pct' },
+  TR:      { codigo: 226,  label: 'TR (Taxa Referencial)',         tipo: 'mensal_pct' },
+  CDI:     { codigo: 4391, label: 'CDI mensal (% a.m.)',           tipo: 'mensal_pct' }
+};
+
+// Cache em memória (TTL 30min) — APIs do BCB são lentas (1-3s/req)
+const _bcbCache = new Map();
+const _BCB_TTL = 30 * 60 * 1000;
+
+async function bcbFetchSerie(codigoSGS, dataInicial, dataFinal) {
+  // dataInicial/Final: ISO 'YYYY-MM-DD' → API BCB quer 'DD/MM/YYYY'
+  const fmt = iso => {
+    const [y, m, d] = iso.split('-');
+    return `${d}/${m}/${y}`;
+  };
+  const di = fmt(dataInicial);
+  const df = fmt(dataFinal);
+  const cacheKey = `${codigoSGS}|${di}|${df}`;
+  const cached = _bcbCache.get(cacheKey);
+  if (cached && Date.now() - cached.at < _BCB_TTL) return cached.data;
+
+  const url = `https://api.bcb.gov.br/dados/serie/bcdata.sgs.${codigoSGS}/dados?formato=json&dataInicial=${di}&dataFinal=${df}`;
+  const resp = await fetch(url);
+  if (!resp.ok) throw new Error(`BCB HTTP ${resp.status} ao buscar série ${codigoSGS}`);
+  const data = await resp.json();
+  // Schema: [{ data: 'DD/MM/YYYY', valor: '0.57' }, ...]
+  _bcbCache.set(cacheKey, { at: Date.now(), data });
+  return data;
+}
+
+/**
+ * Aplica correção + juros sobre um valor.
+ * @param {object} p
+ * @param {number} p.valorInicial
+ * @param {string} p.dataInicial - ISO YYYY-MM-DD
+ * @param {string} p.dataFinal   - ISO YYYY-MM-DD
+ * @param {string} p.indice      - chave de BCB_INDICES (ex 'INPC')
+ * @param {number} p.jurosTaxa   - taxa em % (ex 1 = 1% a.m.)
+ * @param {string} p.jurosTipo   - 'simples' | 'composto'
+ * @param {string} p.jurosPeriodo - 'mensal' | 'anual'
+ * @returns {Promise<object>} { valorCorrigido, valorJuros, valorTotal, fator, memoria[] }
+ */
+async function calcularCorrecaoMonetaria(p) {
+  const ind = BCB_INDICES[p.indice];
+  if (!ind) throw new Error('Índice não suportado: ' + p.indice);
+
+  const serie = await bcbFetchSerie(ind.codigo, p.dataInicial, p.dataFinal);
+  if (!serie || serie.length === 0) {
+    throw new Error('BCB retornou série vazia. Verifique se o período tem dados publicados.');
+  }
+
+  // Acumula variação mensal: fator = produto de (1 + var/100)
+  let fator = 1;
+  const memoria = [];
+  for (const item of serie) {
+    const varMes = parseFloat(item.valor.replace(',', '.'));
+    if (isNaN(varMes)) continue;
+    fator *= (1 + varMes / 100);
+    memoria.push({
+      data: item.data,         // 'DD/MM/YYYY'
+      indiceMes: varMes,       // % do mês
+      fatorAcumulado: fator    // multiplicador acumulado até esse mês
+    });
+  }
+
+  const valorCorrigido = p.valorInicial * fator;
+
+  // Juros sobre valor corrigido (após correção monetária)
+  let valorJuros = 0;
+  if (p.jurosTaxa > 0) {
+    const meses = serie.length;
+    const taxaMensal = p.jurosPeriodo === 'anual' ? (p.jurosTaxa / 12) : p.jurosTaxa;
+    if (p.jurosTipo === 'composto') {
+      valorJuros = valorCorrigido * (Math.pow(1 + taxaMensal/100, meses) - 1);
+    } else {
+      valorJuros = valorCorrigido * (taxaMensal/100) * meses;
+    }
+  }
+
+  return {
+    valorInicial: p.valorInicial,
+    valorCorrigido,
+    valorJuros,
+    valorTotal: valorCorrigido + valorJuros,
+    fator,
+    mesesPeriodo: serie.length,
+    indiceLabel: ind.label,
+    memoria
+  };
+}
+
+const _calcState = {
+  tab: 'civil',
+  resultado: null,
+  loading: false,
+  erro: null
+};
+
+async function renderCalculadora() {
+  const tab = _calcState.tab || 'civil';
+  const r = _calcState.resultado;
+  const indexOpts = Object.entries(BCB_INDICES)
+    .map(([k, v]) => `<option value="${k}">${v.label}</option>`)
+    .join('');
+
+  // Defaults: hoje no final, 1 ano atrás no início
+  const hoje = new Date();
+  const _isoDate = d => d.toISOString().slice(0, 10);
+  const umAnoAtras = new Date(hoje); umAnoAtras.setFullYear(umAnoAtras.getFullYear() - 1);
+
+  $('appContent').innerHTML = `
+    <div class="page-header">
+      <div>
+        <h1 class="page-title"><span class="smallcaps-prefix">Calculadora</span></h1>
+        <p class="page-subtitle">Atualização monetária com índices BCB + juros + memória de cálculo</p>
+      </div>
+    </div>
+
+    <div class="tabs" style="margin-bottom: 16px;">
+      <button class="tab ${tab === 'civil' ? 'active' : ''}" onclick="_calcSetTab('civil')">Cível (atualização + juros)</button>
+      <button class="tab ${tab === 'fiscal' ? 'active' : ''}" onclick="_calcSetTab('fiscal')" title="Em desenvolvimento (fase 2)" disabled style="opacity:.5;cursor:not-allowed;">Fiscal (fase 2)</button>
+    </div>
+
+    <div class="grid gap-4" style="grid-template-columns: 380px 1fr; align-items: flex-start;">
+
+      <!-- ===== FORM ===== -->
+      <div class="card">
+        <h3 class="font-serif text-lg font-semibold smallcaps mb-3" style="color: var(--uc-black);">Dados do cálculo</h3>
+
+        <div class="space-y-3">
+          <div>
+            <label class="label">Valor original (R$)</label>
+            <input type="number" id="calcValor" class="input" step="0.01" min="0" placeholder="Ex.: 10000,00" value="${r ? r.input?.valorInicial || '' : ''}">
+          </div>
+
+          <div class="grid gap-2" style="grid-template-columns: 1fr 1fr;">
+            <div>
+              <label class="label">Data inicial</label>
+              <input type="date" id="calcDataIni" class="input" value="${r?.input?.dataInicial || _isoDate(umAnoAtras)}">
+            </div>
+            <div>
+              <label class="label">Data final</label>
+              <input type="date" id="calcDataFim" class="input" value="${r?.input?.dataFinal || _isoDate(hoje)}">
+            </div>
+          </div>
+
+          <div>
+            <label class="label">Índice de correção</label>
+            <select id="calcIndice" class="select">
+              ${indexOpts}
+            </select>
+          </div>
+
+          <div>
+            <label class="label">Juros (opcional)</label>
+            <div class="grid gap-2" style="grid-template-columns: 1fr 1fr 1fr;">
+              <div>
+                <input type="number" id="calcJurosTaxa" class="input" step="0.01" min="0" placeholder="Taxa %" value="${r?.input?.jurosTaxa || '1'}">
+              </div>
+              <div>
+                <select id="calcJurosPeriodo" class="select">
+                  <option value="mensal">% a.m.</option>
+                  <option value="anual">% a.a.</option>
+                </select>
+              </div>
+              <div>
+                <select id="calcJurosTipo" class="select">
+                  <option value="simples">Simples</option>
+                  <option value="composto">Composto</option>
+                </select>
+              </div>
+            </div>
+            <p class="help-text" style="margin-top:6px;">Aplicados sobre o valor já corrigido. Deixe 0 pra calcular só atualização monetária.</p>
+          </div>
+
+          <div>
+            <label class="label">Nome do cálculo (opcional)</label>
+            <input type="text" id="calcNome" class="input" placeholder="Ex.: Liquidação ACME × Banco" value="${r?.input?.nome || ''}">
+          </div>
+
+          <div class="flex gap-2 mt-4">
+            <button class="btn btn-primary" onclick="_calcExecutar()" style="flex:1;">
+              ${_calcState.loading ? '⏳ Calculando...' : '🧮 Calcular'}
+            </button>
+            ${r ? `<button class="btn btn-outline" onclick="_calcSalvar()" title="Grava em /calculos no Firestore">💾 Salvar</button>` : ''}
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== RESULTADO ===== -->
+      <div>
+        ${_calcRenderResultado(r)}
+      </div>
+    </div>
+  `;
+
+  // Pré-seleciona o índice se houver no estado
+  if (r?.input?.indice) {
+    const sel = $('calcIndice');
+    if (sel) sel.value = r.input.indice;
+  }
+  if (r?.input?.jurosPeriodo) {
+    const sel = $('calcJurosPeriodo');
+    if (sel) sel.value = r.input.jurosPeriodo;
+  }
+  if (r?.input?.jurosTipo) {
+    const sel = $('calcJurosTipo');
+    if (sel) sel.value = r.input.jurosTipo;
+  }
+}
+
+function _calcSetTab(t) {
+  _calcState.tab = t;
+  renderCalculadora();
+}
+
+function _calcRenderResultado(r) {
+  if (_calcState.loading) {
+    return `<div class="card text-center" style="padding:40px;">
+      <div style="display:inline-block;border:3px solid #d4cfc0;border-top-color:var(--uc-gold);border-radius:50%;width:32px;height:32px;animation:spin 0.8s linear infinite;margin-bottom:12px;"></div>
+      <p>Consultando série histórica do BCB…</p>
+    </div>`;
+  }
+  if (_calcState.erro) {
+    return `<div class="card" style="border-left:3px solid var(--uc-red);">
+      <p style="color:var(--uc-red);"><strong>Erro:</strong> ${escapeHtml(_calcState.erro)}</p>
+    </div>`;
+  }
+  if (!r) {
+    return `<div class="card text-center" style="padding:60px;">
+      <p style="color:var(--uc-warm-gray);">Preencha o formulário e clique em <strong>Calcular</strong>.</p>
+      <p class="help-text" style="margin-top:8px;">Os dados de correção vêm direto da API pública do Banco Central do Brasil (BCB).</p>
+    </div>`;
+  }
+
+  const brl = v => 'R$ ' + (v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const pct = v => ((v - 1) * 100).toFixed(4) + '%';
+  return `
+    <div class="grid gap-3 mb-4" style="grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));">
+      <div class="card">
+        <p class="text-xs smallcaps" style="color:var(--uc-warm-gray);margin:0 0 4px;">Valor original</p>
+        <p style="font-size:20px;font-weight:600;margin:0;">${brl(r.valorInicial)}</p>
+        <p class="help-text" style="margin-top:4px;">em ${_brDate(r.input.dataInicial)}</p>
+      </div>
+      <div class="card">
+        <p class="text-xs smallcaps" style="color:var(--uc-warm-gray);margin:0 0 4px;">+ Correção (${r.indiceLabel.split(' ')[0]})</p>
+        <p style="font-size:20px;font-weight:600;color:var(--uc-amber);margin:0;">${brl(r.valorCorrigido - r.valorInicial)}</p>
+        <p class="help-text" style="margin-top:4px;">fator ${r.fator.toFixed(6)} (${pct(r.fator)})</p>
+      </div>
+      ${r.valorJuros > 0 ? `
+      <div class="card">
+        <p class="text-xs smallcaps" style="color:var(--uc-warm-gray);margin:0 0 4px;">+ Juros</p>
+        <p style="font-size:20px;font-weight:600;color:var(--uc-amber);margin:0;">${brl(r.valorJuros)}</p>
+        <p class="help-text" style="margin-top:4px;">${r.input.jurosTaxa}% ${r.input.jurosPeriodo} (${r.input.jurosTipo})</p>
+      </div>` : ''}
+      <div class="card" style="border-left:3px solid var(--uc-green);">
+        <p class="text-xs smallcaps" style="color:var(--uc-warm-gray);margin:0 0 4px;">Total devido</p>
+        <p style="font-size:22px;font-weight:700;color:var(--uc-green);margin:0;">${brl(r.valorTotal)}</p>
+        <p class="help-text" style="margin-top:4px;">em ${_brDate(r.input.dataFinal)} · ${r.mesesPeriodo} meses</p>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3 class="font-serif text-lg font-semibold smallcaps mb-3" style="color:var(--uc-black);">Memória do cálculo · ${r.indiceLabel}</h3>
+      <div style="max-height:400px;overflow-y:auto;">
+        <table style="width:100%;font-size:12px;border-collapse:collapse;">
+          <thead style="position:sticky;top:0;background:var(--uc-cream);">
+            <tr>
+              <th style="text-align:left;padding:6px 8px;">Mês</th>
+              <th style="text-align:right;padding:6px 8px;">Variação</th>
+              <th style="text-align:right;padding:6px 8px;">Fator acumulado</th>
+              <th style="text-align:right;padding:6px 8px;">Valor corrigido</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${r.memoria.map(m => `
+              <tr style="border-bottom:1px solid var(--uc-line-soft);">
+                <td style="padding:4px 8px;">${m.data}</td>
+                <td style="padding:4px 8px;text-align:right;${m.indiceMes < 0 ? 'color:var(--uc-red);' : ''}">${m.indiceMes.toFixed(4)}%</td>
+                <td style="padding:4px 8px;text-align:right;font-family:ui-monospace,monospace;">${m.fatorAcumulado.toFixed(8)}</td>
+                <td style="padding:4px 8px;text-align:right;font-weight:500;">${brl(r.valorInicial * m.fatorAcumulado)}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
+function _brDate(iso) {
+  if (!iso) return '';
+  const [y, m, d] = iso.split('-');
+  return `${d}/${m}/${y}`;
+}
+
+async function _calcExecutar() {
+  const valor = parseFloat($('calcValor').value.replace(',', '.'));
+  const dataIni = $('calcDataIni').value;
+  const dataFim = $('calcDataFim').value;
+  const indice = $('calcIndice').value;
+  const jurosTaxa = parseFloat($('calcJurosTaxa').value.replace(',', '.')) || 0;
+  const jurosPeriodo = $('calcJurosPeriodo').value;
+  const jurosTipo = $('calcJurosTipo').value;
+  const nome = $('calcNome').value.trim();
+
+  if (!valor || valor <= 0) { toast('Valor inválido', 'Informe um valor maior que zero.', 'error'); return; }
+  if (!dataIni || !dataFim) { toast('Datas obrigatórias', '', 'error'); return; }
+  if (new Date(dataIni) >= new Date(dataFim)) { toast('Data inicial deve ser antes da final', '', 'error'); return; }
+
+  _calcState.loading = true;
+  _calcState.erro = null;
+  renderCalculadora();
+
+  try {
+    const resultado = await calcularCorrecaoMonetaria({
+      valorInicial: valor,
+      dataInicial: dataIni,
+      dataFinal: dataFim,
+      indice,
+      jurosTaxa,
+      jurosTipo,
+      jurosPeriodo
+    });
+    resultado.input = { valorInicial: valor, dataInicial: dataIni, dataFinal: dataFim, indice, jurosTaxa, jurosTipo, jurosPeriodo, nome };
+    _calcState.resultado = resultado;
+    _calcState.erro = null;
+  } catch (e) {
+    _calcState.erro = e.message || String(e);
+    _calcState.resultado = null;
+  } finally {
+    _calcState.loading = false;
+  }
+  renderCalculadora();
+}
+
+async function _calcSalvar() {
+  if (!_calcState.resultado) return;
+  const r = _calcState.resultado;
+  const nome = (r.input.nome || '').trim() || `Cálculo ${r.indiceLabel.split(' ')[0]} ${_brDate(r.input.dataInicial)}→${_brDate(r.input.dataFinal)}`;
+  const me = window.UC_Auth?.getUser?.() || {};
+  const doc = {
+    id: 'calc_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8),
+    tipo: 'civil',
+    nome,
+    input: r.input,
+    resultado: {
+      valorInicial: r.valorInicial,
+      valorCorrigido: r.valorCorrigido,
+      valorJuros: r.valorJuros,
+      valorTotal: r.valorTotal,
+      fator: r.fator,
+      mesesPeriodo: r.mesesPeriodo,
+      indiceLabel: r.indiceLabel
+    },
+    // memória pode ser pesada — manter inline pra reprodutibilidade
+    memoria: r.memoria,
+    escritorio_id: 'UC',
+    deletedAt: null,
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+    updatedBy: me.email || 'unknown'
+  };
+  try {
+    await DB.saveCalculo(doc);
+    toast('Cálculo salvo', nome, 'success');
+  } catch (e) {
+    toast('Falha ao salvar', e.message || String(e), 'error');
+  }
 }
 
 async function renderRelatorio() {

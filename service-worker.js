@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.59.2 (logo animada — sem padding lateral, ocupa sidebar inteira)
-const CACHE_NAME = 'uc-juridico-v6-59-2';
+// Service Worker — UC Jurídico v6.60.0 (P1: Calculadora — atualização monetária via API BCB + juros)
+const CACHE_NAME = 'uc-juridico-v6-60-0';
 const APP_SHELL = [
   './',
   './index.html',

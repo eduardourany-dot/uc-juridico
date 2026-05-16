@@ -147,7 +147,19 @@ function parseContatos() {
     // Astrea usa "Pessoa Física" e "Pessoa Jurídica" literais.
     // Acentos e variações ("juridica") cobertos pelo strip de acentos.
     const tipoNorm = tipoRaw.normalize('NFD').replace(/[̀-ͯ]/g, '');
-    const tipo = tipoNorm.includes('juridica') || tipoNorm.includes('pj') ? 'PJ' : 'PF';
+    let tipo = tipoNorm.includes('juridica') || tipoNorm.includes('pj') ? 'PJ' : 'PF';
+    // Override: se Astrea diz PF mas o nome tem indicador inequívoco de PJ,
+    // reclassificar (vimos vários casos no backup com cadastro errado lá).
+    if (tipo === 'PF') {
+      const nomeUp = nome.toUpperCase();
+      const indicadoresPj = [
+        ' LTDA', ' S/A', ' S.A.', ' S A', ' ME', ' EPP', ' EIRELI', ' CIA',
+        'COOPERATIVA ', 'SINDICATO ', 'ASSOCIA', 'FUNDAÇÃO ', 'INSTITUTO ',
+        'IGREJA ', 'PARTIDO ', 'COMERCIO', 'COMÉRCIO', 'INDUSTRIA', 'INDÚSTRIA',
+        'TRANSPORTES', 'CONSTRU', 'DISTRIBUIDORA', 'BANCO ', 'MUNICIPIO', 'MUNICÍPIO'
+      ];
+      if (indicadoresPj.some(ind => nomeUp.includes(ind))) tipo = 'PJ';
+    }
 
     // Endereço (Astrea separa em colunas distintas)
     const endereco = {
@@ -254,10 +266,12 @@ function parseProcessos(usuariosMap, acoesMap, contatosMap) {
       .map(lid => contatosMap[lid])
       .filter(Boolean);
 
-    // Advogado responsável (FK pra Usuário)
-    const respLegacy = cleanStr(r['Responsável']);
-    const respUser = respLegacy ? usuariosMap[respLegacy] : null;
-    const advogadoResponsavel = respUser ? respUser.apelido : '';
+    // Advogado responsável — TODOS os processos importados ficam vinculados
+    // a Eduardo Urany de Castro (titular do escritório). O "Responsável"
+    // do Astrea (frequentemente o user logado em cada cadastro) não reflete
+    // a realidade da gestão atual.
+    const advogadoResponsavel = 'EDUARDO URANY DE CASTRO';
+    const advogadoOAB = '16539';
 
     // Tipo de ação
     const tipoAcaoLegacy = cleanStr(r['Tipo de ação']);
@@ -271,7 +285,7 @@ function parseProcessos(usuariosMap, acoesMap, contatosMap) {
         nome: c.nome,
         cpfCnpj: c.doc,
         polo: 'AT',
-        advogados: respUser ? [{ nome: respUser.apelido, oab: '' }] : []
+        advogados: [{ nome: advogadoResponsavel, oab: advogadoOAB }]
       });
     }
     for (const pa of partesAdvResolvidas) {
@@ -285,7 +299,7 @@ function parseProcessos(usuariosMap, acoesMap, contatosMap) {
 
     out.push({
       id: uid('proc_'),
-      name: tituloRaw,
+      name: tituloRaw.toUpperCase(),
       cnj,
       court: cleanStr(r['Nome da Vara']),
       court_numero: cleanStr(r['Número da Vara']),

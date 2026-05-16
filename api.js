@@ -491,6 +491,12 @@ const RemoteDB = {
   async getAllClientes() { return await getAll_('clientes'); },
   async getCliente(id) { return await getById_('clientes', id); },
   async saveCliente(c) { return await upsert_('clientes', c); },
+
+  // Cálculos monetários (atualização monetária, juros, multa, honorários)
+  async getAllCalculos() { return await getAll_('calculos'); },
+  async getCalculo(id) { return await getById_('calculos', id); },
+  async saveCalculo(c) { return await upsert_('calculos', c); },
+  async deleteCalculo(id) { return await softDelete_('calculos', id); },
   async deleteCliente(id) { return await softDelete_('clientes', id); },
 
   // ====== Comunicações (v6.23 — Cli.4) ======
