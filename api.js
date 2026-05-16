@@ -537,7 +537,13 @@ const RemoteDB = {
   async savePeticao(p) { return await upsert_('peticoes', p); },
   async deletePeticao(id) { return await softDelete_('peticoes', id); },
 
-  // ====== Petições — Geração via Claude API (v6.35, Sprint Pet.3) ======
+  // ====== Geração IA (peças + relatórios) ======
+  // Default agora: gemini-2.5-pro (ecossistema Google Workspace).
+  // O Apps Script backend deve rotear pra Google AI Studio quando
+  // modeloApi.startsWith('gemini'), ou Anthropic Claude se preferir manter
+  // como fallback. Pré-requisito Apps Script: configurar GEMINI_API_KEY
+  // nas Script Properties.
+  //
   // briefing: string (requerimento do advogado)
   // contextoSnapshot: { processo, cliente, eventos[], prazos[], jurisprudencia[] }
   // opts: { modeloPromptSistema?, tipo?, modeloApi? }
@@ -547,7 +553,7 @@ const RemoteDB = {
       contextoSnapshot,
       modeloPromptSistema: opts.modeloPromptSistema || '',
       tipo: opts.tipo || 'outro',
-      modeloApi: opts.modeloApi || 'claude-opus-4-7'
+      modeloApi: opts.modeloApi || 'gemini-2.5-pro'
     });
   },
 

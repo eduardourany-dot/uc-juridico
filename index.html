@@ -4143,7 +4143,7 @@ async function _gerarRelatorioAuditoriaComIA({ briefing, p, cliente, modo, nProc
     <div class="modal" style="max-width: 480px; text-align: center; padding: 32px 24px;">
       <div style="display:inline-block;border:3px solid #d4cfc0;border-top-color:var(--uc-gold);border-radius:50%;width:40px;height:40px;animation:spin 0.8s linear infinite;margin-bottom:16px;"></div>
       <h3 class="modal-title">Gerando relatório de auditoria…</h3>
-      <p class="help-text" style="margin: 8px 0 0;">Claude está redigindo. ${modo === 'CONSOLIDADO' ? `${nProcessos} processo(s) · pode levar 1-3 min.` : 'Pode levar 30-60s.'}</p>
+      <p class="help-text" style="margin: 8px 0 0;">Gemini 2.5 Pro está redigindo. ${modo === 'CONSOLIDADO' ? `${nProcessos} processo(s) · pode levar 1-3 min.` : 'Pode levar 30-90s.'}</p>
       <p class="help-text" style="font-size:11px;color:var(--uc-warm-gray);margin-top:12px;">Prompt sistema (especialista) + briefing (contexto + instruções) → Claude → revisão final.</p>
     </div>
   `;
@@ -4154,13 +4154,13 @@ async function _gerarRelatorioAuditoriaComIA({ briefing, p, cliente, modo, nProc
     resp = await DB.gerarPeticaoIA(briefing, { processo: p || null, cliente: cliente || null }, {
       modeloPromptSistema: _PROMPT_SISTEMA_AUDITORIA,
       tipo: 'relatorio_auditoria',
-      modeloApi: 'claude-opus-4-7'
+      modeloApi: 'gemini-2.5-pro'
     });
   } catch (e) {
     loading.remove();
     const msg = e?.message || String(e);
     if (msg.indexOf('api_key_ausente') >= 0) {
-      toast('Claude API não configurada', 'Configure CLAUDE_API_KEY no Apps Script.', 'error');
+      toast('Gemini API não configurada', 'Configure GEMINI_API_KEY no Apps Script.', 'error');
     } else {
       toast('Falha ao gerar', msg.slice(0, 150), 'error');
     }
@@ -4169,7 +4169,7 @@ async function _gerarRelatorioAuditoriaComIA({ briefing, p, cliente, modo, nProc
   loading.remove();
 
   if (!resp?.conteudo) {
-    toast('Resposta vazia', 'Claude não retornou conteúdo. Tente novamente.', 'error');
+    toast('Resposta vazia', 'Gemini não retornou conteúdo. Tente novamente.', 'error');
     return;
   }
 
@@ -4206,7 +4206,7 @@ ${resp.conteudo.replace(/\[VERIFICAR\]/g, '<span class="verificar">[VERIFICAR]</
 </div>
 
 <p style="margin-top:40px;font-size:9pt;color:#6b6b68;text-align:center;border-top:1px solid #d4cfc0;padding-top:12px;">
-  Relatório gerado por UC Jurídico em ${new Date().toLocaleString('pt-BR')} · auxílio de IA (Claude Opus 4.7) com revisão final do advogado responsável.
+  Relatório gerado por UC Jurídico em ${new Date().toLocaleString('pt-BR')} · auxílio de IA (Google Gemini 2.5 Pro) com revisão final do advogado responsável.
   ${nVerificar > 0 ? `⚠ ${nVerificar} item(s) marcado(s) como [VERIFICAR] — revise antes de enviar à auditoria.` : ''}
 </p>
 
@@ -4215,11 +4215,38 @@ ${resp.conteudo.replace(/\[VERIFICAR\]/g, '<span class="verificar">[VERIFICAR]</
   const filename = `relatorio_auditoria_${modo.toLowerCase()}_${(cliente?.nome || 'cliente').replace(/[^\w]/g, '_')}_${dataBase || new Date().toISOString().slice(0, 10)}.doc`;
   downloadBlob(new Blob(['﻿' + htmlCompleto], { type: 'application/msword' }), filename);
 
-  if (nVerificar > 0) {
-    toast(`Relatório gerado · ${nVerificar} [VERIFICAR]`, 'Revise os itens marcados antes de enviar à auditoria.', 'info');
-  } else {
-    toast('Relatório de auditoria gerado', filename, 'success');
-  }
+  // Modal de sucesso com opção de gerar prompt pra revisão Claude
+  const sucessoModal = document.createElement('div');
+  sucessoModal.className = 'modal-backdrop';
+  sucessoModal.innerHTML = `
+    <div class="modal" style="max-width: 540px;">
+      <h3 class="modal-title">✓ Relatório de auditoria gerado</h3>
+      <p class="help-text" style="margin-bottom:12px;">
+        Arquivo <code>${escapeHtml(filename)}</code> baixado.
+        ${nVerificar > 0 ? `<br><strong style="color:var(--uc-amber);">⚠ ${nVerificar} item(s) marcado(s) como [VERIFICAR]</strong> — revise antes de enviar à auditoria.` : ''}
+      </p>
+      <p class="help-text" style="margin-bottom:16px;">
+        <strong>Recomendado:</strong> revise a peça no Claude Chat antes de enviar. O Claude vai apontar erros materiais, jurisprudência inventada, falhas argumentativas e sugestões de fortalecimento.
+      </p>
+      <div class="flex gap-2">
+        <button class="btn btn-primary" id="_audClaude" style="flex:1;">🤖 Gerar prompt pra revisar no Claude</button>
+        <button class="btn btn-outline" id="_audOk">Fechar</button>
+      </div>
+    </div>
+  `;
+  $('modalContainer').appendChild(sucessoModal);
+  sucessoModal.querySelector('#_audOk').onclick = () => sucessoModal.remove();
+  sucessoModal.querySelector('#_audClaude').onclick = () => {
+    const ctxBreve = [
+      modo === 'CONSOLIDADO' ? `Relatório consolidado de ${nProcessos} processos` : 'Relatório individual',
+      cliente?.nome ? 'Cliente: ' + cliente.nome : '',
+      p?.cnj ? 'CNJ: ' + p.cnj : '',
+      'Data-base: ' + (dataBase || new Date().toISOString().slice(0, 10))
+    ].filter(Boolean).join(' · ');
+    const prompt = _gerarPromptCorrecaoClaude(resp.conteudo, 'Relatório de auditoria CPC 25/IAS 37 — ' + modo.toLowerCase(), ctxBreve);
+    sucessoModal.remove();
+    _abrirModalPromptCorrecao(prompt, 'relatorio_auditoria');
+  };
 }
 
 async function editarClassificacaoCpc25Flow(processId) {
@@ -14091,6 +14118,7 @@ function _abrirModalPeticaoGerada(opts) {
         <button class="btn btn-secondary" id="_pgDocx" style="min-width: 110px;" title="Word (.docx) com formatação Garamond + cabeçalho">⬇ .docx</button>
         <button class="btn btn-secondary" id="_pgMd" style="min-width: 90px;">⬇ .md</button>
         <button class="btn btn-secondary" id="_pgTxt" style="min-width: 90px;">⬇ .txt</button>
+        <button class="btn btn-outline" id="_pgClaude" style="min-width: 160px;border-color:#b87f1c;color:#b87f1c;" title="Gera prompt formatado pra revisão crítica no Claude Chat">🤖 Revisar no Claude</button>
         <button class="btn btn-outline" id="_pgFechar" style="min-width: 90px;">Fechar</button>
       </div>
     </div>
@@ -14127,6 +14155,25 @@ function _abrirModalPeticaoGerada(opts) {
     }
   };
   document.getElementById('_pgFechar').onclick = cleanup;
+
+  // Botão de revisão no Claude Chat
+  const btnClaude = document.getElementById('_pgClaude');
+  if (btnClaude) {
+    btnClaude.onclick = () => {
+      const ctxBreve = [
+        processo?.name ? 'Processo: ' + processo.name : '',
+        processo?.cnj ? 'CNJ: ' + processo.cnj : '',
+        cliente?.nome ? 'Cliente: ' + cliente.nome : '',
+        processo?.polo ? 'Polo: ' + (processo.polo === 'AT' ? 'Ativo' : 'Passivo') : ''
+      ].filter(Boolean).join(' · ');
+      const prompt = _gerarPromptCorrecaoClaude(
+        getTexto(),
+        fallbackModelo?.nome || fallbackModelo?.tipo || 'petição',
+        ctxBreve
+      );
+      _abrirModalPromptCorrecao(prompt, fallbackModelo?.tipo || 'peca');
+    };
+  }
 
   document.getElementById('_pgSalvar').onclick = async () => {
     try {
@@ -14640,6 +14687,122 @@ async function removerPeticao(id) {
 // proxy Apps Script. O modelo de petição é OPCIONAL — quando escolhido,
 // seu campo promptSistema vira o system prompt da Claude.
 
+// ====================================================================
+// PROMPT DE CORREÇÃO PRO CLAUDE CHAT
+// ====================================================================
+// Após gerar peça/relatório com Gemini, oferece prompt formatado pra
+// revisão crítica no Claude Chat (claude.ai). Workflow recomendado:
+// Gemini gera → user copia prompt + peça → cola no Claude.ai → Claude
+// revisa apontando erros materiais, falhas argumentativas, melhorias.
+
+function _gerarPromptCorrecaoClaude(pecaTexto, tipoPeca, contextoBreve) {
+  const tipo = tipoPeca || 'peça processual';
+  const ctx = contextoBreve || '(contexto não informado)';
+  // Strip HTML básico se a peça vier formatada
+  const textoLimpo = String(pecaTexto || '')
+    .replace(/<\/(h[1-6]|p|div|li|tr|td|th|table|ul|ol)>/gi, '\n')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#x27;|&apos;/g, "'")
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+
+  return `# REVISÃO CRÍTICA DE PEÇA · COLE NO CLAUDE CHAT (claude.ai)
+
+Você é advogado sênior brasileiro com 30 anos de prática contenciosa nas áreas cível, tributária e empresarial. Sua tarefa é revisar criteriosamente a peça abaixo, gerada por outro modelo de IA (Google Gemini 2.5 Pro), e devolver a versão corrigida.
+
+## O QUE REVISAR (em ordem de prioridade)
+
+**1. ERROS MATERIAIS — bloqueantes:**
+- Jurisprudência citada que não existe ou está mal atribuída
+- Súmulas com numeração errada
+- Dispositivos legais errados (artigo, lei, decreto, código)
+- Tese juridicamente inconsistente ou ultrapassada
+- Argumento que contradiz fato comprovado nos autos
+- Pedidos sem cabimento processual
+
+**2. FALHAS ARGUMENTATIVAS:**
+- Tese principal não desenvolvida o suficiente
+- Contra-argumentação omitida (teses adversárias previsíveis sem refutação)
+- Encadeamento lógico fraco entre premissas e conclusão
+- Pedidos não fundamentados ou desproporcionais
+
+**3. FORMA — padrão Urany de Castro:**
+- Estrutura processual correta (preâmbulo → fatos → fundamentos → pedidos → fecho)
+- Capitalização e smallcaps padrão forense
+- Citações com formato correto (autor/obra/página para doutrina, número completo para jurisprudência)
+- Numeração de itens consistente
+- Linguagem técnica sem prolixidade
+
+**4. FORTALECIMENTO:**
+- Sugestões de teses adicionais aplicáveis
+- Doutrina/precedentes que reforçariam o pedido
+- Estrutura argumentativa alternativa mais persuasiva
+
+## OUTPUT ESPERADO
+
+Devolva em 2 partes:
+
+### PARTE 1 — PEÇA REVISADA E CORRIGIDA
+A peça inteira, com todas as correções já aplicadas, pronta pra protocolar.
+
+### PARTE 2 — RELATÓRIO DE ALTERAÇÕES PRINCIPAIS
+Lista bulleted com as 5-10 mudanças mais relevantes, no formato:
+- [trecho original] → [correção aplicada]: motivo (categoria: erro material / argumentação / forma / fortalecimento)
+
+## CONTEXTO DA PEÇA
+
+**Tipo:** ${tipo}
+**Contexto:** ${ctx}
+
+---
+
+## PEÇA GERADA PELO GEMINI (a ser revisada):
+
+\`\`\`
+${textoLimpo}
+\`\`\`
+
+---
+
+Agora revise e devolva conforme o formato acima.`;
+}
+
+async function _copiarPromptCorrecaoClaude(promptText) {
+  try {
+    await navigator.clipboard.writeText(promptText);
+    toast('Prompt copiado!', 'Cole no Claude Chat (claude.ai) pra revisão.', 'success');
+  } catch (e) {
+    toast('Falha ao copiar', 'Selecione manualmente o texto na janela.', 'error');
+  }
+}
+
+function _abrirModalPromptCorrecao(promptText, tipoPeca) {
+  const modal = document.createElement('div');
+  modal.className = 'modal-backdrop';
+  modal.innerHTML = `
+    <div class="modal" style="max-width: 720px;">
+      <h3 class="modal-title">📋 Prompt de revisão pra Claude Chat</h3>
+      <p class="help-text" style="margin-bottom: 12px;">
+        Workflow recomendado: copie este prompt + peça abaixo, abra <a href="https://claude.ai" target="_blank" rel="noopener" style="color:var(--uc-gold);">claude.ai</a> e cole numa nova conversa. Claude revisa criticamente apontando erros materiais, falhas argumentativas e sugestões de fortalecimento.
+      </p>
+      <textarea readonly style="width:100%;height:280px;padding:10px;font-family:ui-monospace,Consolas,monospace;font-size:11px;border:1px solid var(--uc-line);border-radius:4px;background:var(--uc-cream);resize:vertical;">${escapeHtml(promptText)}</textarea>
+      <div class="flex gap-2 mt-3">
+        <button class="btn btn-primary" id="_copiarPromptBtn" style="flex:1;">📋 Copiar prompt completo</button>
+        <a class="btn btn-outline" href="https://claude.ai" target="_blank" rel="noopener" style="text-decoration:none;text-align:center;">↗ Abrir Claude.ai</a>
+        <button class="btn btn-ghost" onclick="this.closest('.modal-backdrop').remove();">Fechar</button>
+      </div>
+    </div>
+  `;
+  $('modalContainer').appendChild(modal);
+  modal.querySelector('#_copiarPromptBtn').onclick = () => _copiarPromptCorrecaoClaude(promptText);
+}
+
 async function gerarPeticaoIAFlow() {
   const proc = state._processView?.p;
   if (!proc) { toast('Abra um processo primeiro', '', 'error'); return; }
@@ -14722,7 +14885,7 @@ async function gerarPeticaoIAFlow() {
     <div class="modal" style="max-width: 360px; text-align: center; padding: 32px 24px;">
       <div class="spinner" style="margin: 0 auto 16px; width: 32px; height: 32px;"></div>
       <h3 class="modal-title">Gerando petição…</h3>
-      <p class="help-text" style="margin-bottom: 0;">Claude está redigindo. Pode levar 30s a 2min dependendo do tamanho.</p>
+      <p class="help-text" style="margin-bottom: 0;">Gemini 2.5 Pro está redigindo. Pode levar 30s a 2min dependendo do tamanho.</p>
     </div>
   `;
   $('modalContainer').appendChild(loading);
@@ -14732,13 +14895,13 @@ async function gerarPeticaoIAFlow() {
     resp = await DB.gerarPeticaoIA(briefing, contextoSnapshot, {
       modeloPromptSistema: modeloEscolhido?.promptSistema || '',
       tipo: tipo || 'outro',
-      modeloApi: 'claude-opus-4-7'
+      modeloApi: 'gemini-2.5-pro'
     });
   } catch (e) {
     loading.remove();
     const msg = e?.message || String(e);
     if (msg.indexOf('api_key_ausente') >= 0) {
-      toast('Claude API não configurada', 'Veja Configurações → Aparência ou Apps Script', 'error');
+      toast('Gemini API não configurada', 'Veja Configurações → Apps Script (GEMINI_API_KEY)', 'error');
     } else {
       toast('Falha ao gerar', msg.slice(0, 100), 'error');
     }
@@ -14747,12 +14910,12 @@ async function gerarPeticaoIAFlow() {
   loading.remove();
 
   if (!resp?.conteudo) {
-    toast('Resposta vazia', 'Claude não retornou conteúdo. Tente refrasear o briefing.', 'error');
+    toast('Resposta vazia', 'Gemini não retornou conteúdo. Tente refrasear o briefing.', 'error');
     return;
   }
 
   toast(
-    'Petição gerada · ' + resp.tokensInput + '↓ ' + resp.tokensOutput + '↑',
+    'Petição gerada · ' + (resp.tokensInput || '?') + '↓ ' + (resp.tokensOutput || '?') + '↑',
     'Custo estimado $' + (resp.custoEstimado || 0).toFixed(4),
     'success'
   );

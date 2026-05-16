@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.63.5 (Classificação CPC 25: unificada com p.risco, mostrada na Identificação, botão em Ações)
-const CACHE_NAME = 'uc-juridico-v6-63-5';
+// Service Worker — UC Jurídico v6.64.0 (IA: Claude → Gemini 2.5 Pro + prompt de revisão pra Claude Chat)
+const CACHE_NAME = 'uc-juridico-v6-64-0';
 const APP_SHELL = [
   './',
   './index.html',
