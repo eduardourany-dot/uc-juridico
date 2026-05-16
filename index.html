@@ -10537,15 +10537,46 @@ const _calcState = {
   jurosTaxa: '1',
   jurosPeriodo: 'mensal',
   jurosTipo: 'simples',
-  nome: ''
+  nome: '',
+  // Termo a quo dos juros (CC, CPC, súmulas STJ):
+  //   'vencimento' — juros desde o vencimento de cada parcela (default)
+  //   'citacao'    — juros desde a citação (uma data, todos os lançamentos)
+  //   'transito'   — juros desde o trânsito em julgado
+  //   'mora'       — juros desde a mora (constituída/notificação)
+  //   'manual'     — usa a coluna "Data juros" da tabela (data por lançamento)
+  termoQuoJuros: 'vencimento',
+  dataJurosGlobal: ''  // data quando termoQuoJuros é citacao/transito/mora
 };
 
 // Aplica correção+juros pra UMA LISTA de lançamentos (cada um com data
 // e valor próprios), tudo até uma data final comum. Soma os parciais.
-async function calcularLancamentosMultiplos({ lancamentos, dataFinal, indice, jurosTaxa, jurosTipo, jurosPeriodo }) {
+async function calcularLancamentosMultiplos({ lancamentos, dataFinal, indice, jurosTaxa, jurosTipo, jurosPeriodo, termoQuoJuros, dataJurosGlobal }) {
   const parciais = [];
   let totalOriginal = 0, totalCorrigido = 0, totalJuros = 0;
   let indiceLabel = '';
+
+  // Resolve a data de início dos juros pra um lançamento, conforme o
+  // termo a quo escolhido. Regra: juros NUNCA fluem antes da própria
+  // data do lançamento — se o termo global for anterior (ex: citação
+  // antes de uma parcela vencer depois), respeitamos a data do
+  // lançamento.
+  const _resolverDataJuros = (lanc) => {
+    if (lanc.tipo === 'custas') return lanc.data;  // custas: sem juros (irrelevante)
+    let dj;
+    switch (termoQuoJuros) {
+      case 'vencimento': dj = lanc.data; break;
+      case 'manual':     dj = lanc.dataJuros || lanc.data; break;
+      case 'citacao':
+      case 'transito':
+      case 'mora':
+        dj = dataJurosGlobal || lanc.data;
+        break;
+      default: dj = lanc.data;
+    }
+    // Floor: data de juros não pode ser anterior à data do lançamento
+    if (new Date(dj) < new Date(lanc.data)) dj = lanc.data;
+    return dj;
+  };
 
   for (const lanc of lancamentos) {
     // Custas e despesas processuais (CPC art. 84 + jurisprudência STJ):
@@ -10556,7 +10587,7 @@ async function calcularLancamentosMultiplos({ lancamentos, dataFinal, indice, ju
     const r = await calcularCorrecaoMonetaria({
       valorInicial: lanc.valor,
       dataInicial: lanc.data,
-      dataInicioJuros: lanc.dataJuros || lanc.data,
+      dataInicioJuros: _resolverDataJuros(lanc),
       dataFinal,
       indice,
       jurosTaxa: ehCustas ? 0 : jurosTaxa,
@@ -10661,6 +10692,30 @@ async function renderCalculadora() {
           <strong>Combine com IPCA</strong> como índice de correção (CC art. 389 §único) pra o cálculo legal completo.
         </div>
       ` : ''}
+
+      <!-- Termo a quo dos juros -->
+      <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--uc-line-soft);">
+        <label class="label">Termo a quo dos juros</label>
+        <div class="grid gap-2" style="grid-template-columns: 1fr 1fr;">
+          <select id="calcTermoQuoJuros" class="select" onchange="_calcState.termoQuoJuros = this.value; renderCalculadora();">
+            <option value="vencimento" ${_calcState.termoQuoJuros === 'vencimento' ? 'selected' : ''}>Vencimento (data de cada lançamento)</option>
+            <option value="citacao"    ${_calcState.termoQuoJuros === 'citacao'    ? 'selected' : ''}>Citação</option>
+            <option value="transito"   ${_calcState.termoQuoJuros === 'transito'   ? 'selected' : ''}>Trânsito em julgado</option>
+            <option value="mora"       ${_calcState.termoQuoJuros === 'mora'       ? 'selected' : ''}>Mora (notificação/interpelação)</option>
+            <option value="manual"     ${_calcState.termoQuoJuros === 'manual'     ? 'selected' : ''}>Manual (data por lançamento)</option>
+          </select>
+          ${['citacao', 'transito', 'mora'].includes(_calcState.termoQuoJuros) ? `
+            <input type="date" id="calcDataJurosGlobal" class="input" value="${_calcState.dataJurosGlobal || ''}" onchange="_calcState.dataJurosGlobal = this.value" placeholder="Data ${_calcState.termoQuoJuros}">
+          ` : '<div></div>'}
+        </div>
+        <p class="help-text" style="margin-top:6px;">
+          ${_calcState.termoQuoJuros === 'vencimento' ? 'Juros fluem da data de cada parcela (default — obrigações contratuais, alugueres, prestações).'
+            : _calcState.termoQuoJuros === 'citacao' ? 'Súmula 54 STJ: ato ilícito → juros desde o evento. Mas em ação de cobrança contratual sem prévia notificação, é desde a citação (CC art. 397, parágrafo único).'
+            : _calcState.termoQuoJuros === 'transito' ? 'Indenização por dano moral: juros desde o trânsito em julgado (Súmula 362 STJ).'
+            : _calcState.termoQuoJuros === 'mora' ? 'Súmula 43 STJ: juros desde a constituição em mora (data da notificação/interpelação).'
+            : 'Coluna "Data juros" na tabela vira editável — você define por linha.'}
+        </p>
+      </div>
       <div style="margin-top:12px;">
         <label class="label">Nome do cálculo (opcional)</label>
         <input type="text" id="calcNome" class="input" placeholder="Ex.: Liquidação ACME × Banco" value="${_calcState.nome || ''}" onchange="_calcState.nome = this.value">
@@ -10678,9 +10733,11 @@ async function renderCalculadora() {
       </div>
 
       <p class="help-text" style="margin-bottom:12px;">
-        Cada linha = um valor com sua data própria. Útil pra parcelas em datas diferentes.<br>
-        <strong>Tipo:</strong> <em>Principal</em> sofre correção + juros · <em>Custas/Despesa</em> só correção (CPC art. 84 — custas processuais não geram juros).<br>
-        <strong>Data correção</strong> = termo a quo da atualização (ex.: fato gerador). <strong>Data juros</strong> = quando começam os juros (ex.: citação). Se vazia, igual à de correção.
+        Cada linha = um valor com sua data própria.
+        <strong>Tipo:</strong> <em>Principal</em> sofre correção + juros · <em>Custas/Despesa</em> só correção (CPC art. 84).
+        ${_calcState.termoQuoJuros === 'manual'
+          ? 'Termo a quo dos juros configurado como <strong>Manual</strong> — preencha a coluna "Data juros" por linha.'
+          : `Termo a quo dos juros configurado globalmente acima (<strong>${{vencimento:'Vencimento',citacao:'Citação',transito:'Trânsito em julgado',mora:'Mora'}[_calcState.termoQuoJuros] || ''}</strong>).`}
       </p>
 
       <table style="width:100%;font-size:13px;border-collapse:collapse;">
@@ -10688,7 +10745,7 @@ async function renderCalculadora() {
           <tr>
             <th style="text-align:left;padding:8px 6px;width:110px;">Tipo</th>
             <th style="text-align:left;padding:8px 6px;width:125px;">Data correção</th>
-            <th style="text-align:left;padding:8px 6px;width:125px;">Data juros</th>
+            ${_calcState.termoQuoJuros === 'manual' ? '<th style="text-align:left;padding:8px 6px;width:125px;">Data juros</th>' : ''}
             <th style="text-align:right;padding:8px 6px;width:115px;">Valor (R$)</th>
             <th style="text-align:left;padding:8px 6px;">Descrição</th>
             <th style="width:40px;"></th>
@@ -10706,7 +10763,9 @@ async function renderCalculadora() {
                 </select>
               </td>
               <td style="padding:6px;"><input type="date" class="input" style="padding:6px 8px;" value="${l.data || ''}" onchange="_calcUpdateLancamento('${l.id}', 'data', this.value)"></td>
-              <td style="padding:6px;"><input type="date" class="input" style="padding:6px 8px;${ehCustas ? 'opacity:.4;cursor:not-allowed;' : ''}" placeholder="${ehCustas ? '—' : '(igual)'}" value="${l.dataJuros || ''}" onchange="_calcUpdateLancamento('${l.id}', 'dataJuros', this.value)" ${ehCustas ? 'disabled title="Custas não geram juros — campo ignorado"' : 'title="Opcional. Se vazio, usa a data de correção."'}></td>
+              ${_calcState.termoQuoJuros === 'manual' ? `
+                <td style="padding:6px;"><input type="date" class="input" style="padding:6px 8px;${ehCustas ? 'opacity:.4;cursor:not-allowed;' : ''}" placeholder="${ehCustas ? '—' : '(igual)'}" value="${l.dataJuros || ''}" onchange="_calcUpdateLancamento('${l.id}', 'dataJuros', this.value)" ${ehCustas ? 'disabled title="Custas não geram juros — campo ignorado"' : 'title="Opcional. Se vazio, usa a data de correção."'}></td>
+              ` : ''}
               <td style="padding:6px;"><input type="number" class="input" step="0.01" min="0" placeholder="0.00" style="padding:6px 8px;text-align:right;" value="${l.valor || ''}" onchange="_calcUpdateLancamento('${l.id}', 'valor', this.value)"></td>
               <td style="padding:6px;"><input type="text" class="input" placeholder="${ehCustas ? 'Ex.: Custas iniciais' : 'Ex.: Parcela ' + (i+1)}" style="padding:6px 8px;" value="${escapeHtml(l.descricao || '')}" onchange="_calcUpdateLancamento('${l.id}', 'descricao', this.value)"></td>
               <td style="padding:6px;text-align:center;">
@@ -10925,6 +10984,15 @@ async function _calcExecutar() {
 
   if (!dataFim) { toast('Data final obrigatória', '', 'error'); return; }
 
+  // Validação do termo a quo dos juros (se for global, precisa da data)
+  const termoQuoJuros = _calcState.termoQuoJuros || 'vencimento';
+  const dataJurosGlobal = _calcState.dataJurosGlobal || '';
+  if (['citacao', 'transito', 'mora'].includes(termoQuoJuros) && !dataJurosGlobal) {
+    const labels = { citacao: 'Citação', transito: 'Trânsito em julgado', mora: 'Mora' };
+    toast(`Data ${labels[termoQuoJuros]} obrigatória`, 'Informe a data correspondente ao termo a quo dos juros.', 'error');
+    return;
+  }
+
   // Valida e normaliza lançamentos
   const lancsValid = [];
   for (const l of _calcState.lancamentos) {
@@ -10952,7 +11020,9 @@ async function _calcExecutar() {
       indice,
       jurosTaxa,
       jurosTipo,
-      jurosPeriodo
+      jurosPeriodo,
+      termoQuoJuros,
+      dataJurosGlobal
     });
     _calcState.resultado = resultado;
     _calcState.erro = null;

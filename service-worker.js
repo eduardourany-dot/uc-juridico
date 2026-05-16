@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.60.3 (Calculadora: tipo de lançamento Principal / Custas — custas só corrigem, sem juros)
-const CACHE_NAME = 'uc-juridico-v6-60-3';
+// Service Worker — UC Jurídico v6.60.4 (Calculadora: termo a quo global dos juros — vencimento/citação/trânsito/mora/manual)
+const CACHE_NAME = 'uc-juridico-v6-60-4';
 const APP_SHELL = [
   './',
   './index.html',
