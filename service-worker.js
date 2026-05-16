@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.58.2 (FIX: DB.getCliente exposto + tab Cliente do cliente buscando próprio doc)
-const CACHE_NAME = 'uc-juridico-v6-58-2';
+// Service Worker — UC Jurídico v6.58.3 (cliente: tab Honorários sem orientação de cadastro/financeiro)
+const CACHE_NAME = 'uc-juridico-v6-58-3';
 const APP_SHELL = [
   './',
   './index.html',

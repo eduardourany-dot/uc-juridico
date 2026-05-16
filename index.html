@@ -8479,14 +8479,18 @@ function renderProcessHonorarios(p, honorarios) {
       ${totalVencido > 0 ? `<div class="card"><p class="text-xs smallcaps" style="color: var(--uc-warm-gray); margin: 0 0 4px;">Vencido</p><p style="font-size: 18px; font-weight: 600; color: var(--uc-red); margin: 0;">${brl(totalVencido)}</p></div>` : ''}
     </div>
 
+    ${_isClienteMode() ? '' : `
     <div class="flex justify-between items-center mb-3">
       <p class="text-sm" style="color: var(--uc-warm-gray);">${honsDoProcesso.length} honorário(s) cobrindo este processo</p>
       <button class="btn btn-primary btn-sm" onclick="novoHonorarioFlow('${p.id}')">+ Novo honorário</button>
     </div>
+    `}
 
     ${honsDoProcesso.length === 0 ? `
       <div class="empty-state">
-        <p class="empty-state-msg">Nenhum honorário cobre este processo. Cadastre um novo (será vinculado ao cliente do processo) ou vincule um honorário existente do mesmo cliente em /financeiro/honorarios.</p>
+        <p class="empty-state-msg">${_isClienteMode()
+          ? 'Sem honorários cadastrados para este processo.'
+          : 'Nenhum honorário cobre este processo. Cadastre um novo (será vinculado ao cliente do processo) ou vincule um honorário existente do mesmo cliente em /financeiro/honorarios.'}</p>
       </div>
     ` : honsDoProcesso.map(h => {
       const procsCobertos = _processosDoHonorario(h);
