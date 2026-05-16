@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.62.8 (Calculadora Fiscal: anexo legal no export — Temas 1062/1217, CTN, súmulas STJ)
-const CACHE_NAME = 'uc-juridico-v6-62-8';
+// Service Worker — UC Jurídico v6.63.0 (P2 MVP: Relatório consolidado pra cliente em .doc — sob demanda)
+const CACHE_NAME = 'uc-juridico-v6-63-0';
 const APP_SHELL = [
   './',
   './index.html',

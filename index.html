@@ -2368,6 +2368,261 @@ function renderClienteComunicacoesSection(cli, comunicacoes, processos) {
 // === PAGE: CLIENTE — DASHBOARD CONSOLIDADO (Cli.3) ==================
 // ====================================================================
 
+// ====================================================================
+// P2 — Relatórios automáticos pra cliente
+// ====================================================================
+// MVP Fase 1: gera relatório consolidado dos processos do cliente,
+// formato HTML standalone (.doc) — Word abre nativo. Inclui pólo ativo
+// /passivo, CNJ, vara, valor, status, último evento, prazo pendente,
+// providência. Pronto pra enviar ao cliente após revisão.
+//
+// Fase 2 (depois): templates por cliente, periodicidade automática
+// (cron Cloud Function), fila de revisão, envio email/WhatsApp.
+
+async function gerarRelatorioClienteFlow(clienteId) {
+  const [clientes, processos] = await Promise.all([
+    DB.getAllClientes(), DB.getAllProcesses()
+  ]);
+  const cli = clientes.find(c => c.id === clienteId);
+  if (!cli) { toast('Cliente não encontrado', '', 'error'); return; }
+  const procsCli = processos.filter(p =>
+    !p.deletedAt && (
+      p.clienteId === clienteId ||
+      (Array.isArray(p.clienteIds) && p.clienteIds.includes(clienteId))
+    )
+  ).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+
+  if (procsCli.length === 0) {
+    toast('Sem processos vinculados', `${cli.nome} não tem processos cadastrados.`, 'error');
+    return;
+  }
+
+  // Modal de configuração: quais processos incluir + opções
+  const procsOptions = procsCli.map(p => ({
+    value: p.id,
+    label: `${p.cnj ? p.cnj + ' · ' : ''}${(p.name || '').slice(0, 80)}`
+  }));
+  const r = await showModal(`📊 Gerar relatório · ${cli.nome}`, [
+    { label: 'Processos a incluir', name: 'processIds', type: 'multiselect',
+      options: procsOptions, default: procsCli.map(p => p.id),
+      help: 'Por default, todos os processos do cliente. Desmarque os que não devem entrar.' },
+    { label: 'Período de movimentações (últimos dias)', name: 'periodoDias', type: 'number',
+      default: 90, min: 7, max: 365,
+      help: 'Quantos dias de histórico de eventos/prazos incluir (default: últimos 90 dias).' },
+    { label: 'Incluir prazos vencidos', name: 'incluirVencidos', type: 'checkbox', default: true,
+      help: 'Se marcado, mostra também prazos já vencidos (útil pra apontar atrasos).' },
+    { label: 'Observações gerais ao cliente', name: 'observacoes', type: 'textarea',
+      placeholder: 'Texto livre que aparece no início do relatório. Ex.: status geral, novidades, recomendações.',
+      rows: 4, mono: false, default: '' }
+  ], { confirmLabel: 'Gerar .doc', cancelLabel: 'Cancelar', intro: `Gerando relatório consolidado de ${procsCli.length} processo(s) vinculado(s).` });
+  if (!r) return;
+
+  const [processIds, periodoDias, incluirVencidos, observacoes] = r;
+  if (!processIds || processIds.length === 0) {
+    toast('Selecione ao menos 1 processo', '', 'error');
+    return;
+  }
+
+  // Coleta dados de cada processo: eventos recentes + prazos ativos
+  const periodo = parseInt(periodoDias) || 90;
+  const hojeMs = Date.now();
+  const limiteMs = hojeMs - (periodo * 86400000);
+
+  const procsData = await Promise.all(processIds.map(async pid => {
+    const proc = procsCli.find(x => x.id === pid);
+    if (!proc) return null;
+    const [eventos, deadlines] = await Promise.all([
+      DB.getEventsByProcess(pid).catch(() => []),
+      DB.getDeadlinesByProcess(pid).catch(() => [])
+    ]);
+    // Filtra eventos recentes (período)
+    const eventosRecentes = eventos.filter(e => {
+      const dt = new Date(e.date || e.createdAt || 0).getTime();
+      return dt >= limiteMs;
+    }).sort((a, b) => new Date(b.date || b.createdAt || 0) - new Date(a.date || a.createdAt || 0));
+    // Filtra prazos ativos + (opcional) vencidos
+    const hoje0 = new Date(); hoje0.setHours(0, 0, 0, 0);
+    const deadlinesRelevantes = deadlines.filter(d => {
+      if (d.cumprida || d.cancelada || d.deletedAt) return false;
+      const dataFatal = new Date(d.deadlineDate || d.date);
+      if (isNaN(dataFatal)) return false;
+      const venceu = dataFatal < hoje0;
+      return incluirVencidos || !venceu;
+    }).sort((a, b) => new Date(a.deadlineDate || a.date) - new Date(b.deadlineDate || b.date));
+    return { proc, eventosRecentes, deadlinesRelevantes };
+  }));
+  const procsValidos = procsData.filter(Boolean);
+
+  // Monta HTML do relatório
+  const brl = v => 'R$ ' + (v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const _dt = iso => {
+    if (!iso) return '';
+    try {
+      const d = new Date(iso);
+      if (isNaN(d)) return iso;
+      return `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}`;
+    } catch { return iso; }
+  };
+  const _diasAte = iso => {
+    if (!iso) return null;
+    const d = new Date(iso);
+    if (isNaN(d)) return null;
+    const hoje0 = new Date(); hoje0.setHours(0, 0, 0, 0);
+    return Math.ceil((d - hoje0) / 86400000);
+  };
+  const _statusLabel = s => ({ active: 'Ativo', archived: 'Arquivado', suspended: 'Suspenso' }[s] || s || 'Ativo');
+  const _riscoLabel = r => ({ baixo: 'Provável êxito', medio: 'Médio', alto: 'Provável insucesso' }[r] || r || '—');
+
+  const html = `<!DOCTYPE html>
+<html lang="pt-BR"><head><meta charset="UTF-8"><title>Relatório · ${escapeHtml(cli.nome)}</title>
+<style>
+@page { size: A4; margin: 2cm 2cm 2cm 2.5cm; }
+body { font-family: 'EB Garamond', 'Times New Roman', serif; font-size: 11pt; line-height: 1.5; color: #1f1f1f; max-width: 800px; margin: 0 auto; padding: 20px; }
+h1 { font-size: 18pt; font-variant: small-caps; letter-spacing: 0.06em; text-align: center; border-bottom: 2px solid #8a6f3d; padding-bottom: 8px; }
+h2 { font-size: 14pt; font-variant: small-caps; letter-spacing: 0.04em; color: #0a0a0a; margin-top: 24px; border-left: 3px solid #8a6f3d; padding-left: 12px; }
+h2::before { content: "§ "; color: #8a6f3d; }
+h3 { font-size: 12pt; font-variant: small-caps; color: #444; margin-top: 16px; margin-bottom: 6px; border-bottom: 1px solid #d4cfc0; padding-bottom: 4px; }
+.cnj { font-family: monospace; color: #444; }
+table { width: 100%; border-collapse: collapse; margin: 8px 0; font-size: 10.5pt; }
+th, td { padding: 5px 8px; border-bottom: 1px solid #d4cfc0; text-align: left; vertical-align: top; }
+th { background: #f4f1e8; font-variant: small-caps; width: 160px; color: #444; }
+.proc-card { background: #faf7f0; padding: 14px; border-left: 3px solid #8a6f3d; margin: 16px 0; border-radius: 4px; }
+.proc-titulo { font-weight: 700; font-size: 13pt; margin-bottom: 4px; color: #0a0a0a; }
+.proc-meta { font-size: 10pt; color: #6b6b68; margin-bottom: 12px; }
+.evento { padding: 6px 10px; border-left: 2px solid #d4cfc0; margin: 6px 0; font-size: 10.5pt; }
+.evento .data { color: #8a6f3d; font-weight: 600; font-size: 10pt; }
+.prazo-ativo { background: rgba(255,193,7,0.08); border-left: 3px solid #d4a017; padding: 10px; margin: 8px 0; border-radius: 4px; }
+.prazo-vencido { background: rgba(178,34,52,0.06); border-left: 3px solid #b22234; padding: 10px; margin: 8px 0; border-radius: 4px; }
+.observacoes { background: #f4f1e8; padding: 14px; border-left: 3px solid #4a7c4a; margin: 16px 0 24px; border-radius: 4px; font-style: italic; }
+.assinatura { margin-top: 60px; text-align: center; font-variant: small-caps; letter-spacing: 0.06em; font-weight: 600; }
+.oab { font-variant: normal; font-weight: normal; font-size: 10pt; margin-top: 4px; }
+.rodape { margin-top: 30px; padding-top: 12px; border-top: 1px solid #d4cfc0; font-size: 9pt; color: #6b6b68; text-align: center; }
+@media print { body { padding: 0; } .proc-card { page-break-inside: avoid; } }
+</style></head><body>
+
+<h1>Relatório Processual</h1>
+<p style="text-align:center;font-size:13pt;font-style:italic;margin:6px 0 4px;">Cliente: ${escapeHtml(cli.nome)}</p>
+<p style="text-align:center;font-size:10pt;color:#6b6b68;margin:0 0 20px;">Emitido em ${new Date().toLocaleDateString('pt-BR')} · ${procsValidos.length} processo(s) · período: últimos ${periodo} dias</p>
+
+${observacoes && observacoes.trim() ? `
+<div class="observacoes">
+  <strong style="font-style:normal;">Observações:</strong><br>
+  ${escapeHtml(observacoes).replace(/\\n/g, '<br>')}
+</div>
+` : ''}
+
+<h2>Resumo dos processos</h2>
+<table>
+  <thead>
+    <tr style="background:#f4f1e8;">
+      <th style="width:auto;">Processo</th>
+      <th style="width:auto;">CNJ</th>
+      <th style="width:auto;">Vara</th>
+      <th style="width:auto;text-align:right;">Valor causa</th>
+      <th style="width:auto;">Status</th>
+    </tr>
+  </thead>
+  <tbody>
+    ${procsValidos.map(d => `
+      <tr>
+        <td>${escapeHtml((d.proc.name || '').slice(0, 60))}</td>
+        <td class="cnj">${escapeHtml(d.proc.cnj || '—')}</td>
+        <td>${escapeHtml(d.proc.court || '—')}</td>
+        <td style="text-align:right;">${d.proc.valorCausa ? brl(d.proc.valorCausa) : '—'}</td>
+        <td>${escapeHtml(_statusLabel(d.proc.status))}</td>
+      </tr>
+    `).join('')}
+  </tbody>
+</table>
+
+<h2>Detalhamento processo a processo</h2>
+
+${procsValidos.map((d, idx) => {
+  const p = d.proc;
+  const ultimoEvento = d.eventosRecentes[0];
+  const proximoPrazo = d.deadlinesRelevantes.find(pr => {
+    const dias = _diasAte(pr.deadlineDate || pr.date);
+    return dias !== null && dias >= 0;
+  });
+  const prazosVencidos = incluirVencidos ? d.deadlinesRelevantes.filter(pr => {
+    const dias = _diasAte(pr.deadlineDate || pr.date);
+    return dias !== null && dias < 0;
+  }) : [];
+  return `
+    <div class="proc-card">
+      <p class="proc-titulo">${idx + 1}. ${escapeHtml(p.name || 'Processo sem título')}</p>
+      <p class="proc-meta">
+        ${p.cnj ? `<span class="cnj">${escapeHtml(p.cnj)}</span> · ` : ''}
+        ${p.court ? escapeHtml(p.court) : ''}${p.comarca ? ' · ' + escapeHtml(p.comarca) : ''}
+      </p>
+
+      <table>
+        ${p.partes && p.partes.length ? `
+          <tr><th>Pólo ativo</th><td>${escapeHtml(p.partes.filter(pa => pa.polo === 'AT').map(pa => pa.nome).join(' · ') || '—')}</td></tr>
+          <tr><th>Pólo passivo</th><td>${escapeHtml(p.partes.filter(pa => pa.polo === 'PA').map(pa => pa.nome).join(' · ') || '—')}</td></tr>
+        ` : ''}
+        ${p.type ? `<tr><th>Classe / Ação</th><td>${escapeHtml(p.type)}</td></tr>` : ''}
+        ${p.dataDistribuicao ? `<tr><th>Data de distribuição</th><td>${_dt(p.dataDistribuicao)}</td></tr>` : ''}
+        ${p.valorCausa ? `<tr><th>Valor da causa</th><td><strong>${brl(p.valorCausa)}</strong></td></tr>` : ''}
+        ${p.risco ? `<tr><th>Probabilidade de êxito</th><td>${escapeHtml(_riscoLabel(p.risco))}</td></tr>` : ''}
+        ${p.description ? `<tr><th>Resumo</th><td style="white-space:pre-wrap;">${escapeHtml(p.description)}</td></tr>` : ''}
+        ${p.advogadoResponsavel ? `<tr><th>Advogado responsável</th><td>${escapeHtml(p.advogadoResponsavel)}</td></tr>` : ''}
+      </table>
+
+      ${ultimoEvento ? `
+        <h3>Último andamento</h3>
+        <div class="evento">
+          <div class="data">${_dt(ultimoEvento.date || ultimoEvento.createdAt)}</div>
+          <strong>${escapeHtml(ultimoEvento.type || ultimoEvento.title || '—')}</strong>
+          ${ultimoEvento.description ? `<br><span style="font-size:10pt;">${escapeHtml(ultimoEvento.description.slice(0, 500))}${ultimoEvento.description.length > 500 ? '…' : ''}</span>` : ''}
+        </div>
+        ${d.eventosRecentes.length > 1 ? `<p style="font-size:9.5pt;color:#6b6b68;margin-top:4px;">+ ${d.eventosRecentes.length - 1} outras movimentações no período</p>` : ''}
+      ` : `<p style="font-size:10pt;color:#6b6b68;font-style:italic;margin:8px 0;">Sem movimentações novas nos últimos ${periodo} dias.</p>`}
+
+      ${proximoPrazo ? (() => {
+        const dias = _diasAte(proximoPrazo.deadlineDate || proximoPrazo.date);
+        return `
+          <h3>Providência pendente</h3>
+          <div class="prazo-ativo">
+            <strong>${escapeHtml(proximoPrazo.description || proximoPrazo.type || 'Prazo judicial')}</strong><br>
+            <span style="font-size:10pt;">Vence em <strong>${_dt(proximoPrazo.deadlineDate || proximoPrazo.date)}</strong>${dias === 0 ? ' (HOJE)' : dias > 0 ? ` (em ${dias} dias)` : ''}</span>
+          </div>
+        `;
+      })() : ''}
+
+      ${prazosVencidos.length > 0 ? `
+        <h3>Prazos vencidos (atenção)</h3>
+        ${prazosVencidos.map(pv => {
+          const dias = _diasAte(pv.deadlineDate || pv.date);
+          return `
+            <div class="prazo-vencido">
+              <strong>${escapeHtml(pv.description || pv.type || 'Prazo')}</strong><br>
+              <span style="font-size:10pt;">Venceu em <strong>${_dt(pv.deadlineDate || pv.date)}</strong> (há ${Math.abs(dias)} dias)</span>
+            </div>
+          `;
+        }).join('')}
+      ` : ''}
+    </div>
+  `;
+}).join('')}
+
+<div class="assinatura">
+  Urany de Castro Advocacia · 30 anos<br>
+  <span class="oab">Goiânia · Anápolis</span>
+</div>
+
+<div class="rodape">
+  Relatório gerado por UC Jurídico em ${new Date().toLocaleString('pt-BR')}.<br>
+  Documento para fins informativos. Em caso de dúvida, contate o escritório.
+</div>
+
+</body></html>`;
+
+  const filename = `relatorio_${(cli.nome || 'cliente').replace(/[^\w]/g, '_')}_${new Date().toISOString().slice(0, 10)}.doc`;
+  downloadBlob(new Blob(['﻿' + html], { type: 'application/msword' }), filename);
+  toast('Relatório gerado', filename, 'success');
+}
+
 async function renderClienteDetalhe() {
   const cid = state.currentClienteId;
   if (!cid) { navigate('clientes'); return; }
@@ -2428,6 +2683,7 @@ async function renderClienteDetalhe() {
         </p>
       </div>
       <div class="flex gap-2">
+        ${meusProcs.length > 0 && !_isClienteMode() ? `<button class="btn btn-primary" onclick="gerarRelatorioClienteFlow('${cli.id}')" title="Gera relatório consolidado dos processos do cliente em .doc">📊 Gerar relatório</button>` : ''}
         <button class="btn btn-outline" onclick="editarCliente('${cli.id}')">✎ Editar</button>
       </div>
     </div>
