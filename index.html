@@ -10395,10 +10395,25 @@ const BCB_INDICES = {
   INPC:    { codigo: 188,  label: 'INPC (IBGE)',                   tipo: 'mensal_pct' },
   IGPM:    { codigo: 189,  label: 'IGP-M (FGV)',                   tipo: 'mensal_pct' },
   IPCA:    { codigo: 433,  label: 'IPCA (IBGE)',                   tipo: 'mensal_pct' },
-  SELIC:   { codigo: 4189, label: 'SELIC mensal (% a.m.)',         tipo: 'mensal_pct' },
+  // SELIC série 4189 retorna a taxa ANUALIZADA mensal (% a.a. apurada
+  // no mês). Convertemos pra mensal equivalente via (1+i_a)^(1/12)−1
+  // antes de aplicar — caso contrário 10% a.a. virava 10% a.m. = 213% a.a.
+  SELIC:   { codigo: 4189, label: 'SELIC (anualizada, % a.a.)',    tipo: 'anual_pct' },
   TR:      { codigo: 226,  label: 'TR (Taxa Referencial)',         tipo: 'mensal_pct' },
   CDI:     { codigo: 4391, label: 'CDI mensal (% a.m.)',           tipo: 'mensal_pct' }
 };
+
+// Converte o valor cru de uma entrada do BCB pra "variação % do mês",
+// considerando se a série é mensal direta ou anualizada (caso da SELIC 4189).
+function _bcbVarMensal(valor, tipo) {
+  const v = parseFloat(String(valor).replace(',', '.'));
+  if (isNaN(v)) return 0;
+  if (tipo === 'anual_pct') {
+    // Taxa anual → taxa mensal equivalente (juros compostos)
+    return (Math.pow(1 + v / 100, 1 / 12) - 1) * 100;
+  }
+  return v;  // 'mensal_pct' ou outros
+}
 
 // Cache em memória (TTL 30min) — APIs do BCB são lentas (1-3s/req)
 const _bcbCache = new Map();
@@ -10467,12 +10482,12 @@ async function calcularCorrecaoMonetaria(p) {
     }
     // Acumula variação mensal: fator = produto de (1 + var/100)
     for (const item of serie) {
-      const varMes = parseFloat(item.valor.replace(',', '.'));
+      const varMes = _bcbVarMensal(item.valor, ind.tipo);
       if (isNaN(varMes)) continue;
       fator *= (1 + varMes / 100);
       memoria.push({
         data: item.data,         // 'DD/MM/YYYY'
-        indiceMes: varMes,       // % do mês
+        indiceMes: varMes,       // % do mês (já convertido)
         fatorAcumulado: fator    // multiplicador acumulado até esse mês
       });
     }
@@ -10495,17 +10510,27 @@ async function calcularCorrecaoMonetaria(p) {
       bcbFetchSerie(BCB_INDICES.IPCA.codigo, dataJurosIni, p.dataFinal)
     ]);
     const ipcaPorMes = {};
-    for (const i of serieIpca) ipcaPorMes[i.data] = parseFloat(i.valor.replace(',', '.'));
+    for (const i of serieIpca) {
+      // IPCA (433) já vem mensal direto
+      ipcaPorMes[i.data] = _bcbVarMensal(i.valor, BCB_INDICES.IPCA.tipo);
+    }
     let somaTaxas = 0;
     for (const s of serieSelic) {
-      const selic = parseFloat(s.valor.replace(',', '.'));
+      // SELIC (4189) vem anualizada → converter pra mensal equivalente
+      const selicAnual = parseFloat(String(s.valor).replace(',', '.'));
+      const selicMensal = _bcbVarMensal(s.valor, BCB_INDICES.SELIC.tipo);
       const ipca = ipcaPorMes[s.data];
-      // Se faltar IPCA daquele mês, considera 0 (não inventa)
       const ipcaVal = isNaN(ipca) ? 0 : ipca;
-      let taxa = selic - ipcaVal;
+      let taxa = selicMensal - ipcaVal;
       if (taxa < 0) taxa = 0;  // §3º: negativo vira zero
       somaTaxas += taxa;
-      jurosMemoria.push({ data: s.data, selic, ipca: ipcaVal, taxaLegal: taxa });
+      jurosMemoria.push({
+        data: s.data,
+        selicAnual,           // % a.a. publicada
+        selicMensal,          // % a.m. equivalente (convertida)
+        ipca: ipcaVal,        // % a.m.
+        taxaLegal: taxa       // % a.m. (selic_mensal − ipca, com floor 0)
+      });
     }
     valorJuros = valorCorrigido * (somaTaxas / 100);  // simples
   } else if (p.jurosTaxa > 0) {

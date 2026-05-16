@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.61.0 (Calculadora P1 fase 2: tab Histórico — listar/reabrir/excluir cálculos salvos)
-const CACHE_NAME = 'uc-juridico-v6-61-0';
+// Service Worker — UC Jurídico v6.61.1 (FIX CRÍTICO: SELIC 4189 era anualizada — converter pra mensal equivalente)
+const CACHE_NAME = 'uc-juridico-v6-61-1';
 const APP_SHELL = [
   './',
   './index.html',
