@@ -1132,7 +1132,7 @@ function renderModalField(f, i) {
     return `<div style="display: flex; gap: 8px; align-items: flex-start;"><input type="checkbox" id="${id}" ${f.default ? 'checked' : ''} style="margin-top: 3px;"><div><label for="${id}" style="font-weight: 500; cursor: pointer;">${escapeHtml(f.label)}</label>${f.help ? `<p class="help-text">${f.help}</p>` : ''}</div></div>`;
   }
   if (f.type === 'textarea') {
-    return `<div><label class="label">${escapeHtml(f.label)}</label>${f.help ? `<p class="help-text" style="margin-bottom: 6px;">${f.help}</p>` : ''}<textarea class="textarea" id="${id}" rows="${f.rows || 4}" ${f.readOnly ? 'readonly' : ''} ${f.placeholder ? `placeholder="${escapeHtml(f.placeholder)}"` : ''} style="font-family: ${f.mono === false ? 'inherit' : 'ui-monospace, Menlo, Consolas, monospace'}; font-size: ${f.mono === false ? '13px' : '12px'};">${escapeHtml(f.default || '')}</textarea></div>`;
+    return `<div><label class="label">${escapeHtml(f.label)}</label>${f.help ? `<p class="help-text" style="margin-bottom: 6px;">${f.help}</p>` : ''}<textarea class="textarea" id="${id}" rows="${f.rows || 4}" ${f.readOnly ? 'readonly' : ''} ${f.maxLength ? `maxlength="${f.maxLength}"` : ''} ${f.placeholder ? `placeholder="${escapeHtml(f.placeholder)}"` : ''} style="font-family: ${f.mono === false ? 'inherit' : 'ui-monospace, Menlo, Consolas, monospace'}; font-size: ${f.mono === false ? '13px' : '12px'};">${escapeHtml(f.default || '')}</textarea></div>`;
   }
   if (f.type === 'file') {
     return `<div><label class="label">${escapeHtml(f.label)}</label>${f.help ? `<p class="help-text" style="margin-bottom: 6px;">${f.help}</p>` : ''}<input type="file" class="input" id="${id}" ${f.accept ? `accept="${escapeHtml(f.accept)}"` : ''} ${f.multiple ? 'multiple' : ''} style="padding: 6px;"></div>`;
@@ -4212,21 +4212,17 @@ async function editarClassificacaoCpc25Flow(processId) {
       ],
       help: 'Classificação refere-se à probabilidade do CLIENTE OBTER ÊXITO na ação. O sistema traduz pra CPC 25 conforme polo (' + _cpcPoloLabel(p.polo) + ').'
     },
-    { label: 'Justificativa técnica (mínimo 200 caracteres)', name: 'justificativa', type: 'textarea',
+    { label: 'Justificativa técnica (opcional, máx. 5.000 caracteres)', name: 'justificativa', type: 'textarea',
       default: p.justificativaClassificacao || '',
       placeholder: 'Fundamente a classificação com base no estado processual, teses do escritório e adversárias, jurisprudência aplicável e atos pendentes. Este texto será adensado pela IA no relatório de auditoria.',
-      rows: 8, mono: false,
-      help: 'Mínimo 200 caracteres. Será reproduzida e adensada pela IA na geração do relatório.'
+      rows: 8, mono: false, maxLength: 5000,
+      help: 'Opcional. Quanto mais detalhada, melhor a fundamentação da IA. Se vazia, será marcada como [VERIFICAR] no relatório.'
     }
   ], { confirmLabel: 'Salvar classificação' });
   if (!r) return;
   const [probabilidade, justificativa] = r;
-  if (!justificativa || justificativa.trim().length < 200) {
-    toast('Justificativa insuficiente', 'Mínimo 200 caracteres — fundamente tecnicamente.', 'error');
-    return;
-  }
   p.probabilidadeExito = probabilidade;
-  p.justificativaClassificacao = justificativa.trim();
+  p.justificativaClassificacao = (justificativa || '').trim().slice(0, 5000);
   p.probabilidadeExitoAtualizadaEm = new Date().toISOString();
   try {
     await DB.saveProcess(p);

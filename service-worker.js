@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.63.3 (Relatório auditoria: botão '⚖ Classificar CPC 25' no header do processo)
-const CACHE_NAME = 'uc-juridico-v6-63-3';
+// Service Worker — UC Jurídico v6.63.4 (Classificação CPC 25: justificativa opcional, sem mínimo, máx 5000 chars)
+const CACHE_NAME = 'uc-juridico-v6-63-4';
 const APP_SHELL = [
   './',
   './index.html',
