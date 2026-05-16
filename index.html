@@ -2684,6 +2684,7 @@ async function renderClienteDetalhe() {
       </div>
       <div class="flex gap-2">
         ${meusProcs.length > 0 && !_isClienteMode() ? `<button class="btn btn-primary" onclick="gerarRelatorioClienteFlow('${cli.id}')" title="Gera relatório consolidado dos processos do cliente em .doc">📊 Gerar relatório</button>` : ''}
+        ${meusProcs.length > 0 && !_isClienteMode() ? `<button class="btn btn-outline" onclick="gerarRelatorioAuditoriaConsolidadoFlow('${cli.id}')" title="Gerar relatório consolidado para auditoria externa (CPC 25/IAS 37)">🏛 Auditoria</button>` : ''}
         <button class="btn btn-outline" onclick="editarCliente('${cli.id}')">✎ Editar</button>
       </div>
     </div>
@@ -3536,6 +3537,7 @@ async function renderProcessDetail() {
         ${_isClienteMode() ? '' : `<button class="btn btn-secondary btn-sm" onclick="setProcessTab('analysis')" title="Abre análise IA do processo">🧠 Análise IA</button>`}
         ${_isClienteMode() ? '' : `<button class="btn btn-primary btn-sm" onclick="gerarPeticaoEscolhaFlow()" title="Gerar petição — escolha entre modelo cadastrado ou geração via IA">📝 Gerar petição</button>`}
         ${(p.cnj && !_isClienteMode()) ? `<button class="btn btn-primary btn-sm" onclick="mniProtocolarFlow('${p.id}')" title="Protocolar petição/manifestação direto no tribunal via SOAP/MNI" style="background:linear-gradient(135deg,#b87f1c 0%,#c9a14c 100%);">📤 Protocolar</button>` : ''}
+        ${(!_isClienteMode() && p.probabilidadeExito) ? `<button class="btn btn-outline btn-sm" onclick="gerarRelatorioAuditoriaIndividualFlow('${p.id}')" title="Gerar relatório técnico-jurídico para auditoria externa (CPC 25/IAS 37)">🏛 Relatório auditoria</button>` : ''}
       </div>
     </div>
 
@@ -3807,6 +3809,391 @@ function _cpcTratamentoContabil(prob, polo) {
       : 'Risco de perda provável — exige provisão contábil pelo valor melhor estimado.';
   }
   return '—';
+}
+
+// ====================================================================
+// RELATÓRIO DE AUDITORIA — Geração via Claude API
+// ====================================================================
+// Implementa a especificação dos 4 prompts (config + contexto + redação
+// + revisão) compactados em UMA chamada à Claude (modeloPromptSistema +
+// briefing combinado). Mais eficiente que 4 chamadas separadas e
+// suficiente pra IA executar a sequência num único turno.
+
+const _PROMPT_SISTEMA_AUDITORIA = `Você atuará como advogado sênior brasileiro com 30 anos de atuação contenciosa, redigindo relatório técnico-jurídico destinado a AUDITORIA EXTERNA CONTRATADA do cliente.
+
+Princípios obrigatórios:
+
+1. **Destinatário técnico.** O leitor é auditor independente familiarizado com CPC 25 / IAS 37. Use terminologia jurídica e contábil padrão sem tradução para leigo. Evite, contudo, prolixidade — auditoria valoriza objetividade e comparabilidade.
+
+2. **Anti-fabricação.** NUNCA inventar jurisprudência, doutrina, legislação, número de processo, valor, data ou andamento que não esteja nos dados fornecidos. Toda referência deve corresponder a fonte real e verificável. Quando uma informação relevante não constar dos dados de entrada, sinalize com [VERIFICAR] e siga.
+
+3. **Classificação de probabilidade.** Refletir fielmente a classificação fornecida pelo advogado responsável (PROVÁVEL | POSSÍVEL | REMOTO). NÃO revisar nem questionar a classificação — apenas fundamentar tecnicamente. Traduzir explicitamente para a linguagem contábil correspondente, considerando o polo processual do cliente.
+
+4. **Distinção rigorosa.** Fato já ocorrido = afirmação direta. Cenário futuro = linguagem probabilística ("tende a", "há precedentes no sentido de"). Hipótese não fundamentada = ressalva expressa ("ainda não é possível afirmar com segurança porque…").
+
+5. **Neutralidade.** Sem otimismo artificial, sem alarmismo. Auditor precisa formar opinião própria.
+
+6. **Confidencialidade preservada.** Não revelar estratégia processual sigilosa que possa prejudicar o cliente se vazada. Auditoria precisa do RISCO, não do PLAYBOOK.
+
+7. **Autoria.** Documento assinado por Eduardo Urany de Castro — OAB/GO 16.539 · OAB/DF 87.243.
+
+O usuário vai fornecer (1) contexto e (2) instruções de estrutura. Siga rigorosamente.`;
+
+function _montarContextoProcessoAuditoria(p, eventos, deadlines, jurisprudencia, cliente) {
+  const _dt = iso => iso ? new Date(iso).toLocaleDateString('pt-BR') : '—';
+  const _brl = v => v ? 'R$ ' + Number(v).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—';
+
+  const partesAt = (p.partes || []).filter(pa => pa.polo === 'AT').map(pa => pa.nome).join(' · ');
+  const partesPa = (p.partes || []).filter(pa => pa.polo === 'PA').map(pa => pa.nome).join(' · ');
+
+  const eventosOrdenados = [...(eventos || [])]
+    .sort((a, b) => new Date(b.date || b.createdAt || 0) - new Date(a.date || a.createdAt || 0))
+    .slice(0, 30);
+  const histText = eventosOrdenados.length
+    ? eventosOrdenados.map(e => `- ${_dt(e.date || e.createdAt)}: ${e.type || e.title || ''}${e.description ? ' — ' + e.description.slice(0, 300) : ''}`).join('\n')
+    : '(sem andamentos relevantes nos dados)';
+
+  const prazos = (deadlines || []).filter(d => !d.cumprida && !d.cancelada);
+  const prazosText = prazos.length
+    ? prazos.map(d => `- ${_dt(d.deadlineDate || d.date)}: ${d.description || d.type || 'prazo'}`).join('\n')
+    : '(sem prazos ativos)';
+
+  const jurisText = (jurisprudencia || []).length
+    ? jurisprudencia.slice(0, 20).map(j => `- ${j.tipo || ''} ${j.numero || ''} ${j.relator ? '· Rel. ' + j.relator : ''} ${j.data ? '· ' + _dt(j.data) : ''}: ${(j.ementa || j.tese || '').slice(0, 400)}`).join('\n')
+    : '(sem jurisprudência cadastrada nos dados — abster-se de citar julgados não fornecidos)';
+
+  return `**PROCESSO**
+- Número CNJ: ${p.cnj || '[VERIFICAR]'}
+- Tribunal: ${p.court || '[VERIFICAR]'}${p.comarca ? ' · Comarca: ' + p.comarca : ''}
+- Natureza/Classe: ${p.type || '[VERIFICAR]'}
+- Objeto: ${p.description || (p.name || '[VERIFICAR]')}
+- Valor da causa: ${_brl(p.valorCausa)}
+- Exposição financeira estimada: ${p.valorCausa ? _brl(p.valorCausa) + ' (igual ao valor da causa — confirmar)' : '[VERIFICAR]'}
+- Polo do cliente: ${p.polo === 'AT' ? 'ATIVO (autor)' : p.polo === 'PA' ? 'PASSIVO (réu)' : '[VERIFICAR]'}
+- Parte adversa: ${p.polo === 'AT' ? (partesPa || '[VERIFICAR]') : (partesAt || '[VERIFICAR]')}
+- Fase processual atual: ${p.fase || '[VERIFICAR]'}
+- Status: ${p.status || 'active'}
+
+**HISTÓRICO PROCESSUAL** (cronológico, do mais recente):
+${histText}
+
+**PRAZOS EM CURSO:**
+${prazosText}
+
+**JURISPRUDÊNCIA APLICÁVEL VERIFICADA:**
+${jurisText}
+
+**CLASSIFICAÇÃO DO ADVOGADO RESPONSÁVEL:**
+- Probabilidade de êxito do cliente: ${p.probabilidadeExito || '[VERIFICAR — sem classificação cadastrada]'}
+- Justificativa técnica: ${p.justificativaClassificacao || '[VERIFICAR — sem justificativa cadastrada]'}
+
+**CAMPOS NÃO COBERTOS NESTE EXPORT** (Teses próprias, Teses adversas, Atos previstos):
+Não fornecidos no dump atual. Quando essas informações forem necessárias na redação, marcar com [VERIFICAR] e prosseguir.`;
+}
+
+async function gerarRelatorioAuditoriaIndividualFlow(processId) {
+  const p = await DB.getProcess(processId);
+  if (!p) { toast('Processo não encontrado', '', 'error'); return; }
+  if (!p.probabilidadeExito || !p.justificativaClassificacao) {
+    toast('Classificação CPC 25 obrigatória',
+      'Preencha probabilidade de êxito + justificativa antes de gerar o relatório. Use "+ Classificar" na Visão geral.',
+      'error');
+    return;
+  }
+
+  const r = await showModal('🏛 Gerar relatório de auditoria · individual', [
+    { label: 'Data-base do relatório', name: 'dataBase', type: 'date',
+      default: new Date().toISOString().slice(0, 10) },
+    { label: 'Auditoria destinatária (opcional)', name: 'auditoria', type: 'text',
+      placeholder: 'Ex.: KPMG Auditores Independentes', default: '' },
+    { label: 'Observações finais (opcional)', name: 'observacoes', type: 'textarea',
+      placeholder: 'Texto livre que entra ao final. Ex.: contexto adicional pra auditoria.',
+      rows: 3, default: '' }
+  ], { confirmLabel: '🏛 Gerar via IA',
+    intro: 'Relatório técnico CPC 25/IAS 37 com classificação ' + p.probabilidadeExito + '. A geração via Claude leva ~30-60s.' });
+  if (!r) return;
+  const [dataBase, auditoria, observacoes] = r;
+
+  // Carrega contexto do processo
+  const [cliente, eventos, deadlines, jurisprudencia] = await Promise.all([
+    p.clienteId ? DB.getCliente(p.clienteId).catch(() => null) : null,
+    DB.getEventsByProcess(processId).catch(() => []),
+    DB.getDeadlinesByProcess(processId).catch(() => []),
+    DB.getJurisprudenceByProcess(processId).catch(() => [])
+  ]);
+
+  const ctx = _montarContextoProcessoAuditoria(p, eventos, deadlines, jurisprudencia, cliente);
+
+  const briefing = `Modo de geração: INDIVIDUAL — relatório de UM processo.
+
+Data-base: ${dataBase}
+Auditoria destinatária: ${auditoria || '(não informada)'}
+
+**CLIENTE**
+- Nome: ${cliente?.nome || '[VERIFICAR]'}
+- CPF/CNPJ: ${cliente?.doc || '[VERIFICAR]'}
+- Endereço: ${cliente?.endereco ? _composeEndereco(cliente) : '[VERIFICAR]'}
+
+${ctx}
+
+${observacoes ? `\n**OBSERVAÇÕES ADICIONAIS DO ADVOGADO RESPONSÁVEL:**\n${observacoes}\n` : ''}
+
+---
+
+**INSTRUÇÕES DE REDAÇÃO** — siga rigorosamente esta estrutura:
+
+CABEÇALHO: "RELATÓRIO JURÍDICO PARA FINS DE AUDITORIA — PROCESSO INDIVIDUAL" + cliente + data-base + auditoria destinatária + processo (número/vara/tribunal).
+
+BLOCO 1 — Identificação do processo (tabela): CNJ, órgão, natureza, partes (com polo do cliente), objeto, valor da causa, exposição financeira, fase atual.
+
+BLOCO 2 — Síntese fática: 3-5 parágrafos curtos, fatos incontroversos + controversos.
+
+BLOCO 3 — Fundamentação técnica do escritório: teses adotadas + base normativa/jurisprudencial VERIFICADA (marcar [VERIFICAR] em qualquer não-confirmada).
+
+BLOCO 4 — Teses da parte adversa: identificar principais teses adversas + classificação (consistente/frágil/processual/de mérito) + linha de resposta.
+
+BLOCO 5 — Atos processuais recentes e pendentes: decisões/peças com data; próximas providências.
+
+BLOCO 6 — Classificação de probabilidade (formato padronizado):
+> **Probabilidade de êxito do cliente:** ${p.probabilidadeExito}
+> **Tratamento contábil correspondente (CPC 25/IAS 37):** [traduzir conforme polo ${p.polo === 'AT' ? 'ATIVO' : 'PASSIVO'}]
+> **Fundamentação técnica:** [adensar a justificativa do advogado responsável, articulando com estado processual + jurisprudência + força das teses + atos pendentes]
+
+BLOCO 7 — Próximos passos e horizonte temporal: providências previstas (6-12 meses); cenários (favorável/intermediário/adverso) com indicação probabilística qualitativa; principal risco a neutralizar.
+
+BLOCO 8 — Ressalvas e informações pendentes: listar TUDO marcado com [VERIFICAR] + lacunas (perícia em curso, decisão aguardada, etc).
+
+ENCERRAMENTO: Local, data, "Eduardo Urany de Castro · OAB/GO 16.539 · OAB/DF 87.243".
+
+REGRAS RÍGIDAS:
+- Nada de jurisprudência citada por número se não tiver sido fornecida.
+- Não afirmar sobre provas não produzidas.
+- Não prometer resultado. Verbos probabilísticos quando houver incerteza.
+- Não revelar estratégia sigilosa.
+
+FORMATO DE SAÍDA: HTML simples, sem markdown nem markdown-style. Use <h2>, <h3>, <p>, <strong>, <table>, <tr>, <th>, <td>, <ul>, <li>. NÃO use \`\`\` nem blocos de código. Apenas HTML inline pronto pra inserir em documento Word.
+
+REVISÃO FINAL (incorporada): antes de entregar, releia mentalmente e ajuste:
+- Classificação coerente com fundamentação?
+- Tratamento contábil correto pro polo?
+- Tudo amparado nos dados ou marcado [VERIFICAR]?
+- Tom técnico-sóbrio, sem otimismo/alarmismo?
+- Sigilo estratégico preservado?
+
+Entregue agora apenas o HTML do relatório, sem comentários adicionais.`;
+
+  await _gerarRelatorioAuditoriaComIA({
+    briefing,
+    p,
+    cliente,
+    modo: 'INDIVIDUAL',
+    dataBase,
+    auditoria
+  });
+}
+
+async function gerarRelatorioAuditoriaConsolidadoFlow(clienteId) {
+  const [clientes, processos] = await Promise.all([
+    DB.getAllClientes(),
+    DB.getAllProcesses()
+  ]);
+  const cli = clientes.find(c => c.id === clienteId);
+  if (!cli) { toast('Cliente não encontrado', '', 'error'); return; }
+
+  const procsCli = processos.filter(p =>
+    !p.deletedAt && (
+      p.clienteId === clienteId ||
+      (Array.isArray(p.clienteIds) && p.clienteIds.includes(clienteId))
+    ) && p.status !== 'archived'
+  );
+
+  if (procsCli.length === 0) {
+    toast('Sem processos ativos', '', 'error');
+    return;
+  }
+
+  const semClassif = procsCli.filter(p => !p.probabilidadeExito || !p.justificativaClassificacao);
+  if (semClassif.length > 0) {
+    const lista = semClassif.slice(0, 5).map(p => `· ${p.cnj || p.name || '?'}`).join('\n');
+    const maisN = semClassif.length > 5 ? `\n+ ${semClassif.length - 5} outros` : '';
+    toast('Processos sem classificação CPC 25',
+      `${semClassif.length} processo(s) sem classificar:\n${lista}${maisN}\n\nClassifique todos antes de gerar consolidado.`,
+      'error');
+    return;
+  }
+
+  const r = await showModal('🏛 Gerar relatório consolidado · auditoria', [
+    { label: 'Data-base', name: 'dataBase', type: 'date',
+      default: new Date().toISOString().slice(0, 10) },
+    { label: 'Auditoria destinatária (opcional)', name: 'auditoria', type: 'text',
+      placeholder: 'Ex.: PwC Auditores Independentes', default: '' },
+    { label: 'Observações finais (opcional)', name: 'observacoes', type: 'textarea',
+      rows: 3, default: '' }
+  ], { confirmLabel: '🏛 Gerar via IA',
+    intro: `Relatório consolidado de ${procsCli.length} processo(s) ativos do cliente ${cli.nome}. Geração via Claude leva 1-3min dependendo do volume.` });
+  if (!r) return;
+  const [dataBase, auditoria, observacoes] = r;
+
+  // Carrega contextos dos processos
+  const procsData = await Promise.all(procsCli.map(async p => {
+    const [eventos, deadlines, jurisprudencia] = await Promise.all([
+      DB.getEventsByProcess(p.id).catch(() => []),
+      DB.getDeadlinesByProcess(p.id).catch(() => []),
+      DB.getJurisprudenceByProcess(p.id).catch(() => [])
+    ]);
+    return { p, eventos, deadlines, jurisprudencia };
+  }));
+
+  const blocoPorProcesso = procsData.map((d, i) => `
+**==== PROCESSO ${i + 1} de ${procsData.length} ====**
+${_montarContextoProcessoAuditoria(d.p, d.eventos, d.deadlines, d.jurisprudencia, cli)}
+`).join('\n\n');
+
+  const briefing = `Modo de geração: CONSOLIDADO — relatório de TODOS os processos ativos do cliente.
+
+Data-base: ${dataBase}
+Auditoria destinatária: ${auditoria || '(não informada)'}
+
+**CLIENTE**
+- Nome: ${cli.nome || '[VERIFICAR]'}
+- CPF/CNPJ: ${cli.doc || '[VERIFICAR]'}
+- Endereço: ${_composeEndereco(cli) || '[VERIFICAR]'}
+
+Universo: ${procsData.length} processos ativos.
+
+${blocoPorProcesso}
+
+${observacoes ? `\n**OBSERVAÇÕES ADICIONAIS:**\n${observacoes}\n` : ''}
+
+---
+
+**INSTRUÇÕES DE REDAÇÃO**:
+
+CABEÇALHO: "RELATÓRIO JURÍDICO CONSOLIDADO PARA FINS DE AUDITORIA" + cliente + data-base + auditoria + qtd processos.
+
+PARTE I — Sumário executivo:
+I.1: Tabela síntese por classificação (Remoto/Possível/Provável) × N processos × exposição agregada (R$). Tabela paralela pra ativos contingentes se houver polo ATIVO.
+I.2: Síntese qualitativa (até 5 parágrafos curtos): principais frentes, distribuição temática, processos mais relevantes em valor/risco, eventos previsíveis 12 meses.
+
+PARTE II — Detalhamento por processo (UM bloco enxuto por processo, em sequência):
+1. Cabeçalho: número, vara, natureza, polo, parte adversa
+2. Objeto + exposição (1-2 linhas)
+3. Fase atual (1 linha)
+4. Histórico relevante (até 5 bullets com data)
+5. Síntese teses: próprias (2-3 linhas) + adversas (2-3 linhas)
+6. Classificação: probabilidade + tratamento contábil + justificativa (até 5 linhas)
+7. Próximos atos (1 linha)
+8. Ressalvas [VERIFICAR] se houver
+
+PARTE III — Ressalvas gerais consolidadas.
+
+ENCERRAMENTO: Local, data, "Eduardo Urany de Castro · OAB/GO 16.539 · OAB/DF 87.243".
+
+REGRAS RÍGIDAS:
+- Nada inventado. Marcar [VERIFICAR] em qualquer dado ausente.
+- Sem promessa de resultado. Verbos probabilísticos.
+- Sem revelação de estratégia sigilosa.
+- Comparabilidade entre os blocos.
+
+FORMATO DE SAÍDA: HTML simples (h2, h3, p, table, ul/li, strong). Sem markdown, sem \`\`\`. Pronto pra Word.
+
+Entregue apenas o HTML do relatório.`;
+
+  await _gerarRelatorioAuditoriaComIA({
+    briefing,
+    cliente: cli,
+    modo: 'CONSOLIDADO',
+    nProcessos: procsData.length,
+    dataBase,
+    auditoria
+  });
+}
+
+async function _gerarRelatorioAuditoriaComIA({ briefing, p, cliente, modo, nProcessos, dataBase, auditoria }) {
+  // Modal de loading com progresso
+  const loading = document.createElement('div');
+  loading.className = 'modal-backdrop';
+  loading.innerHTML = `
+    <div class="modal" style="max-width: 480px; text-align: center; padding: 32px 24px;">
+      <div style="display:inline-block;border:3px solid #d4cfc0;border-top-color:var(--uc-gold);border-radius:50%;width:40px;height:40px;animation:spin 0.8s linear infinite;margin-bottom:16px;"></div>
+      <h3 class="modal-title">Gerando relatório de auditoria…</h3>
+      <p class="help-text" style="margin: 8px 0 0;">Claude está redigindo. ${modo === 'CONSOLIDADO' ? `${nProcessos} processo(s) · pode levar 1-3 min.` : 'Pode levar 30-60s.'}</p>
+      <p class="help-text" style="font-size:11px;color:var(--uc-warm-gray);margin-top:12px;">Prompt sistema (especialista) + briefing (contexto + instruções) → Claude → revisão final.</p>
+    </div>
+  `;
+  $('modalContainer').appendChild(loading);
+
+  let resp;
+  try {
+    resp = await DB.gerarPeticaoIA(briefing, { processo: p || null, cliente: cliente || null }, {
+      modeloPromptSistema: _PROMPT_SISTEMA_AUDITORIA,
+      tipo: 'relatorio_auditoria',
+      modeloApi: 'claude-opus-4-7'
+    });
+  } catch (e) {
+    loading.remove();
+    const msg = e?.message || String(e);
+    if (msg.indexOf('api_key_ausente') >= 0) {
+      toast('Claude API não configurada', 'Configure CLAUDE_API_KEY no Apps Script.', 'error');
+    } else {
+      toast('Falha ao gerar', msg.slice(0, 150), 'error');
+    }
+    return;
+  }
+  loading.remove();
+
+  if (!resp?.conteudo) {
+    toast('Resposta vazia', 'Claude não retornou conteúdo. Tente novamente.', 'error');
+    return;
+  }
+
+  // Conta [VERIFICAR] no output pra avisar sobre pendências
+  const nVerificar = (resp.conteudo.match(/\[VERIFICAR\]/g) || []).length;
+
+  // Monta HTML final com cabeçalho/estilo do escritório
+  const dataFmt = new Date(dataBase || new Date()).toLocaleDateString('pt-BR');
+  const htmlCompleto = `<!DOCTYPE html>
+<html lang="pt-BR"><head><meta charset="UTF-8"><title>Relatório de auditoria · ${escapeHtml(cliente?.nome || 'cliente')}</title>
+<style>
+@page { size: A4; margin: 2cm 2cm 2cm 2.5cm; }
+body { font-family: 'EB Garamond', 'Times New Roman', serif; font-size: 11.5pt; line-height: 1.55; color: #1f1f1f; max-width: 800px; margin: 0 auto; padding: 24px; }
+h1 { font-size: 17pt; font-variant: small-caps; letter-spacing: 0.06em; text-align: center; border-bottom: 2px solid #8a6f3d; padding-bottom: 8px; margin-bottom: 16px; }
+h2 { font-size: 13pt; font-variant: small-caps; letter-spacing: 0.04em; color: #0a0a0a; margin-top: 22px; border-left: 3px solid #8a6f3d; padding-left: 12px; }
+h2::before { content: "§ "; color: #8a6f3d; }
+h3 { font-size: 11.5pt; font-variant: small-caps; color: #444; margin-top: 16px; margin-bottom: 6px; }
+table { width: 100%; border-collapse: collapse; margin: 8px 0; font-size: 10.5pt; }
+th, td { padding: 5px 8px; border-bottom: 1px solid #d4cfc0; vertical-align: top; }
+th { background: #f4f1e8; font-variant: small-caps; text-align: left; }
+strong { color: #0a0a0a; }
+p { margin: 6px 0; text-align: justify; }
+.verificar { background: #fff4d4; padding: 2px 4px; color: #6b5410; border-radius: 2px; font-size: 10pt; }
+.assinatura { margin-top: 50px; text-align: center; font-variant: small-caps; letter-spacing: 0.06em; font-weight: 600; }
+.oab { font-variant: normal; font-weight: normal; font-size: 10pt; margin-top: 4px; }
+@media print { body { padding: 0; } h2 { page-break-after: avoid; } table { page-break-inside: avoid; } }
+</style></head><body>
+
+${resp.conteudo.replace(/\[VERIFICAR\]/g, '<span class="verificar">[VERIFICAR]</span>')}
+
+<div class="assinatura">
+  Eduardo Urany de Castro<br>
+  <span class="oab">OAB/GO n.º 16.539 · OAB/DF n.º 87.243</span>
+</div>
+
+<p style="margin-top:40px;font-size:9pt;color:#6b6b68;text-align:center;border-top:1px solid #d4cfc0;padding-top:12px;">
+  Relatório gerado por UC Jurídico em ${new Date().toLocaleString('pt-BR')} · auxílio de IA (Claude Opus 4.7) com revisão final do advogado responsável.
+  ${nVerificar > 0 ? `⚠ ${nVerificar} item(s) marcado(s) como [VERIFICAR] — revise antes de enviar à auditoria.` : ''}
+</p>
+
+</body></html>`;
+
+  const filename = `relatorio_auditoria_${modo.toLowerCase()}_${(cliente?.nome || 'cliente').replace(/[^\w]/g, '_')}_${dataBase || new Date().toISOString().slice(0, 10)}.doc`;
+  downloadBlob(new Blob(['﻿' + htmlCompleto], { type: 'application/msword' }), filename);
+
+  if (nVerificar > 0) {
+    toast(`Relatório gerado · ${nVerificar} [VERIFICAR]`, 'Revise os itens marcados antes de enviar à auditoria.', 'info');
+  } else {
+    toast('Relatório de auditoria gerado', filename, 'success');
+  }
 }
 
 async function editarClassificacaoCpc25Flow(processId) {
