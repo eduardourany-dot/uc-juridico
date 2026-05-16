@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.62.4 (Calculadora Fiscal: teto SELIC Tema 1062/1217 STF — estados/municípios)
-const CACHE_NAME = 'uc-juridico-v6-62-4';
+// Service Worker — UC Jurídico v6.62.5 (Calculadora: validação melhor de datas inválidas com diagnóstico claro)
+const CACHE_NAME = 'uc-juridico-v6-62-5';
 const APP_SHELL = [
   './',
   './index.html',

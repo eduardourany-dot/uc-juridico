@@ -12152,15 +12152,35 @@ async function _calcExecutar() {
 
   // Valida e normaliza lançamentos
   const lancsValid = [];
-  for (const l of _calcState.lancamentos) {
+  for (let i = 0; i < _calcState.lancamentos.length; i++) {
+    const l = _calcState.lancamentos[i];
+    const linhaNum = i + 1;
+    const descLinha = l.descricao ? `"${l.descricao}"` : `#${linhaNum}`;
     if (!l.data && !l.valor) continue; // pula linha completamente vazia
-    if (!l.data) { toast('Lançamento sem data', `Linha "${l.descricao || '?'}" tem valor mas sem data.`, 'error'); return; }
-    const v = parseFloat(String(l.valor || '').replace(',', '.'));
-    if (!v || v <= 0) { toast('Valor inválido', `Lançamento em ${l.data}: informe um valor > 0.`, 'error'); return; }
-    if (new Date(l.data) >= new Date(dataFim)) { toast('Data inválida', `Lançamento em ${l.data} deve ser ANTES da data final ${dataFim}.`, 'error'); return; }
-    if (l.dataJuros && new Date(l.dataJuros) >= new Date(dataFim)) {
-      toast('Data juros inválida', `Lançamento em ${l.data}: data de juros (${l.dataJuros}) deve ser ANTES da data final.`, 'error');
+    if (!l.data) {
+      // Detectar se foi data inválida digitada (input type=date retorna '' quando inválida)
+      toast('Data inválida ou ausente', `Lançamento ${descLinha}: verifique se a data informada existe (ex: 31/02 ou 31/06 não existem).`, 'error');
       return;
+    }
+    // Sanity check: data tem formato ISO YYYY-MM-DD e parse válido
+    const dl = new Date(l.data);
+    if (isNaN(dl.getTime())) {
+      toast('Data inválida', `Lançamento ${descLinha} tem data '${l.data}' que não é uma data válida.`, 'error');
+      return;
+    }
+    const v = parseFloat(String(l.valor || '').replace(',', '.'));
+    if (!v || v <= 0) { toast('Valor inválido', `Lançamento ${descLinha} em ${l.data}: informe um valor > 0.`, 'error'); return; }
+    if (dl >= new Date(dataFim)) { toast('Data inválida', `Lançamento ${descLinha} em ${l.data} deve ser ANTES da data final ${dataFim}.`, 'error'); return; }
+    if (l.dataJuros) {
+      const dj = new Date(l.dataJuros);
+      if (isNaN(dj.getTime())) {
+        toast('Data juros inválida', `Lançamento ${descLinha}: data de juros '${l.dataJuros}' não é válida.`, 'error');
+        return;
+      }
+      if (dj >= new Date(dataFim)) {
+        toast('Data juros inválida', `Lançamento ${descLinha}: data de juros (${l.dataJuros}) deve ser ANTES da data final.`, 'error');
+        return;
+      }
     }
     lancsValid.push({ id: l.id, data: l.data, dataJuros: l.dataJuros || '', valor: v, valorCobrado: l.valorCobrado || '', descricao: l.descricao || '', tipo: l.tipo || 'principal' });
   }
