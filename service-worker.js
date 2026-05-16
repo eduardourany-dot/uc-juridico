@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.60.0 (P1: Calculadora — atualização monetária via API BCB + juros)
-const CACHE_NAME = 'uc-juridico-v6-60-0';
+// Service Worker — UC Jurídico v6.60.1 (Calculadora: tabela de múltiplos lançamentos com datas/valores diferentes)
+const CACHE_NAME = 'uc-juridico-v6-60-1';
 const APP_SHELL = [
   './',
   './index.html',
