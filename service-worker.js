@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.63.4 (Classificação CPC 25: justificativa opcional, sem mínimo, máx 5000 chars)
-const CACHE_NAME = 'uc-juridico-v6-63-4';
+// Service Worker — UC Jurídico v6.63.5 (Classificação CPC 25: unificada com p.risco, mostrada na Identificação, botão em Ações)
+const CACHE_NAME = 'uc-juridico-v6-63-5';
 const APP_SHELL = [
   './',
   './index.html',

@@ -3537,8 +3537,6 @@ async function renderProcessDetail() {
         ${_isClienteMode() ? '' : `<button class="btn btn-secondary btn-sm" onclick="setProcessTab('analysis')" title="Abre análise IA do processo">🧠 Análise IA</button>`}
         ${_isClienteMode() ? '' : `<button class="btn btn-primary btn-sm" onclick="gerarPeticaoEscolhaFlow()" title="Gerar petição — escolha entre modelo cadastrado ou geração via IA">📝 Gerar petição</button>`}
         ${(p.cnj && !_isClienteMode()) ? `<button class="btn btn-primary btn-sm" onclick="mniProtocolarFlow('${p.id}')" title="Protocolar petição/manifestação direto no tribunal via SOAP/MNI" style="background:linear-gradient(135deg,#b87f1c 0%,#c9a14c 100%);">📤 Protocolar</button>` : ''}
-        ${!_isClienteMode() ? `<button class="btn btn-outline btn-sm" onclick="editarClassificacaoCpc25Flow('${p.id}')" title="Cadastrar/editar classificação CPC 25 (probabilidade de êxito + justificativa)">⚖ ${p.probabilidadeExito ? 'CPC 25 (' + p.probabilidadeExito.slice(0, 3) + ')' : 'Classificar CPC 25'}</button>` : ''}
-        ${(!_isClienteMode() && p.probabilidadeExito) ? `<button class="btn btn-outline btn-sm" onclick="gerarRelatorioAuditoriaIndividualFlow('${p.id}')" title="Gerar relatório técnico-jurídico para auditoria externa (CPC 25/IAS 37)">🏛 Relatório auditoria</button>` : ''}
       </div>
     </div>
 
@@ -3765,10 +3763,31 @@ function _renderParteLi(parte) {
 // ====================================================================
 // Classificação CPC 25 / IAS 37 — Probabilidade de êxito do cliente
 // ====================================================================
-// PROVÁVEL (>50%): risco perda remoto / ativo virtualmente certo
-// POSSÍVEL (10-50%): divulgação em nota (sem provisão / ativo possível)
-// REMOTO (<10%): provisão obrigatória (cliente perdendo) / sem divulgação (ativo)
-// Tradução varia conforme polo: ATIVO vs PASSIVO.
+// Unificada com p.risco (campo legado). Mesmo trinômio com 2 nomenclaturas:
+//   baixo  (risco) ↔ PROVÁVEL (êxito >50%)
+//   medio  (risco) ↔ POSSÍVEL (10-50%)
+//   alto   (risco) ↔ REMOTO  (<10%)
+// Fonte da verdade: p.risco. probabilidadeExito derivada em runtime.
+// Tradução do tratamento contábil considera polo do processo (AT vs PA).
+
+function _riscoToCpc25(risco) {
+  const map = { baixo: 'PROVAVEL', medio: 'POSSIVEL', alto: 'REMOTO' };
+  return map[risco] || null;
+}
+
+function _cpc25ToRisco(prob) {
+  const map = { PROVAVEL: 'baixo', POSSIVEL: 'medio', REMOTO: 'alto' };
+  return map[prob] || null;
+}
+
+function _riscoCpc25Label(risco) {
+  const map = {
+    baixo: 'PROVÁVEL (êxito >50%)',
+    medio: 'POSSÍVEL (10-50%)',
+    alto:  'REMOTO (<10%)'
+  };
+  return map[risco] || '—';
+}
 
 function _cpc25Badge(prob) {
   const map = {
@@ -3895,9 +3914,11 @@ Não fornecidos no dump atual. Quando essas informações forem necessárias na 
 async function gerarRelatorioAuditoriaIndividualFlow(processId) {
   const p = await DB.getProcess(processId);
   if (!p) { toast('Processo não encontrado', '', 'error'); return; }
-  if (!p.probabilidadeExito || !p.justificativaClassificacao) {
-    toast('Classificação CPC 25 obrigatória',
-      'Preencha probabilidade de êxito + justificativa antes de gerar o relatório. Use "+ Classificar" na Visão geral.',
+  // Garante que probabilidadeExito esteja sincronizada com p.risco
+  if (!p.probabilidadeExito && p.risco) p.probabilidadeExito = _riscoToCpc25(p.risco);
+  if (!p.probabilidadeExito) {
+    toast('Classificação obrigatória',
+      'Preencha a Classificação (CPC 25) na Identificação do processo antes de gerar o relatório.',
       'error');
     return;
   }
@@ -4013,7 +4034,11 @@ async function gerarRelatorioAuditoriaConsolidadoFlow(clienteId) {
     return;
   }
 
-  const semClassif = procsCli.filter(p => !p.probabilidadeExito || !p.justificativaClassificacao);
+  // Sincroniza probabilidadeExito ↔ risco em runtime e identifica os sem classificação
+  procsCli.forEach(p => {
+    if (!p.probabilidadeExito && p.risco) p.probabilidadeExito = _riscoToCpc25(p.risco);
+  });
+  const semClassif = procsCli.filter(p => !p.probabilidadeExito);
   if (semClassif.length > 0) {
     const lista = semClassif.slice(0, 5).map(p => `· ${p.cnj || p.name || '?'}`).join('\n');
     const maisN = semClassif.length > 5 ? `\n+ ${semClassif.length - 5} outros` : '';
@@ -4202,13 +4227,15 @@ async function editarClassificacaoCpc25Flow(processId) {
   if (!p) { toast('Processo não encontrado', '', 'error'); return; }
 
   const ehAtivo = p.polo === 'AT';
+  // Valor atual: prioriza p.risco; se não há, traduz de p.probabilidadeExito
+  const riscoAtual = p.risco || _cpc25ToRisco(p.probabilidadeExito) || 'medio';
   const r = await showModal(`⚖ Classificação CPC 25 · ${p.name || ''}`, [
-    { label: 'Probabilidade de êxito do cliente', name: 'probabilidade', type: 'select',
-      default: p.probabilidadeExito || 'POSSIVEL',
+    { label: 'Probabilidade de êxito do cliente', name: 'risco', type: 'select',
+      default: riscoAtual,
       options: [
-        { value: 'PROVAVEL', label: 'PROVÁVEL — êxito >50% (' + (ehAtivo ? 'ativo contingente provável' : 'risco de perda remoto') + ')' },
-        { value: 'POSSIVEL', label: 'POSSÍVEL — êxito 10-50% (' + (ehAtivo ? 'ativo contingente possível' : 'divulgação em nota') + ')' },
-        { value: 'REMOTO',   label: 'REMOTO — êxito <10% (' + (ehAtivo ? 'ativo contingente remoto' : 'PROVISÃO OBRIGATÓRIA') + ')' }
+        { value: 'baixo', label: 'PROVÁVEL — êxito >50% · Risco baixo (' + (ehAtivo ? 'ativo contingente provável' : 'risco de perda remoto') + ')' },
+        { value: 'medio', label: 'POSSÍVEL — êxito 10-50% · Risco médio (' + (ehAtivo ? 'ativo contingente possível' : 'divulgação em nota') + ')' },
+        { value: 'alto',  label: 'REMOTO — êxito <10% · Risco alto (' + (ehAtivo ? 'ativo contingente remoto' : 'PROVISÃO OBRIGATÓRIA') + ')' }
       ],
       help: 'Classificação refere-se à probabilidade do CLIENTE OBTER ÊXITO na ação. O sistema traduz pra CPC 25 conforme polo (' + _cpcPoloLabel(p.polo) + ').'
     },
@@ -4220,8 +4247,9 @@ async function editarClassificacaoCpc25Flow(processId) {
     }
   ], { confirmLabel: 'Salvar classificação' });
   if (!r) return;
-  const [probabilidade, justificativa] = r;
-  p.probabilidadeExito = probabilidade;
+  const [risco, justificativa] = r;
+  p.risco = risco;
+  p.probabilidadeExito = _riscoToCpc25(risco);  // mantém ambos sincronizados
   p.justificativaClassificacao = (justificativa || '').trim().slice(0, 5000);
   p.probabilidadeExitoAtualizadaEm = new Date().toISOString();
   try {
@@ -4287,47 +4315,34 @@ function renderProcessOverview(p, events, deadlines, notes, jurisprudence) {
         ${p.datajudData?.classe ? `<div style="color: var(--uc-warm-gray);">Classe processual:</div><div>${escapeHtml(p.datajudData.classe)}</div>` : ''}
         ${p.datajudData?.assuntos?.length ? `<div style="color: var(--uc-warm-gray);">Assuntos:</div><div>${p.datajudData.assuntos.slice(0, 5).map(a => escapeHtml(a)).join(' · ')}</div>` : ''}
         ${p.datajudData?.grau ? `<div style="color: var(--uc-warm-gray);">Grau:</div><div>${escapeHtml(p.datajudData.grau)}</div>` : ''}
+        ${!_isClienteMode() ? (p.risco ? `
+          <div style="color: var(--uc-warm-gray);">Classificação:</div>
+          <div>
+            <span class="badge ${riscoBadgeClass(p.risco)}" title="${escapeHtml(_cpcTratamentoContabil(_riscoToCpc25(p.risco), p.polo))}">${_riscoCpc25Label(p.risco)}</span>
+            <button class="btn btn-ghost btn-sm" onclick="editarClassificacaoCpc25Flow('${p.id}')" title="Editar classificação CPC 25" style="padding:2px 8px;font-size:11px;margin-left:4px;">✎</button>
+            <div style="font-size:11px;color:var(--uc-warm-gray);margin-top:4px;font-style:italic;">${_cpcTratamentoContabil(_riscoToCpc25(p.risco), p.polo)}</div>
+            ${p.justificativaClassificacao ? `
+              <details style="margin-top:6px;">
+                <summary style="cursor:pointer;font-size:11px;color:var(--uc-gold);">Ver justificativa técnica</summary>
+                <div style="margin-top:6px;font-size:12px;line-height:1.5;background:var(--uc-cream);padding:8px 10px;border-radius:4px;border-left:3px solid var(--uc-gold);white-space:pre-wrap;">${escapeHtml(p.justificativaClassificacao)}</div>
+              </details>
+            ` : ''}
+          </div>
+        ` : `
+          <div style="color: var(--uc-warm-gray);">Classificação:</div>
+          <div><button class="btn btn-ghost btn-sm" onclick="editarClassificacaoCpc25Flow('${p.id}')" style="padding:2px 10px;font-size:11px;">+ Classificar (CPC 25)</button></div>
+        `) : ''}
       </div>
     </div>
 
-    ${(p.advogadoResponsavel || p.advogadoSuplente || p.risco || p.honTipo) ? `
+    ${(p.advogadoResponsavel || p.advogadoSuplente || p.honTipo) ? `
     <div class="card mb-4">
       <h3 class="font-serif text-lg font-semibold smallcaps mb-3" style="color: var(--uc-black);">Gestão</h3>
       <div class="grid gap-2" style="grid-template-columns: 160px 1fr; font-size: 13px;">
         ${p.advogadoResponsavel ? `<div style="color: var(--uc-warm-gray);">Adv. titular:</div><div>${escapeHtml(p.advogadoResponsavel)}</div>` : ''}
         ${p.advogadoSuplente ? `<div style="color: var(--uc-warm-gray);">Adv. suplente:</div><div>${escapeHtml(p.advogadoSuplente)}</div>` : ''}
-        ${p.risco ? `<div style="color: var(--uc-warm-gray);">Risco:</div><div><span class="badge ${riscoBadgeClass(p.risco)}">${escapeHtml(riscoLabel(p.risco))}</span></div>` : ''}
         ${p.honTipo ? `<div style="color: var(--uc-warm-gray);">Honorários:</div><div>${escapeHtml(honLabel(p.honTipo))}${p.honValor ? ' · ' + escapeHtml(p.honValor) : ''}</div>` : ''}
       </div>
-    </div>
-    ` : ''}
-
-    ${!_isClienteMode() ? `
-    <div class="card mb-4" style="${p.probabilidadeExito ? '' : 'border-left:3px solid var(--uc-warm-gray);'}">
-      <div class="flex justify-between items-center mb-3">
-        <h3 class="font-serif text-lg font-semibold smallcaps" style="color: var(--uc-black);">⚖ Classificação CPC 25 / IAS 37</h3>
-        <button class="btn btn-ghost btn-sm" onclick="editarClassificacaoCpc25Flow('${p.id}')" style="padding:4px 10px;font-size:11px;">${p.probabilidadeExito ? '✎ Editar' : '+ Classificar'}</button>
-      </div>
-      ${p.probabilidadeExito ? `
-        <div class="grid gap-2" style="grid-template-columns: 200px 1fr; font-size: 13px;">
-          <div style="color: var(--uc-warm-gray);">Probabilidade de êxito:</div>
-          <div>${_cpc25Badge(p.probabilidadeExito)}</div>
-          <div style="color: var(--uc-warm-gray);">Polo do cliente:</div>
-          <div>${escapeHtml(_cpcPoloLabel(p.polo))}</div>
-          <div style="color: var(--uc-warm-gray);">Tratamento contábil:</div>
-          <div style="font-style:italic;color:var(--uc-graphite);">${_cpcTratamentoContabil(p.probabilidadeExito, p.polo)}</div>
-          ${p.justificativaClassificacao ? `
-            <div style="color: var(--uc-warm-gray);">Justificativa técnica:</div>
-            <div style="white-space:pre-wrap;font-size:12px;line-height:1.5;background:var(--uc-cream);padding:8px 10px;border-radius:4px;border-left:3px solid var(--uc-gold);">${escapeHtml(p.justificativaClassificacao)}</div>
-          ` : ''}
-          ${p.probabilidadeExitoAtualizadaEm ? `
-            <div style="color: var(--uc-warm-gray);">Última revisão:</div>
-            <div style="font-size:12px;color:var(--uc-warm-gray);">${formatDate(p.probabilidadeExitoAtualizadaEm)}</div>
-          ` : ''}
-        </div>
-      ` : `
-        <p class="help-text">Sem classificação CPC 25 cadastrada. Clique em <strong>+ Classificar</strong> para definir a probabilidade de êxito + justificativa técnica — necessárias pra gerar relatório de auditoria externa.</p>
-      `}
     </div>
     ` : ''}
 
@@ -4444,6 +4459,7 @@ function renderProcessOverview(p, events, deadlines, notes, jurisprudence) {
         <button class="btn btn-outline" onclick="addDeadlineFlow()">⏰ Adicionar publicação</button>
         <button class="btn btn-outline" onclick="copyProcessToClaude()">📋 Copiar contexto p/ Claude</button>
         <button class="btn btn-outline" onclick="generateProcessFiche()">📜 Gerar ficha (Word)</button>
+        ${p.risco ? `<button class="btn btn-outline" onclick="gerarRelatorioAuditoriaIndividualFlow('${p.id}')" title="Gerar relatório técnico-jurídico para auditoria externa (CPC 25/IAS 37)">🏛 Relatório auditoria</button>` : ''}
       </div>
       <div class="grid gap-2 mt-3" style="grid-template-columns: 1fr 1fr;">
         <button class="btn btn-outline btn-sm" onclick="archiveProcessFlow()" style="border-color:var(--uc-amber);color:var(--uc-amber);">${p.status === 'archived' ? '↻ Reativar processo' : '📦 Arquivar processo'}</button>
