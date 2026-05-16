@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.60.1 (Calculadora: tabela de múltiplos lançamentos com datas/valores diferentes)
-const CACHE_NAME = 'uc-juridico-v6-60-1';
+// Service Worker — UC Jurídico v6.60.2 (Calculadora: data início juros separada + Taxa Legal CC art. 406 SELIC-IPCA)
+const CACHE_NAME = 'uc-juridico-v6-60-2';
 const APP_SHELL = [
   './',
   './index.html',
