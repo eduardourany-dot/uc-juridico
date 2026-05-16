@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.61.2 (Calculadora: SELIC série 4390 — acumulada no mês em % a.m. direto)
-const CACHE_NAME = 'uc-juridico-v6-61-2';
+// Service Worker — UC Jurídico v6.61.3 (Calculadora P1 fase 2 2/4: vincular cálculo a processo/cliente)
+const CACHE_NAME = 'uc-juridico-v6-61-3';
 const APP_SHELL = [
   './',
   './index.html',

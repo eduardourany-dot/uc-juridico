@@ -10587,6 +10587,11 @@ const _calcState = {
   dataJurosGlobal: '',  // data quando termoQuoJuros é citacao/transito/mora
   historico: null,           // array de cálculos salvos (carregado lazy)
   historicoCarregando: false,
+  // Vínculo opcional do cálculo com processo e/ou cliente (lazy-loaded)
+  processoId: '',
+  clienteId: '',
+  _processosCache: null,
+  _clientesCache: null
   // Multa contratual (CC art. 412): aplicada sobre (principal corrigido + juros).
   // Não incide sobre custas (custas são reembolso, não inadimplemento).
   multaTaxa: '',
@@ -10748,6 +10753,23 @@ async function renderCalculadora() {
 
   const lancs = _calcState.lancamentos || [];
 
+  // Lazy-load de processos/clientes pra autocomplete (1x por sessão)
+  if (!_calcState._processosCache) {
+    DB.getAllProcesses().then(ps => {
+      _calcState._processosCache = ps.filter(p => !p.deletedAt);
+      // re-render só se ainda estiver na tela
+      if (state.currentRoute === 'calculadora') renderCalculadora();
+    }).catch(e => console.warn('[calc] falha getAllProcesses', e));
+  }
+  if (!_calcState._clientesCache) {
+    DB.getAllClientes().then(cs => {
+      _calcState._clientesCache = cs.filter(c => !c.deletedAt);
+      if (state.currentRoute === 'calculadora') renderCalculadora();
+    }).catch(e => console.warn('[calc] falha getAllClientes', e));
+  }
+  const processos = _calcState._processosCache || [];
+  const clientes = _calcState._clientesCache || [];
+
   $('appContent').innerHTML = `
     <div class="page-header">
       <div>
@@ -10871,6 +10893,34 @@ async function renderCalculadora() {
             </div>
           </div>
         ` : ''}
+      </div>
+
+      <!-- Vínculos opcionais com processo/cliente -->
+      <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--uc-line-soft);">
+        <div class="grid gap-3" style="grid-template-columns: 1fr 1fr;">
+          <div>
+            <label class="label">Processo vinculado (opcional)</label>
+            <input type="text" id="calcProcessoBusca" class="input" list="calcProcessosList"
+              placeholder="${processos.length ? 'CNJ ou nome do processo...' : 'Carregando processos...'}"
+              value="${_calcState.processoId ? (processos.find(p => p.id === _calcState.processoId)?.name || _calcState.processoId) : ''}"
+              onchange="_calcVincularProcesso(this.value)">
+            <datalist id="calcProcessosList">
+              ${processos.slice(0, 500).map(p => `<option value="${escapeHtml((p.cnj ? p.cnj + ' · ' : '') + (p.name || ''))}" data-id="${p.id}">`).join('')}
+            </datalist>
+            <p class="help-text" style="margin-top:4px;font-size:11px;">Cálculo fica acessível no detalhe do processo.</p>
+          </div>
+          <div>
+            <label class="label">Cliente vinculado (opcional)</label>
+            <input type="text" id="calcClienteBusca" class="input" list="calcClientesList"
+              placeholder="${clientes.length ? 'Nome do cliente...' : 'Carregando clientes...'}"
+              value="${_calcState.clienteId ? (clientes.find(c => c.id === _calcState.clienteId)?.nome || _calcState.clienteId) : ''}"
+              onchange="_calcVincularCliente(this.value)">
+            <datalist id="calcClientesList">
+              ${clientes.slice(0, 500).map(c => `<option value="${escapeHtml(c.nome || '')}" data-id="${c.id}">`).join('')}
+            </datalist>
+            <p class="help-text" style="margin-top:4px;font-size:11px;">Auto-preenche ao vincular processo (cliente principal).</p>
+          </div>
+        </div>
       </div>
 
       <div style="margin-top:12px;">
@@ -11010,9 +11060,11 @@ function _calcRenderHistorico() {
         <thead style="background:var(--uc-cream);font-size:11px;text-transform:uppercase;letter-spacing:0.04em;">
           <tr>
             <th style="text-align:left;padding:8px;">Nome</th>
+            <th style="text-align:left;padding:8px;">Processo</th>
+            <th style="text-align:left;padding:8px;">Cliente</th>
             <th style="text-align:left;padding:8px;">Salvo em</th>
             <th style="text-align:left;padding:8px;">Índice</th>
-            <th style="text-align:right;padding:8px;">Lançamentos</th>
+            <th style="text-align:right;padding:8px;">Lanç.</th>
             <th style="text-align:right;padding:8px;">Total devido</th>
             <th style="width:160px;"></th>
           </tr>
@@ -11024,9 +11076,16 @@ function _calcRenderHistorico() {
             const total = c.resultado?.totalGeral || 0;
             const dt = new Date(c.createdAt || 0);
             const dtStr = `${String(dt.getDate()).padStart(2,'0')}/${String(dt.getMonth()+1).padStart(2,'0')}/${dt.getFullYear()} ${String(dt.getHours()).padStart(2,'0')}:${String(dt.getMinutes()).padStart(2,'0')}`;
+            // Resolve nomes via cache
+            const proc = c.processoId ? (_calcState._processosCache || []).find(p => p.id === c.processoId) : null;
+            const cli = c.clienteId ? (_calcState._clientesCache || []).find(x => x.id === c.clienteId) : null;
+            const procLabel = proc ? (proc.cnj || proc.name || '').slice(0, 30) : '—';
+            const cliLabel = cli ? (cli.nome || '').slice(0, 30) : '—';
             return `
               <tr style="border-bottom:1px solid var(--uc-line-soft);">
                 <td style="padding:8px;font-weight:500;">${escapeHtml(c.nome || 'sem nome')}</td>
+                <td style="padding:8px;font-size:11px;${proc ? '' : 'color:var(--uc-warm-gray);'}">${proc ? `<a onclick="navigate('process', {currentProcessId: '${proc.id}'})" style="color:var(--uc-gold);cursor:pointer;">${escapeHtml(procLabel)}</a>` : '—'}</td>
+                <td style="padding:8px;font-size:11px;${cli ? '' : 'color:var(--uc-warm-gray);'}">${escapeHtml(cliLabel)}</td>
                 <td style="padding:8px;font-size:12px;color:var(--uc-warm-gray);">${dtStr}</td>
                 <td style="padding:8px;">${escapeHtml(indiceCurto)}</td>
                 <td style="padding:8px;text-align:right;">${nLanc}</td>
@@ -11073,6 +11132,8 @@ async function _calcAbrirCalculo(id) {
   _calcState.art523MultaTaxa = input.art523MultaTaxa != null ? String(input.art523MultaTaxa) : '10';
   _calcState.art523HonTaxa = input.art523HonTaxa != null ? String(input.art523HonTaxa) : '10';
   _calcState.nome = c.nome || '';
+  _calcState.processoId = c.processoId || '';
+  _calcState.clienteId = c.clienteId || '';
   _calcState.resultado = null;  // limpa resultado anterior — user precisa recalcular
   _calcState.tab = 'civil';
   toast('Cálculo carregado', 'Clique em "Calcular tudo" pra recalcular.', 'info');
@@ -11305,6 +11366,58 @@ function _calcAddLancamento() {
   renderCalculadora();
 }
 
+// Vincula calculo a um processo pelo valor digitado no autocomplete.
+// O datalist mostra "CNJ · NOME". Resolvemos o processoId procurando
+// match exato no cache.
+function _calcVincularProcesso(valor) {
+  if (!valor || !valor.trim()) {
+    _calcState.processoId = '';
+    return;
+  }
+  const ps = _calcState._processosCache || [];
+  const found = ps.find(p => {
+    const label = (p.cnj ? p.cnj + ' · ' : '') + (p.name || '');
+    return label === valor;
+  });
+  if (found) {
+    _calcState.processoId = found.id;
+    // Auto-preenche cliente vinculado (primeiro da lista do processo)
+    const cid = found.clienteId || (Array.isArray(found.clienteIds) && found.clienteIds[0]) || '';
+    if (cid && !_calcState.clienteId) {
+      _calcState.clienteId = cid;
+      // Atualiza input visualmente
+      const inp = document.getElementById('calcClienteBusca');
+      if (inp) {
+        const cli = (_calcState._clientesCache || []).find(c => c.id === cid);
+        if (cli) inp.value = cli.nome || cid;
+      }
+    }
+    // Sugere nome se ainda vazio
+    if (!_calcState.nome && found.name) {
+      _calcState.nome = `Cálculo · ${found.name}`;
+      const nm = document.getElementById('calcNome');
+      if (nm) nm.value = _calcState.nome;
+    }
+  } else {
+    // Não encontrou — não force, deixa o usuário corrigir
+    _calcState.processoId = '';
+  }
+}
+
+function _calcVincularCliente(valor) {
+  if (!valor || !valor.trim()) {
+    _calcState.clienteId = '';
+    return;
+  }
+  const cs = _calcState._clientesCache || [];
+  const found = cs.find(c => (c.nome || '') === valor);
+  if (found) {
+    _calcState.clienteId = found.id;
+  } else {
+    _calcState.clienteId = '';
+  }
+}
+
 // Avança uma data ISO (YYYY-MM-DD) em N meses ou N anos.
 // Cuida de meses curtos (ex: 31/01 + 1 mês = 28/02 não 31/02).
 function _calcAvancarData(isoData, n, intervalo) {
@@ -11395,6 +11508,9 @@ function _calcUpdateLancamento(id, field, value) {
 function _calcLimparLancamentos() {
   _calcState.lancamentos = [{ id: 'l_' + Date.now(), data: '', dataJuros: '', valor: '', descricao: '', tipo: 'principal' }];
   _calcState.resultado = null;
+  _calcState.processoId = '';
+  _calcState.clienteId = '';
+  _calcState.nome = '';
   renderCalculadora();
 }
 
@@ -11488,6 +11604,8 @@ async function _calcSalvar() {
     id: 'calc_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8),
     tipo: 'civil',
     nome,
+    processoId: _calcState.processoId || null,
+    clienteId: _calcState.clienteId || null,
     input: {
       lancamentos: _calcState.lancamentos.filter(l => l.data && l.valor),
       dataFinal: r.dataFinal,
