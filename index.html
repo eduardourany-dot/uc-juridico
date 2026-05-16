@@ -52,8 +52,8 @@ body{background:var(--uc-paper);color:var(--uc-graphite);font-size:15px;-webkit-
 @media(max-width:768px){.app-shell{grid-template-columns:minmax(0,1fr);padding-bottom:70px}.sidebar{display:none !important}.mobile-nav{display:flex !important}}
 .sidebar{background:white;border-right:1px solid var(--uc-line);padding:20px 0;position:sticky;top:0;height:100vh;overflow-y:auto;display:flex;flex-direction:column}
 [data-theme="dark"] .sidebar{background:#1c1a14}
-.sidebar-logo{padding:0 12px 20px;border-bottom:1px solid var(--uc-line-soft);margin-bottom:16px}
-.sidebar-logo img,.sidebar-logo video{width:100%;max-width:240px;display:block;margin:0 auto}
+.sidebar-logo{padding:0 0 20px;border-bottom:1px solid var(--uc-line-soft);margin-bottom:16px;text-align:center}
+.sidebar-logo img,.sidebar-logo video{width:100%;max-width:100%;display:block}
 [data-theme="dark"] .sidebar-logo img{filter:invert(1) brightness(0.95)}
 /* Não invertemos o vídeo no dark — vídeo é colorido/animado, inverter degrada. */
 .nav-section{padding:8px 12px 4px;font-size:11px;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;color:var(--uc-warm-gray)}
