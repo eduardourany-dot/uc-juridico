@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.62.0 (Detalhe do processo: tab 'Cálculos' com lista vinculada + botão '+ Novo cálculo')
-const CACHE_NAME = 'uc-juridico-v6-62-0';
+// Service Worker — UC Jurídico v6.62.1 (Calculadora P1 fase 2 3/4: exportar memória de cálculo em .doc — abre no Word)
+const CACHE_NAME = 'uc-juridico-v6-62-1';
 const APP_SHELL = [
   './',
   './index.html',

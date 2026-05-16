@@ -11134,6 +11134,7 @@ async function renderCalculadora() {
           ${_calcState.loading ? '⏳ Calculando...' : '🧮 Calcular tudo'}
         </button>
         ${r ? `<button class="btn btn-outline" onclick="_calcSalvar()" title="Grava em /calculos no Firestore">💾 Salvar</button>` : ''}
+        ${r ? `<button class="btn btn-outline" onclick="_calcExportarMemoria()" title="Exporta memória completa em formato .doc (abre no Word)">📄 Exportar</button>` : ''}
       </div>
     </div>
 
@@ -11273,6 +11274,154 @@ async function _calcAbrirCalculo(id) {
   _calcState.tab = 'civil';
   toast('Cálculo carregado', 'Clique em "Calcular tudo" pra recalcular.', 'info');
   renderCalculadora();
+}
+
+// Gera memória do cálculo em HTML formatado (Word abre como .doc).
+// Inclui: cabeçalho, vínculos, parâmetros, lançamentos, totais
+// consolidados, parciais por lançamento e memória mensal expansível.
+function _calcExportarMemoria() {
+  const r = _calcState.resultado;
+  if (!r) { toast('Sem cálculo pra exportar', 'Faça um cálculo antes.', 'error'); return; }
+
+  const brl = v => 'R$ ' + (v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const indiceLabel = r.indiceLabel || '—';
+
+  // Resolve processo/cliente vinculados (se houver)
+  const proc = _calcState.processoId ? (_calcState._processosCache || []).find(p => p.id === _calcState.processoId) : null;
+  const cli = _calcState.clienteId ? (_calcState._clientesCache || []).find(c => c.id === _calcState.clienteId) : null;
+
+  // Texto descritivo do tipo de juros
+  let jurosDesc = 'Sem juros';
+  if (r.jurosTipo === 'legal_cc406') jurosDesc = '⚖ Taxa legal CC art. 406 (SELIC − IPCA, floor 0 §3º)';
+  else if (r.jurosTaxa > 0) jurosDesc = `${r.jurosTaxa}% ${r.jurosPeriodo === 'mensal' ? 'a.m.' : 'a.a.'} (${r.jurosTipo})`;
+
+  const termoQuoLabel = {
+    vencimento: 'Vencimento (data de cada lançamento)',
+    citacao: 'Citação' + (_calcState.dataJurosGlobal ? ` em ${_brDate(_calcState.dataJurosGlobal)}` : ''),
+    transito: 'Trânsito em julgado' + (_calcState.dataJurosGlobal ? ` em ${_brDate(_calcState.dataJurosGlobal)}` : ''),
+    mora: 'Mora' + (_calcState.dataJurosGlobal ? ` em ${_brDate(_calcState.dataJurosGlobal)}` : ''),
+    manual: 'Manual (data por lançamento)'
+  }[r.termoQuoJuros || _calcState.termoQuoJuros || 'vencimento'] || '—';
+
+  const semCorrecao = r.indice === 'NENHUM';
+  const tipoDescr = t => t === 'custas' ? 'Custas/Despesa' : 'Principal';
+
+  const html = `<!DOCTYPE html>
+<html lang="pt-BR"><head><meta charset="UTF-8"><title>Memória de cálculo · ${escapeHtml(_calcState.nome || 'sem nome')}</title>
+<style>
+@page { size: A4; margin: 2cm 2cm 2cm 2.5cm; }
+body { font-family: 'EB Garamond', 'Times New Roman', serif; font-size: 11pt; line-height: 1.4; color: #1f1f1f; max-width: 760px; margin: 0 auto; padding: 24px; }
+h1 { font-size: 18pt; font-variant: small-caps; letter-spacing: 0.06em; text-align: center; border-bottom: 2px solid #8a6f3d; padding-bottom: 8px; }
+h2 { font-size: 13pt; font-variant: small-caps; letter-spacing: 0.06em; color: #0a0a0a; margin-top: 20px; border-left: 3px solid #8a6f3d; padding-left: 10px; }
+h2::before { content: "§ "; color: #8a6f3d; }
+h3 { font-size: 11pt; font-variant: small-caps; color: #444; margin-top: 16px; margin-bottom: 6px; }
+table { width: 100%; border-collapse: collapse; margin: 8px 0; font-size: 9.5pt; }
+th, td { padding: 4px 6px; border-bottom: 1px solid #d4cfc0; }
+th { background: #f4f1e8; font-variant: small-caps; text-align: left; }
+td.r { text-align: right; }
+.box { background: #faf7f0; border-left: 3px solid #b87f1c; padding: 10px 14px; margin: 12px 0; font-size: 10pt; }
+.totalDevido { background: #4a7c4a; color: white; padding: 12px; font-size: 14pt; font-weight: 600; text-align: right; margin-top: 12px; }
+.help { color: #6b6b68; font-size: 9pt; font-style: italic; }
+.custas { background: rgba(184,127,28,0.06); }
+.art523 { background: rgba(178,34,52,0.06); color: #8a2434; }
+@media print { body { padding: 0; } }
+</style></head><body>
+
+<h1>Memória de cálculo</h1>
+${_calcState.nome ? `<p style="text-align:center;font-size:13pt;font-style:italic;margin:0 0 16px;">${escapeHtml(_calcState.nome)}</p>` : ''}
+
+<h2>Identificação</h2>
+<table>
+  ${proc ? `<tr><th width="180">Processo vinculado</th><td>${escapeHtml(proc.name || '')}${proc.cnj ? ` <span style="color:#6b6b68;font-family:monospace;">(${escapeHtml(proc.cnj)})</span>` : ''}</td></tr>` : ''}
+  ${cli ? `<tr><th width="180">Cliente vinculado</th><td>${escapeHtml(cli.nome || '')}${cli.doc ? ` <span style="color:#6b6b68;">— ${escapeHtml(cli.doc)}</span>` : ''}</td></tr>` : ''}
+  <tr><th width="180">Data de cálculo</th><td>${new Date().toLocaleString('pt-BR')}</td></tr>
+  <tr><th>Atualização até</th><td>${_brDate(r.dataFinal)}</td></tr>
+</table>
+
+<h2>Parâmetros do cálculo</h2>
+<table>
+  <tr><th width="220">Índice de correção</th><td>${escapeHtml(indiceLabel)}</td></tr>
+  <tr><th>Tipo de juros</th><td>${escapeHtml(jurosDesc)}</td></tr>
+  <tr><th>Termo a quo dos juros</th><td>${escapeHtml(termoQuoLabel)}</td></tr>
+  ${r.multaTaxa > 0 ? `<tr><th>Multa contratual</th><td>${r.multaTaxa}% (CC art. 412 · sobre principal + juros)</td></tr>` : ''}
+  ${r.honSucumbenciaTaxa > 0 ? `<tr><th>Honorários sucumbência</th><td>${r.honSucumbenciaTaxa}% (CPC art. 85 · sobre crédito com multa)</td></tr>` : ''}
+  ${r.aplicarArt523 ? `<tr><th>Cumprimento não pago</th><td>⚖ CPC art. 523 §1º · multa ${r.art523MultaTaxa}% + honorários ${r.art523HonTaxa}% sobre o débito</td></tr>` : ''}
+</table>
+
+<h2>Lançamentos · ${r.parciais.length}</h2>
+<table>
+  <tr><th>Tipo</th><th>Data correção</th><th>Data juros</th><th class="r">Valor original</th><th class="r">Meses</th><th class="r">Fator</th><th class="r">Corrigido</th><th class="r">Juros</th><th class="r">Total</th></tr>
+  ${r.parciais.map(p => {
+    const ehCustas = p.tipo === 'custas';
+    return `<tr class="${ehCustas ? 'custas' : ''}">
+      <td>${tipoDescr(p.tipo)}${escapeHtml(p.lancamento.descricao ? ' — ' + p.lancamento.descricao : '')}</td>
+      <td>${_brDate(p.lancamento.data)}</td>
+      <td>${ehCustas ? '—' : _brDate(p.dataInicioJuros || p.lancamento.data)}</td>
+      <td class="r">${brl(p.valorInicial)}</td>
+      <td class="r">${p.mesesPeriodo}</td>
+      <td class="r" style="font-family:monospace;">${p.fator.toFixed(6)}</td>
+      <td class="r">${brl(p.valorCorrigido)}</td>
+      <td class="r">${ehCustas ? '—' : brl(p.valorJuros)}</td>
+      <td class="r"><strong>${brl(p.valorTotal)}</strong></td>
+    </tr>`;
+  }).join('')}
+  <tr style="background:#f4f1e8;font-weight:600;">
+    <td colspan="3">TOTAIS dos lançamentos</td>
+    <td class="r">${brl(r.totalOriginal)}</td>
+    <td colspan="2"></td>
+    <td class="r">${brl(r.totalCorrigido)}</td>
+    <td class="r">${brl(r.totalJuros)}</td>
+    <td class="r">${brl(r.totalCorrigido + r.totalJuros)}</td>
+  </tr>
+</table>
+
+${(r.valorMulta > 0 || r.valorHonSucumbencia > 0 || r.aplicarArt523 || r.subtotalCustasCorrigido > 0) ? `
+<h2>Acréscimos e composição final</h2>
+<table>
+  ${r.valorMulta > 0 ? `<tr><th width="320">Multa contratual (${r.multaTaxa}% · CC art. 412)</th><td class="r">${brl(r.valorMulta)}</td></tr>` : ''}
+  ${r.valorHonSucumbencia > 0 ? `<tr><th>Honorários sucumbência (${r.honSucumbenciaTaxa}% · CPC art. 85)</th><td class="r">${brl(r.valorHonSucumbencia)}</td></tr>` : ''}
+  ${r.aplicarArt523 ? `<tr class="art523"><th>⚖ Multa art. 523 §1º (${r.art523MultaTaxa}% · cumprimento não pago)</th><td class="r">${brl(r.valorMulta523)}</td></tr>` : ''}
+  ${r.aplicarArt523 ? `<tr class="art523"><th>⚖ Honorários art. 523 §1º (${r.art523HonTaxa}%)</th><td class="r">${brl(r.valorHon523)}</td></tr>` : ''}
+  ${r.subtotalCustasCorrigido > 0 ? `<tr><th>Custas/despesas corrigidas (sem juros · CPC art. 84)</th><td class="r">${brl(r.subtotalCustasCorrigido)}</td></tr>` : ''}
+</table>
+` : ''}
+
+<div class="totalDevido">TOTAL DEVIDO em ${_brDate(r.dataFinal)}: ${brl(r.totalGeral)}</div>
+
+${semCorrecao ? '' : `
+<h2>Memória mensal por lançamento</h2>
+${r.parciais.map((p, idx) => {
+  if (p.tipo === 'custas' && !p.memoria.length) return '';
+  return `
+  <h3>Lançamento ${idx + 1} · ${_brDate(p.lancamento.data)} · ${brl(p.valorInicial)} · ${escapeHtml(p.lancamento.descricao || 'sem descrição')}${p.tipo === 'custas' ? ' (custas)' : ''}</h3>
+  <table>
+    <tr><th>Mês</th><th class="r">Variação</th><th class="r">Fator acumulado</th><th class="r">Valor corrigido</th></tr>
+    ${p.memoria.map(m => `
+      <tr>
+        <td>${m.data}</td>
+        <td class="r">${m.indiceMes.toFixed(4)}%</td>
+        <td class="r" style="font-family:monospace;">${m.fatorAcumulado.toFixed(8)}</td>
+        <td class="r">${brl(p.valorInicial * m.fatorAcumulado)}</td>
+      </tr>
+    `).join('')}
+  </table>
+  `;
+}).join('')}
+`}
+
+<div class="box">
+  <strong>Fontes:</strong> Séries históricas da API pública do Banco Central do Brasil (BCB) — sistema SGS.
+  ${r.indice !== 'NENHUM' ? `Código da série utilizada: <strong>${BCB_INDICES[r.indice]?.codigo || '?'}</strong>.` : ''}
+  ${r.jurosTipo === 'legal_cc406' ? 'Taxa legal Lei 14.905/2024 calculada com séries 4390 (SELIC acumulada no mês) e 433 (IPCA), conforme CC art. 406.' : ''}
+  Cálculo gerado por <strong>UC Jurídico</strong> em ${new Date().toLocaleString('pt-BR')}.
+</div>
+
+</body></html>`;
+
+  // Word abre HTML como .doc nativamente; também serve como HTML standalone
+  const filename = (_calcState.nome || 'memoria_calculo').replace(/[^\w]/g, '_') + '.doc';
+  downloadBlob(new Blob(['﻿' + html], { type: 'application/msword' }), filename);
+  toast('Memória exportada', filename, 'success');
 }
 
 async function _calcExcluirCalculo(id, nome) {
