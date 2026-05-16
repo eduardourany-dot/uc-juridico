@@ -18008,7 +18008,7 @@ async function bootApp() {
       // Clientes: cliente vê só o próprio doc (rule libera só esse id)
       DB.getAllClientes = async () => {
         try {
-          const c = await getById_('clientes', meuClienteId);
+          const c = await DB.getCliente(meuClienteId);
           return c ? [c] : [];
         } catch (e) { console.warn('[cliente] getAllClientes falhou', e); return []; }
       };

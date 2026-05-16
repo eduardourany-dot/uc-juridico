@@ -489,6 +489,7 @@ const RemoteDB = {
 
   // ====== Clientes (v6.19+) ======
   async getAllClientes() { return await getAll_('clientes'); },
+  async getCliente(id) { return await getById_('clientes', id); },
   async saveCliente(c) { return await upsert_('clientes', c); },
   async deleteCliente(id) { return await softDelete_('clientes', id); },
 

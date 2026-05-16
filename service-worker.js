@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.58.1 (Security Rules: cliente vê eventos/prazos/djen do próprio processo via lookup rule)
-const CACHE_NAME = 'uc-juridico-v6-58-1';
+// Service Worker — UC Jurídico v6.58.2 (FIX: DB.getCliente exposto + tab Cliente do cliente buscando próprio doc)
+const CACHE_NAME = 'uc-juridico-v6-58-2';
 const APP_SHELL = [
   './',
   './index.html',
