@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.60.8 (Calculadora: replicar lançamento — 1x (+mês) ou N vezes mensal/anual)
-const CACHE_NAME = 'uc-juridico-v6-60-8';
+// Service Worker — UC Jurídico v6.61.0 (Calculadora P1 fase 2: tab Histórico — listar/reabrir/excluir cálculos salvos)
+const CACHE_NAME = 'uc-juridico-v6-61-0';
 const APP_SHELL = [
   './',
   './index.html',
