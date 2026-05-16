@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.56.1 (MNI.4 fase 2: cron DJEN migrado pra Cloud Functions em São Paulo)
-const CACHE_NAME = 'uc-juridico-v6-56-1';
+// Service Worker — UC Jurídico v6.57.0 (MNI.5 MVP: protocolar petição via SOAP entregarManifestacaoProcessual)
+const CACHE_NAME = 'uc-juridico-v6-57-0';
 const APP_SHELL = [
   './',
   './index.html',

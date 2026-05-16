@@ -947,6 +947,10 @@ function showModal(title, fields, options = {}) {
         try { return JSON.parse(el.dataset.selected || '[]'); }
         catch { return []; }
       }
+      if (el.type === 'file') {
+        // multiple → FileList; single → File ou null
+        return el.multiple ? el.files : (el.files && el.files[0]) || null;
+      }
       return el.type === 'checkbox' ? el.checked : el.value;
     };
     const setValue = (idx, val) => {
@@ -1119,7 +1123,10 @@ function renderModalField(f, i) {
   if (f.type === 'textarea') {
     return `<div><label class="label">${escapeHtml(f.label)}</label>${f.help ? `<p class="help-text" style="margin-bottom: 6px;">${f.help}</p>` : ''}<textarea class="textarea" id="${id}" rows="${f.rows || 4}" ${f.readOnly ? 'readonly' : ''} ${f.placeholder ? `placeholder="${escapeHtml(f.placeholder)}"` : ''} style="font-family: ${f.mono === false ? 'inherit' : 'ui-monospace, Menlo, Consolas, monospace'}; font-size: ${f.mono === false ? '13px' : '12px'};">${escapeHtml(f.default || '')}</textarea></div>`;
   }
-  return `<div><label class="label">${escapeHtml(f.label)}</label>${f.help ? `<p class="help-text" style="margin-bottom: 6px;">${f.help}</p>` : ''}<input type="${f.type || 'text'}" class="input" id="${id}" value="${escapeHtml(f.default || '')}" ${f.placeholder ? `placeholder="${escapeHtml(f.placeholder)}"` : ''} ${f.min !== undefined ? `min="${f.min}"` : ''} ${f.max !== undefined ? `max="${f.max}"` : ''} ${f.step !== undefined ? `step="${f.step}"` : ''}></div>`;
+  if (f.type === 'file') {
+    return `<div><label class="label">${escapeHtml(f.label)}</label>${f.help ? `<p class="help-text" style="margin-bottom: 6px;">${f.help}</p>` : ''}<input type="file" class="input" id="${id}" ${f.accept ? `accept="${escapeHtml(f.accept)}"` : ''} ${f.multiple ? 'multiple' : ''} style="padding: 6px;"></div>`;
+  }
+  return `<div><label class="label">${escapeHtml(f.label)}</label>${f.help ? `<p class="help-text" style="margin-bottom: 6px;">${f.help}</p>` : ''}<input type="${f.type || 'text'}" class="input" id="${id}" value="${escapeHtml(f.default || '')}" ${f.placeholder ? `placeholder="${escapeHtml(f.placeholder)}"` : ''} ${f.readOnly ? 'readonly' : ''} ${f.min !== undefined ? `min="${f.min}"` : ''} ${f.max !== undefined ? `max="${f.max}"` : ''} ${f.step !== undefined ? `step="${f.step}"` : ''}></div>`;
 }
 
 function confirmDialog(title, message, danger = false) {
@@ -3294,6 +3301,7 @@ async function renderProcessDetail() {
         ${_isClienteMode() ? '' : `<button class="btn btn-secondary btn-sm" onclick="generateProcessFiche()">Gerar ficha</button>`}
         ${_isClienteMode() ? '' : `<button class="btn btn-secondary btn-sm" onclick="setProcessTab('analysis')" title="Abre análise IA do processo">🧠 Análise IA</button>`}
         ${_isClienteMode() ? '' : `<button class="btn btn-primary btn-sm" onclick="gerarPeticaoEscolhaFlow()" title="Gerar petição — escolha entre modelo cadastrado ou geração via IA">📝 Gerar petição</button>`}
+        ${(p.cnj && !_isClienteMode()) ? `<button class="btn btn-primary btn-sm" onclick="mniProtocolarFlow('${p.id}')" title="Protocolar petição/manifestação direto no tribunal via SOAP/MNI" style="background:linear-gradient(135deg,#b87f1c 0%,#c9a14c 100%);">📤 Protocolar</button>` : ''}
       </div>
     </div>
 
@@ -14574,6 +14582,196 @@ async function mniBuscarProcessoFlow(processId) {
 
   // 7. Exibe modal de resultado (chunk 1 = preview cru; chunk 2 = diff/merge)
   _mniShowResultModal(p, codigo, usedAdvogado, data, Date.now() - t0);
+}
+
+// ====================================================================
+// MNI.5 — Protocolar petição via SOAP entregarManifestacaoProcessual
+// ====================================================================
+// Reusa toda infra de mniBuscarProcessoFlow (cofre, credenciais, worker).
+// Difere no payload (manda documentos[]) e no parser de resposta (protocolo).
+// MVP: TJGO Projudi + manifestação intercorrente. Tipos adicionais ficam
+// pra v2 (recursos, embargos, inicial — cada um tem schema próprio).
+async function mniProtocolarFlow(processId) {
+  if (_isReadOnly()) { toast('Sem permissão', 'Role atual não pode protocolar.', 'error'); return; }
+  const p = await DB.getProcess(processId);
+  if (!p) { toast('Processo não encontrado', '', 'error'); return; }
+  if (!p.cnj) { toast('Sem CNJ', 'CNJ é obrigatório pra protocolar via MNI.', 'error'); return; }
+
+  // 1. Detecta tribunal
+  const detect = await _mniDetectarTribunal(p);
+  if (!detect) { toast('Tribunal não identificado', 'CNJ inválido ou tribunal não suportado.', 'error'); return; }
+  const { codigo, conf } = detect;
+  if (conf?.naoSuportado) { toast(`${codigo} não suporta MNI`, conf.motivo || '', 'error'); return; }
+
+  // 2. Aviso prévio — protocolo é irreversível
+  const ok = await confirmDialog('Protocolar via MNI?',
+    `Você vai enviar uma petição DIRETO ao ${codigo} (${escapeHtml(conf?.nome || '')}) pelo CNJ ${p.cnj}.\n\nIsso GERA protocolo no tribunal — não dá pra cancelar depois. Use só quando a peça estiver revisada e pronta pra protocolar.\n\nContinuar?`,
+    true);
+  if (!ok) return;
+
+  // 3. Worker URL
+  const config = await _mniGetConfig();
+  if (!config.workerUrl) { toast('Worker MNI não configurada', 'Vá em Configurações → MNI.', 'error'); return; }
+
+  // 4. Destrava cofre
+  if (!window.MniCrypto.isUnlocked()) {
+    if (!config.salt || !config.canary) { toast('Cofre não configurado', 'Configurações → MNI.', 'error'); return; }
+    const r = await showModal(`Destravar cofre pra protocolar no ${codigo}`, [
+      { label: 'Chave mestra MNI', type: 'password' }
+    ], { confirmLabel: 'Destravar' });
+    if (!r) return;
+    const okUnlock = await window.MniCrypto.unlock(r[0], config.salt, config.canary);
+    if (!okUnlock) { toast('Chave mestra incorreta', '', 'error'); return; }
+  }
+
+  // 5. Credencial (advogado responsável → suplente → o próprio user)
+  const meEmail = (window.UC_Auth?.getUser?.() || {}).email || '';
+  const meuNome = (typeof defaultAdvogado === 'function' ? defaultAdvogado(meEmail) : '') || '';
+  const candidatos = [p.advogadoResponsavel, p.advogadoSuplente, meuNome].filter(Boolean);
+  let cred = null, usedAdvogado = null;
+  for (const adv of candidatos) {
+    cred = await _mniBuscarCredencial(adv, codigo);
+    if (cred) { usedAdvogado = adv; break; }
+  }
+  if (!cred) {
+    toast('Sem credencial cadastrada', `Nenhum advogado tem credencial pro ${codigo}. Cadastre em Configurações → MNI.`, 'error');
+    return;
+  }
+
+  // 6. Modal de seleção da peça + descrição + arquivos
+  const form = await showModal(`📤 Protocolar no ${codigo}`, [
+    { label: 'Advogado peticionante', type: 'text', default: usedAdvogado, readOnly: true, help: 'Usa as credenciais do advogado responsável pelo processo.' },
+    { label: 'CNJ do processo', type: 'text', default: p.cnj, readOnly: true },
+    { label: 'Tipo de transmissão', name: 'tipo', type: 'select', default: '3', options: [
+      { value: '3', label: '3 — Petição/Manifestação intercorrente (default)' }
+    ], help: 'MVP suporta só manifestação intercorrente. Outros tipos (inicial, recurso, embargos) em versão futura.' },
+    { label: 'Descrição da peça (complemento)', name: 'descricao', type: 'textarea', placeholder: 'Ex.: Manifestação sobre a contestação · Cumprimento de despacho de fls. 123', rows: 2 },
+    { label: 'PDF principal (obrigatório)', name: 'pdfPrincipal', type: 'file', accept: '.pdf', help: 'A petição em si. Máx ~3MB recomendado.' },
+    { label: 'Anexos (opcional, múltiplos)', name: 'pdfAnexos', type: 'file', accept: '.pdf', multiple: true, help: 'Documentos comprobatórios. Total da consulta ≤ ~5MB.' }
+  ], { confirmLabel: '📤 Protocolar' });
+  if (!form) return;
+
+  const [, , tipoTransmissao, descricao, pdfPrincipalInput, pdfAnexosInput] = form;
+  // showModal retorna File pra type=file (ou FileList pra multiple)
+  const pdfPrincipal = pdfPrincipalInput instanceof File ? pdfPrincipalInput
+    : (pdfPrincipalInput && pdfPrincipalInput[0]) || null;
+  if (!pdfPrincipal) { toast('PDF principal obrigatório', '', 'error'); return; }
+  const anexos = pdfAnexosInput && pdfAnexosInput.length ? Array.from(pdfAnexosInput) : [];
+
+  // 7. Lê arquivos como base64
+  const lerComoBase64 = file => new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => {
+      const s = String(r.result || '');
+      const i = s.indexOf(',');
+      resolve(i >= 0 ? s.slice(i + 1) : s);
+    };
+    r.onerror = () => reject(new Error('Falha ao ler ' + file.name));
+    r.readAsDataURL(file);
+  });
+
+  let documentos;
+  try {
+    documentos = [{
+      nomeArquivo: pdfPrincipal.name,
+      base64: await lerComoBase64(pdfPrincipal),
+      mimetype: 'application/pdf',
+      descricao: descricao || pdfPrincipal.name
+    }];
+    for (const a of anexos) {
+      documentos.push({
+        nomeArquivo: a.name,
+        base64: await lerComoBase64(a),
+        mimetype: a.type || 'application/pdf',
+        descricao: a.name
+      });
+    }
+  } catch (e) {
+    toast('Falha ao ler arquivos', String(e.message || e), 'error');
+    return;
+  }
+
+  // 8. Decifra senha + chama Worker
+  let senha;
+  try {
+    senha = await window.MniCrypto.decrypt(cred.senhaCifrada);
+  } catch (e) {
+    toast('Falha ao decifrar credencial', String(e.message || e), 'error');
+    return;
+  }
+
+  const loadingModal = _mniMakeLoadingModal(codigo, p.cnj);
+  loadingModal.querySelector('h3').textContent = `Protocolando no ${codigo}…`;
+  $('modalContainer').appendChild(loadingModal);
+
+  let data;
+  const t0 = Date.now();
+  try {
+    const resp = await fetch(config.workerUrl.replace(/\/$/, ''), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        tribunal: codigo,
+        operacao: 'entregarManifestacaoProcessual',
+        cnj: p.cnj,
+        cpf: cred.cpf,
+        senha,
+        tipoTransmissao: Number(tipoTransmissao || 3),
+        descricao: descricao || '',
+        documentos
+      })
+    });
+    data = await resp.json();
+  } catch (e) {
+    loadingModal.remove();
+    toast('Falha de rede', String(e.message || e), 'error');
+    return;
+  } finally {
+    senha = null;
+  }
+  loadingModal.remove();
+  const elapsed = Date.now() - t0;
+
+  // 9. Trata resposta
+  if (!data.sucesso) {
+    await showModal('Protocolo recusado', [
+      { label: 'Erro', type: 'text', default: data.erro || 'desconhecido', readOnly: true },
+      { label: 'Mensagem do tribunal', type: 'textarea', default: data.mensagem || '(sem mensagem)', readOnly: true, rows: 4 },
+      ...(data.httpStatus ? [{ label: 'HTTP', type: 'text', default: String(data.httpStatus), readOnly: true }] : []),
+      { label: 'Tempo', type: 'text', default: (elapsed/1000).toFixed(1) + 's', readOnly: true }
+    ], { confirmLabel: 'Entendi', cancelLabel: '' });
+    return;
+  }
+
+  // 10. Sucesso — cria evento no processo + toast
+  const protocolo = data.protocolo || '(sem número)';
+  const dataOperacao = data.dataOperacao || new Date().toISOString();
+
+  try {
+    await DB.saveEvent({
+      id: 'evt_proto_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8),
+      processId: p.id,
+      date: dataOperacao,
+      type: 'protocolo_mni',
+      title: `📤 Petição protocolada — #${protocolo}`,
+      description: `Protocolo via MNI por ${usedAdvogado || cred.cpf}.\nTipo: ${tipoTransmissao} (manifestação intercorrente)\n${descricao ? 'Descrição: ' + descricao + '\n' : ''}Documentos: ${documentos.length} (${documentos.map(d => d.nomeArquivo).join(', ')})`,
+      source: 'mni-protocolo'
+    });
+  } catch (e) {
+    console.warn('Falha ao salvar evento de protocolo:', e);
+  }
+
+  await showModal('✓ Protocolado com sucesso', [
+    { label: 'Protocolo', type: 'text', default: protocolo, readOnly: true },
+    { label: 'Data/hora', type: 'text', default: dataOperacao, readOnly: true },
+    { label: 'Mensagem', type: 'textarea', default: data.mensagem || '', readOnly: true, rows: 2 },
+    { label: 'Documentos', type: 'text', default: documentos.length + ' (' + documentos.map(d => d.nomeArquivo).join(', ') + ')', readOnly: true },
+    { label: 'Tempo', type: 'text', default: (elapsed/1000).toFixed(1) + 's', readOnly: true }
+  ], { confirmLabel: 'OK', cancelLabel: '' });
+
+  toast('Petição protocolada', `#${protocolo}`, 'success');
+  // Refresh detalhe
+  if (typeof renderProcessDetail === 'function') renderProcessDetail();
 }
 
 function _mniMakeLoadingModal(codigo, cnj) {

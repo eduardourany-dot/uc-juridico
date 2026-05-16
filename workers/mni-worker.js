@@ -1,4 +1,10 @@
 // UC Jurídico — MNI Worker genérico (multi-tribunal)
+// Versão: 0.10.0 · MNI.5 — entregarManifestacaoProcessual (MVP TJGO)
+//   - Nova operação: protocolar petição via SOAP MNI 2.2.2
+//   - SHA-256 do conteúdo de cada documento (alguns tribunais validam)
+//   - Default idTipoTransmissao=3 (manifestação intercorrente)
+//   - PDFs em base64 inline (sem MTOM por enquanto — funciona até ~5MB total)
+//   - Sem assinatura digital ICP — CPF+senha do advogado basta no Projudi
 // Versão: 0.9.3 · timeout (45s sem docs, 90s com) + timing detalhado
 //   - signal: AbortSignal.timeout() pra falhar rápido quando Projudi engasga
 //   - tempoSoapMs / tempoParseMs / elapsedMs no JSON pra diagnóstico
@@ -150,7 +156,7 @@ export default {
         worker: 'uc-mni', versao: '0.9.3',
         total: codigos.length,
         validados, naoSuportados,
-        operacoes: ['consultarProcesso', 'health', 'listarTribunais', 'detectarPorCnj']
+        operacoes: ['consultarProcesso', 'entregarManifestacaoProcessual', 'health', 'listarTribunais', 'detectarPorCnj']
       }, 200, corsHeaders);
     }
 
@@ -213,6 +219,19 @@ export default {
         result.grau = grau;
         return json(result, 200, corsHeaders);
       }
+      if (operacao === 'entregarManifestacaoProcessual') {
+        if (!cnj) return json({ error: 'cnj_obrigatorio' }, 400, corsHeaders);
+        const documentos = Array.isArray(body.documentos) ? body.documentos : [];
+        if (documentos.length === 0) return json({ error: 'documentos_obrigatorios' }, 400, corsHeaders);
+        const tipoTransmissao = Number(body.tipoTransmissao || 3);  // 3 = Petição/Manifestação intercorrente
+        const descricao = String(body.descricao || '').slice(0, 500);
+        const result = await entregarManifestacao(conf, endpoint, {
+          cnj, cpf, senha, tipoTransmissao, descricao, documentos, debug
+        });
+        result.tribunal = codigo;
+        result.grau = grau;
+        return json(result, 200, corsHeaders);
+      }
       return json({ error: 'operacao_nao_suportada', operacao }, 400, corsHeaders);
     } catch (e) {
       console.error('[MNI] erro:', e?.stack || e);
@@ -249,6 +268,163 @@ async function healthCheck(conf) {
   } catch (e) {
     return { status: 'falha_rede', elapsedMs: Date.now() - t0, erro: String(e?.message || e) };
   }
+}
+
+// ============================================================
+// entregarManifestacaoProcessual (MNI.5)
+// ============================================================
+//
+// Protocola petição/manifestação direto no tribunal via SOAP. Validado
+// pra TJGO/Projudi (POC v0.1.0). Outros tribunais podem ter quirks
+// específicos (movimentoLocal obrigatório, classeProcessual em recursos,
+// etc.) — adicionar suporte caso a caso.
+//
+// Tipos de transmissão (idTipoTransmissao — Tabela CNJ 1.21):
+//   1 = Petição Inicial
+//   2 = Recurso (Apelação)
+//   3 = Petição/Manifestação intercorrente (DEFAULT — caso comum)
+//   4 = Recurso Adesivo
+//   5 = Embargos de Declaração
+//   ...
+//
+// Documentos esperados:
+//   [{ nomeArquivo, base64, mimetype?, tipoDocumento?, descricao?, nivelSigilo? }]
+//   - mimetype default: application/pdf
+//   - tipoDocumento default: 60 (Outros — Tabela CNJ — funciona pra petição)
+//   - nivelSigilo default: 0 (público)
+//   - hash SHA-256 do conteúdo é computado e enviado (alguns tribunais validam)
+async function entregarManifestacao(conf, endpoint, { cnj, cpf, senha, tipoTransmissao, descricao, documentos, debug }) {
+  // Pre-processa: computa hash de cada documento + monta XML
+  const docsXml = [];
+  for (let i = 0; i < documentos.length; i++) {
+    const d = documentos[i];
+    const base64 = String(d.base64 || '');
+    if (!base64) {
+      return { sucesso: false, erro: 'documento_vazio', mensagem: `Documento ${i+1} sem conteúdo base64` };
+    }
+    const nomeArquivo = String(d.nomeArquivo || `doc-${i+1}.pdf`).slice(0, 200);
+    const mimetype = String(d.mimetype || 'application/pdf');
+    const tipoDocumento = String(d.tipoDocumento || '60');  // 60 = Outros (genérico)
+    const nivelSigilo = String(d.nivelSigilo != null ? d.nivelSigilo : 0);
+    const descricaoDoc = String(d.descricao || nomeArquivo).slice(0, 200);
+    const hash = await sha256Hex(base64);
+    const dataHora = mniDataHora(new Date());
+
+    // Documento principal = i===0, demais = anexos. Mas o WSDL aceita
+    // múltiplos <documento> filhos sem hierarquia — o tribunal decide
+    // qual é principal pela ordem (primeiro = principal).
+    docsXml.push(`
+      <documento idDocumento="${i+1}" tipoDocumento="${escapeXml(tipoDocumento)}" dataHora="${dataHora}" mimetype="${escapeXml(mimetype)}" nivelSigilo="${escapeXml(nivelSigilo)}" hash="${hash}" descricao="${escapeXml(descricaoDoc)}">
+        <conteudo>${base64}</conteudo>
+        <outroParametro nome="NomeArquivo" valor="${escapeXml(nomeArquivo)}"/>
+      </documento>`);
+  }
+
+  const envelope = buildEnvelope(conf.namespace, 'entregarManifestacaoProcessual', `
+    <idManifestante>${escapeXml(cpf)}</idManifestante>
+    <senhaManifestante>${escapeXml(senha)}</senhaManifestante>
+    <idTipoTransmissao>${tipoTransmissao}</idTipoTransmissao>
+    <numeroProcesso>${escapeXml(cnj)}</numeroProcesso>
+    <dataEnvio>${mniDataHora(new Date())}</dataEnvio>
+    <petição>
+      ${descricao ? `<outroParametro nome="Complemento" valor="${escapeXml(descricao)}"/>` : ''}
+      ${docsXml.join('\n')}
+    </petição>
+  `);
+
+  const t0 = Date.now();
+  const timeoutMs = 120000;  // 2min — upload pode demorar com PDFs grandes
+  let resp;
+  try {
+    resp = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'text/xml; charset=utf-8',
+        'SOAPAction': conf.soapAction === '' || conf.soapAction == null
+          ? '""'
+          : `"${conf.soapAction}"`,
+        'User-Agent': 'UC-Juridico-MNI/0.9-protocolo'
+      },
+      body: envelope,
+      signal: AbortSignal.timeout(timeoutMs)
+    });
+  } catch (e) {
+    const elapsed = Date.now() - t0;
+    if (e?.name === 'TimeoutError' || e?.name === 'AbortError') {
+      return {
+        sucesso: false,
+        erro: 'timeout',
+        mensagem: `Timeout após ${(timeoutMs/1000).toFixed(0)}s no protocolo. Não confirme reenvio sem checar o portal — pode ter sido recebido pelo tribunal sem retornar a resposta no prazo.`,
+        elapsedMs: elapsed
+      };
+    }
+    return { sucesso: false, erro: 'rede', mensagem: String(e?.message || e), elapsedMs: elapsed };
+  }
+  const text = await resp.text();
+  const tempoSoapMs = Date.now() - t0;
+
+  if (!resp.ok) {
+    return { sucesso: false, erro: 'http_' + resp.status, httpStatus: resp.status, elapsedMs: tempoSoapMs, raw: text.slice(0, 4000) };
+  }
+  const fault = extractFault(text);
+  if (fault) {
+    return { sucesso: false, erro: 'soap_fault', mensagem: fault, elapsedMs: tempoSoapMs, raw: text.slice(0, 4000) };
+  }
+
+  const parsed = parseEntregaManifestacao(text);
+  const result = {
+    sucesso: parsed.sucesso !== false,
+    elapsedMs: tempoSoapMs,
+    tempoSoapMs,
+    rawSize: text.length,
+    ...parsed
+  };
+  if (debug) result.rawXml = text;
+  return result;
+}
+
+// SHA-256 do conteúdo binário (decodificado do base64), retorno em hex
+async function sha256Hex(base64) {
+  // atob no Worker é nativo
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', bytes);
+  return Array.from(new Uint8Array(hashBuffer))
+    .map(b => b.toString(16).padStart(2, '0'))
+    .join('');
+}
+
+// Formato yyyyMMddHHmmss usado pelos campos dataHora/dataEnvio do MNI
+function mniDataHora(d) {
+  const pad = n => String(n).padStart(2, '0');
+  return d.getUTCFullYear()
+    + pad(d.getUTCMonth() + 1)
+    + pad(d.getUTCDate())
+    + pad(d.getUTCHours())
+    + pad(d.getUTCMinutes())
+    + pad(d.getUTCSeconds());
+}
+
+// Parser da resposta SOAP do entregarManifestacaoProcessual
+function parseEntregaManifestacao(xml) {
+  const sucessoTag = tagText(xml, 'sucesso');
+  const mensagem = tagText(xml, 'mensagem');
+  if (sucessoTag.toLowerCase() === 'false') {
+    return { sucesso: false, mensagem: mensagem || '(sem mensagem)' };
+  }
+  const protocolo = tagText(xml, 'protocoloRecebimento')
+    || tagText(xml, 'numeroProtocolo')
+    || tagText(xml, 'protocolo');
+  const dataOperacaoRaw = tagText(xml, 'dataOperacao') || tagText(xml, 'dataRecebimento');
+  const recibo = tagText(xml, 'recibo');
+  return {
+    sucesso: true,
+    mensagem: mensagem || 'Petição protocolada com sucesso',
+    protocolo: protocolo || '',
+    dataOperacao: _parseDataHoraMni(dataOperacaoRaw),
+    recibo: recibo || ''
+  };
 }
 
 // ============================================================

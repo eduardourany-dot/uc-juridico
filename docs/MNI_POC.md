@@ -164,8 +164,16 @@ A POC TJGO foi **bem-sucedida** em 11/05/2026:
 - ✓ **MNI.2** · Botão "🔍 Buscar MNI" no detalhe do processo (substitui DataJud)
 - ✗ **MNI.3** · `consultarAvisosPendentes` — descartado (DJEN cobre intimações com parser de prazo mais maduro; MNI.3 removido em v0.8.0 do worker)
 - ✓ **MNI.4 fase 1** · DJEN auto-check ao abrir o app + banner dourado (commit 68241d6)
-- ✓ **MNI.4 fase 2** · Cron Apps Script diário (08h, dias úteis) → varre DJEN com app fechado → pre-fetch em `djen/{hash}` (status=`pending`) → push FCM. Setup em `backend/DjenCron.gs`.
-- ⏳ **MNI.5** · `entregarManifestacaoProcessual` — peticionar direto do app
+- ✓ **MNI.4 fase 2** · Cron Cloud Functions sa-east1 diário (08h dias úteis) → varre DJEN com app fechado → pre-fetch em `djen/{hash}` (status=`pending`) → push FCM. Setup em `functions/README.md`.
+- ✓ **MNI.5 MVP** · `entregarManifestacaoProcessual` — protocolar petição/manifestação direto do app via SOAP/MNI. Suportado: TJGO Projudi + tipo 3 (manifestação intercorrente). Setup: 1 botão "📤 Protocolar" no detalhe do processo, modal pra upload PDF principal + anexos, hash SHA-256 dos documentos, envio via Worker, parse de protocolo, cria evento no processo.
+
+## MNI.5 — Roadmap futuro
+
+- ⏳ Suporte a outros tipos de transmissão (recurso, embargos, cumprimento)
+- ⏳ Petição inicial (precisa de classe + assunto + partes + valor da causa)
+- ⏳ Outros tribunais (TRF1, TJMT, TJCE — validados em health, falta testar com peticionamento real)
+- ⏳ Validação prévia de procuração + status processual antes de enviar
+- ⏳ Assinatura digital ICP-Brasil (caso algum tribunal exija)
 
 ## Setup MNI.4 fase 2 — Cloud Functions em São Paulo
 
