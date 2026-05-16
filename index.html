@@ -17416,7 +17416,7 @@ function djenRenderPubRow(pub, kind, idx) {
                 <input type="checkbox" data-djen-create-process>
                 Criar processo na importação
               </label>
-              <button class="btn btn-ghost btn-sm datajud-enrich-btn" onclick="datajudEnrichDjenPub('${pub.hash}')" style="margin-left: 12px; padding: 2px 8px; font-size: 11px; font-variant: normal;" title="Buscar dados completos do processo no DataJud antes de importar">🔍 DataJud</button>
+              <span style="margin-left: 12px; color: var(--uc-warm-gray); font-size: 10px;" title="Após importar e criar o processo, abra o detalhe e clique em '🔍 Buscar MNI' pra enriquecer com dados do tribunal de origem (partes, advogados, movimentos).">💡 Enriquecer via MNI no detalhe</span>
             </div>
           ` : ''}
           ${(() => {

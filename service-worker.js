@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.57.0 (MNI.5 MVP: protocolar petição via SOAP entregarManifestacaoProcessual)
-const CACHE_NAME = 'uc-juridico-v6-57-0';
+// Service Worker — UC Jurídico v6.57.1 (modal DJEN: remove botão DataJud órfão — DataJud foi descontinuado)
+const CACHE_NAME = 'uc-juridico-v6-57-1';
 const APP_SHELL = [
   './',
   './index.html',
