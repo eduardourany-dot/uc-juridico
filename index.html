@@ -17897,10 +17897,86 @@ function djenInferProcessFromPublication(pub) {
 // Fase 2 (futuro): Cloudflare Worker Cron Trigger pra rodar mesmo com o
 // app fechado. Fica como sprint separado quando este aqui maturar.
 
+// Adapta um doc djen/{hash} salvo pelo cron (Apps Script DjenCron.gs)
+// pro shape que djenShowResultsModal espera (igual ao retorno da API DJEN).
+// Necessário porque cron salva campos camelCase normalizados, enquanto a
+// API direct usa snake_case + structures planas.
+function _djenAdaptCronPubToApi(p) {
+  return {
+    hash: p.hash,
+    numero_processo: p.cnj || '',
+    numeroProcesso: p.cnj || '',
+    siglaTribunal: p.tribunal || '',
+    tribunal: p.tribunal || '',
+    nomeOrgao: p.orgao || '',
+    orgao: p.orgao || '',
+    tipoComunicacao: p.tipo || 'Intimação',
+    tipo_comunicacao: p.tipo || 'Intimação',
+    data_disponibilizacao: p.dataDisponibilizacao || '',
+    dataDisponibilizacao: p.dataDisponibilizacao || '',
+    texto: p.texto || '',
+    link: p.link || '',
+    // Campos privados que djenClassify normalmente popula
+    _cnjFormatted: p.cnj || '',
+    _cnjNormalized: normalizeCnjForCompare(p.cnj || ''),
+    _proc: (p.matched && p.processId) ? { id: p.processId } : null,
+    _oab: p.oab || {},
+    _fromCron: true  // flag pra UI saber que veio do pre-fetch noturno
+  };
+}
+
 async function djenMaybeAutoCheck() {
   // Guard 1: só roda se ativo
   const enabled = await DB.getSetting('djenAutoCheckEnabled', true);
   if (!enabled) return;
+
+  // === MNI.4 fase 2 — Cron pre-fetch ===========================
+  // Antes de qualquer fetch à API CNJ, verifica se Apps Script já trouxe
+  // publicações novas no cron diário (status='pending' em djen/). Se sim,
+  // mostra banner direto sem chamar API — economia + não bloqueia se o
+  // user já decidiu fechar o app por hoje.
+  try {
+    const todasDjen = await DB.getAllDjenPublications();
+    const cronPending = (todasDjen || []).filter(p =>
+      p.status === 'pending' && p.source === 'djen-cron'
+    );
+    if (cronPending.length > 0) {
+      const matched = cronPending.filter(p => p.matched).map(_djenAdaptCronPubToApi);
+      const unmatched = cronPending.filter(p => !p.matched).map(_djenAdaptCronPubToApi);
+      // Re-classifica processo via cnjMap atual (cron pode estar desatualizado
+      // se user criou processo manualmente depois do cron rodar).
+      const processos = await DB.getAllProcesses();
+      const cnjMap = new Map();
+      processos.forEach(p => { if (p.cnj) cnjMap.set(normalizeCnjForCompare(p.cnj), p); });
+      [...matched, ...unmatched].forEach(pub => {
+        const found = cnjMap.get(pub._cnjNormalized);
+        if (found) pub._proc = found;
+      });
+      // Move pubs que ganharam _proc do unmatched pro matched
+      const finalMatched = [...matched.filter(p => p._proc), ...unmatched.filter(p => p._proc)];
+      const finalUnmatched = unmatched.filter(p => !p._proc);
+
+      const classified = {
+        matched: finalMatched,
+        unmatched: finalUnmatched,
+        duplicates: [],
+        internalDuplicates: 0
+      };
+      const today = new Date();
+      const inicio = new Date(today); inicio.setDate(today.getDate() - 7);
+      const fmt = d => d.toISOString().slice(0,10);
+      window._djenAutoCheckCache = { classified, oabs: [], inicio: fmt(inicio), fim: fmt(today), fromCron: true };
+
+      const n = finalMatched.length, o = finalUnmatched.length;
+      if (n > 0 || o > 0) _djenMostrarBannerAutoCheck(n, o);
+      console.log(`[DJEN auto] cron pré-fetch: ${n} vinculadas + ${o} órfãs (skip API fetch)`);
+      return; // skipa API fetch — cron já trouxe
+    }
+  } catch (e) {
+    console.warn('[DJEN auto] erro lendo cron pending (segue pra API direta):', e);
+  }
+  // === fim cron pre-fetch ====================================
+
   // Guard 2: throttle por horas
   const hours = await DB.getSetting('djenAutoCheckHours', 12);
   const last = await DB.getSetting('djenLastAutoCheck', 0);

@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.55.10 (admin: botão Excluir usuário em Acessos + UC_admin.deleteUser)
-const CACHE_NAME = 'uc-juridico-v6-55-10';
+// Service Worker — UC Jurídico v6.56.0 (MNI.4 fase 2: cron DJEN no Apps Script + app lê pré-fetch do Firestore)
+const CACHE_NAME = 'uc-juridico-v6-56-0';
 const APP_SHELL = [
   './',
   './index.html',

@@ -159,12 +159,56 @@ A POC TJGO foi **bem-sucedida** em 11/05/2026:
 
 ## Próximas etapas (sprint MNI)
 
-- ✓ **MNI.1 (atual)** · Registry multi-tribunal · health check · Worker genérico
-- ⏳ **MNI.1.2** · Cadastro cifrado de credenciais por advogado em Configurações (UI + design de cifragem cliente-side)
-- ⏳ **MNI.2** · Botão "🔍 Buscar MNI" no detalhe do processo (substitui DataJud)
-- ⏳ **MNI.3** · `consultarAvisosPendentes` — substitui/complementa DJEN
-- ⏳ **MNI.4** · Cron de avisos (Cloudflare Cron Trigger) → notifica advogado
+- ✓ **MNI.1** · Registry multi-tribunal · health check · Worker genérico
+- ✓ **MNI.1.2** · Cadastro cifrado de credenciais por advogado em Configurações
+- ✓ **MNI.2** · Botão "🔍 Buscar MNI" no detalhe do processo (substitui DataJud)
+- ✗ **MNI.3** · `consultarAvisosPendentes` — descartado (DJEN cobre intimações com parser de prazo mais maduro; MNI.3 removido em v0.8.0 do worker)
+- ✓ **MNI.4 fase 1** · DJEN auto-check ao abrir o app + banner dourado (commit 68241d6)
+- ✓ **MNI.4 fase 2** · Cron Apps Script diário (08h, dias úteis) → varre DJEN com app fechado → pre-fetch em `djen/{hash}` (status=`pending`) → push FCM. Setup em `backend/DjenCron.gs`.
 - ⏳ **MNI.5** · `entregarManifestacaoProcessual` — peticionar direto do app
+
+## Setup MNI.4 fase 2 (Apps Script cron DJEN)
+
+Arquivo: `backend/DjenCron.gs`
+
+1. Cola o arquivo no Apps Script Editor (script.google.com do projeto UC Jurídico)
+2. Confirma que `FCM_SERVICE_ACCOUNT_JSON` está em **Script Properties** (já está, configurado pra cron de Lembretes)
+3. Testa sem efeitos colaterais:
+   - Execute → `_previewDjenCron` → "Ver registros" mostra quantas pubs seriam encontradas, sem gravar nem mandar push
+4. Testa com efeitos (cuidado: vai mandar push real):
+   - Execute → `_testarDjenCron`
+5. Cria trigger:
+   - Acionadores (⏰) → **+ Adicionar acionador**
+   - Função: `cron_djenAutoCheck`
+   - Tipo de fonte: **Time-driven**
+   - Tipo: **Day timer**
+   - Hora: **8h - 9h**
+   - Notificações: **Notificar imediatamente** (manda email se falhar)
+
+### Schema novo no Firestore
+
+Collection `djen/{hash}` ganha campos do cron:
+- `source: 'djen-cron'`
+- `status: 'pending'` (cron) → `imported` ou `orphan` (após user triar) → `dismissed` (opcional)
+- `matched: boolean` — classificação do cron (CNJ casa com processo cadastrado)
+- `fetchedAt: timestamp` — quando o cron capturou
+- `oab: { numero, uf, nome }` — qual OAB trouxe
+
+Doc `settings/djenCron`:
+- `value.enabled: boolean` (default true)
+- `value.lastRun: timestamp`
+- `value.lastDataFim: 'YYYY-MM-DD'`
+- `value.lastNovas: number`
+- `value.lastOrfas: number`
+
+### Comportamento no app
+
+`djenMaybeAutoCheck()` (chamado ~10s após boot) agora:
+1. Lê `djen/` filtrado por `status='pending' AND source='djen-cron'`
+2. Se houver pendings: adapta pro shape da API, mostra banner dourado, **skipa API direta**
+3. Se vazio: fallback pra fetch direto (comportamento da fase 1)
+
+Quando user clica "Importar" no modal, `DB.saveDjenPublication` salva com status `imported`/`orphan` (overwrite do cron `pending`). Próxima boot, banner não aparece mais pra essa pub.
 
 ## Segurança
 
