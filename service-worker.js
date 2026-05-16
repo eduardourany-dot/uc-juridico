@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.61.1 (FIX CRÍTICO: SELIC 4189 era anualizada — converter pra mensal equivalente)
-const CACHE_NAME = 'uc-juridico-v6-61-1';
+// Service Worker — UC Jurídico v6.61.2 (Calculadora: SELIC série 4390 — acumulada no mês em % a.m. direto)
+const CACHE_NAME = 'uc-juridico-v6-61-2';
 const APP_SHELL = [
   './',
   './index.html',

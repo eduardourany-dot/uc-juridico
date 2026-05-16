@@ -10395,10 +10395,12 @@ const BCB_INDICES = {
   INPC:    { codigo: 188,  label: 'INPC (IBGE)',                   tipo: 'mensal_pct' },
   IGPM:    { codigo: 189,  label: 'IGP-M (FGV)',                   tipo: 'mensal_pct' },
   IPCA:    { codigo: 433,  label: 'IPCA (IBGE)',                   tipo: 'mensal_pct' },
-  // SELIC série 4189 retorna a taxa ANUALIZADA mensal (% a.a. apurada
-  // no mês). Convertemos pra mensal equivalente via (1+i_a)^(1/12)−1
-  // antes de aplicar — caso contrário 10% a.a. virava 10% a.m. = 213% a.a.
-  SELIC:   { codigo: 4189, label: 'SELIC (anualizada, % a.a.)',    tipo: 'anual_pct' },
+  // SELIC série 4390 = "Taxa de juros - Selic acumulada no mês",
+  // em % a.m. direto (ex.: 0.79, 0.91). Pra Taxa Legal CC art. 406,
+  // é a base correta (selic mensal − ipca mensal).
+  // Anteriormente usávamos 4189 que retorna anualizada (% a.a.) e
+  // produzia juros absurdos quando interpretada como mensal.
+  SELIC:   { codigo: 4390, label: 'SELIC acumulada no mês (% a.m.)', tipo: 'mensal_pct' },
   TR:      { codigo: 226,  label: 'TR (Taxa Referencial)',         tipo: 'mensal_pct' },
   CDI:     { codigo: 4391, label: 'CDI mensal (% a.m.)',           tipo: 'mensal_pct' }
 };
@@ -10509,27 +10511,24 @@ async function calcularCorrecaoMonetaria(p) {
       bcbFetchSerie(BCB_INDICES.SELIC.codigo, dataJurosIni, p.dataFinal),
       bcbFetchSerie(BCB_INDICES.IPCA.codigo, dataJurosIni, p.dataFinal)
     ]);
+    // SELIC série 4390 e IPCA série 433 — ambas em % a.m. direto.
     const ipcaPorMes = {};
     for (const i of serieIpca) {
-      // IPCA (433) já vem mensal direto
       ipcaPorMes[i.data] = _bcbVarMensal(i.valor, BCB_INDICES.IPCA.tipo);
     }
     let somaTaxas = 0;
     for (const s of serieSelic) {
-      // SELIC (4189) vem anualizada → converter pra mensal equivalente
-      const selicAnual = parseFloat(String(s.valor).replace(',', '.'));
-      const selicMensal = _bcbVarMensal(s.valor, BCB_INDICES.SELIC.tipo);
+      const selic = _bcbVarMensal(s.valor, BCB_INDICES.SELIC.tipo);
       const ipca = ipcaPorMes[s.data];
       const ipcaVal = isNaN(ipca) ? 0 : ipca;
-      let taxa = selicMensal - ipcaVal;
+      let taxa = selic - ipcaVal;
       if (taxa < 0) taxa = 0;  // §3º: negativo vira zero
       somaTaxas += taxa;
       jurosMemoria.push({
         data: s.data,
-        selicAnual,           // % a.a. publicada
-        selicMensal,          // % a.m. equivalente (convertida)
-        ipca: ipcaVal,        // % a.m.
-        taxaLegal: taxa       // % a.m. (selic_mensal − ipca, com floor 0)
+        selic,           // % a.m. (série 4390)
+        ipca: ipcaVal,   // % a.m. (série 433)
+        taxaLegal: taxa  // % a.m. (selic − ipca, floor 0)
       });
     }
     valorJuros = valorCorrigido * (somaTaxas / 100);  // simples
