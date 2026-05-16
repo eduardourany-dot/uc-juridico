@@ -109,6 +109,10 @@ function _normalizeCnj(raw) {
  * Fetch uma página da API DJEN. Retorna array de items (vazio em erro).
  * Loga falhas mas não interrompe o cron — uma OAB pode falhar sem afetar
  * o resto.
+ *
+ * Headers de browser real são necessários — sem User-Agent customizado,
+ * Apps Script manda "Mozilla/5.0 (compatible; Google-Apps-Script)" que
+ * a API do CNJ rejeita com HTTP 403 (provável discrim. de bots).
  */
 function _djenFetchPage(oab, dataInicio, dataFim, pagina) {
   const params = {
@@ -125,7 +129,12 @@ function _djenFetchPage(oab, dataInicio, dataFim, pagina) {
   const url = DJEN_API_URL + '?' + qs;
   const resp = UrlFetchApp.fetch(url, {
     method: 'get',
-    headers: { Accept: 'application/json' },
+    headers: {
+      'Accept': 'application/json, text/plain, */*',
+      'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+      'Referer': 'https://comunicaapi.pje.jus.br/'
+    },
     muteHttpExceptions: true
   });
   const code = resp.getResponseCode();
@@ -181,8 +190,11 @@ function djenAutoCheckCron(opts) {
   Logger.log(logPrefix + ' janela: ' + inicio + ' → ' + fim);
 
   // ---- 3. Fetch DJEN pra todas as OABs -----------------------------
+  // Sleep 250ms entre OABs pra não bater rate limit do CNJ (já vimos
+  // HTTP 403 vindo de Apps Script sem espaçamento + headers de bot).
   const allPubs = [];
   for (var i = 0; i < DJEN_CRON_OABS.length; i++) {
+    if (i > 0) Utilities.sleep(250);
     const oab = DJEN_CRON_OABS[i];
     var pagina = 1;
     var loops = 0;
@@ -196,6 +208,7 @@ function djenAutoCheckCron(opts) {
       if (items.length < 100) break;
       pagina++;
       loops++;
+      Utilities.sleep(150); // entre páginas
     }
   }
   Logger.log(logPrefix + ' total pubs fetched: ' + allPubs.length);
@@ -447,4 +460,66 @@ function _resetDjenCron() {
     updatedAt: Date.now()
   });
   Logger.log('settings/djenCron resetado');
+}
+
+/**
+ * Diagnóstico: 1 fetch isolado à API DJEN com log de tudo.
+ * Use pra investigar HTTP 403 / bloqueio / parsing.
+ * NÃO grava nada nem manda push.
+ */
+function _diagDjenApi() {
+  // OAB de teste — Eduardo Urany GO (com publicações esperadas)
+  const oab = { numero: '16539', uf: 'GO', nome: 'Eduardo' };
+  // Janela: últimos 7 dias úteis pra garantir que tem dados
+  const fim = new Date();
+  fim.setDate(fim.getDate() - 1);
+  const inicio = new Date(fim);
+  inicio.setDate(fim.getDate() - 7);
+  const fmt = d => d.toISOString().slice(0,10);
+
+  const params = {
+    numeroOab: oab.numero,
+    ufOab: oab.uf,
+    dataDisponibilizacaoInicio: fmt(inicio),
+    dataDisponibilizacaoFim: fmt(fim),
+    itensPorPagina: 5,
+    pagina: 1
+  };
+  const qs = Object.keys(params).map(k => k + '=' + encodeURIComponent(params[k])).join('&');
+  const url = DJEN_API_URL + '?' + qs;
+
+  Logger.log('=== DIAG DJEN API ===');
+  Logger.log('URL: ' + url);
+  Logger.log('Janela: ' + fmt(inicio) + ' → ' + fmt(fim));
+
+  const resp = UrlFetchApp.fetch(url, {
+    method: 'get',
+    headers: {
+      'Accept': 'application/json, text/plain, */*',
+      'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+      'Referer': 'https://comunicaapi.pje.jus.br/'
+    },
+    muteHttpExceptions: true
+  });
+
+  const code = resp.getResponseCode();
+  const respHeaders = resp.getAllHeaders();
+  const body = resp.getContentText();
+  Logger.log('HTTP ' + code);
+  Logger.log('Response headers: ' + JSON.stringify(respHeaders));
+  Logger.log('Body (primeiros 1500 chars): ' + body.slice(0, 1500));
+
+  if (code === 200) {
+    try {
+      const data = JSON.parse(body);
+      Logger.log('Items: ' + (data.items ? data.items.length : 'N/A'));
+      Logger.log('TotalRegistros: ' + (data.count || data.totalRegistros || 'N/A'));
+    } catch (e) {
+      Logger.log('JSON parse falhou: ' + e.message);
+    }
+  } else {
+    Logger.log('FAIL — ver headers/body acima pra diagnóstico');
+    if (code === 403) Logger.log('Dica: WAF bloqueia IP Google Cloud ou User-Agent. Tentar via Cloudflare Worker proxy.');
+  }
 }
