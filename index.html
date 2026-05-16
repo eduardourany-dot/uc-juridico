@@ -10545,14 +10545,26 @@ const _calcState = {
   //   'mora'       — juros desde a mora (constituída/notificação)
   //   'manual'     — usa a coluna "Data juros" da tabela (data por lançamento)
   termoQuoJuros: 'vencimento',
-  dataJurosGlobal: ''  // data quando termoQuoJuros é citacao/transito/mora
+  dataJurosGlobal: '',  // data quando termoQuoJuros é citacao/transito/mora
+  // Multa contratual (CC art. 412): aplicada sobre (principal corrigido + juros).
+  // Não incide sobre custas (custas são reembolso, não inadimplemento).
+  multaTaxa: '',
+  // Honorários sucumbência (CPC art. 85): aplicados sobre o total final
+  // do crédito (principal corrigido + juros + multa). Não incide sobre custas.
+  honSucumbenciaTaxa: ''
 };
 
 // Aplica correção+juros pra UMA LISTA de lançamentos (cada um com data
 // e valor próprios), tudo até uma data final comum. Soma os parciais.
-async function calcularLancamentosMultiplos({ lancamentos, dataFinal, indice, jurosTaxa, jurosTipo, jurosPeriodo, termoQuoJuros, dataJurosGlobal }) {
+async function calcularLancamentosMultiplos({ lancamentos, dataFinal, indice, jurosTaxa, jurosTipo, jurosPeriodo, termoQuoJuros, dataJurosGlobal, multaTaxa, honSucumbenciaTaxa }) {
   const parciais = [];
   let totalOriginal = 0, totalCorrigido = 0, totalJuros = 0;
+  // Subtotais separados pra base de cálculo da multa e sucumbência:
+  //   subtotalPrincipalCorrJuros = soma de (corrigido + juros) só dos lançamentos
+  //                                tipo 'principal' (custas ficam fora)
+  //   subtotalCustasCorrigido    = soma de valorCorrigido só das custas
+  let subtotalPrincipalCorrJuros = 0;
+  let subtotalCustasCorrigido = 0;
   let indiceLabel = '';
 
   // Resolve a data de início dos juros pra um lançamento, conforme o
@@ -10610,18 +10622,44 @@ async function calcularLancamentosMultiplos({ lancamentos, dataFinal, indice, ju
     totalOriginal += r.valorInicial;
     totalCorrigido += r.valorCorrigido;
     totalJuros += r.valorJuros;
+    if (ehCustas) {
+      subtotalCustasCorrigido += r.valorCorrigido;
+    } else {
+      subtotalPrincipalCorrJuros += (r.valorCorrigido + r.valorJuros);
+    }
     indiceLabel = r.indiceLabel;
   }
+
+  // Multa contratual (CC art. 412): sobre (principal corrigido + juros)
+  const multaPct = parseFloat(String(multaTaxa || '0').replace(',', '.')) || 0;
+  const valorMulta = multaPct > 0 ? subtotalPrincipalCorrJuros * (multaPct / 100) : 0;
+  const subtotalComMulta = subtotalPrincipalCorrJuros + valorMulta;
+
+  // Honorários sucumbência (CPC art. 85): sobre total final do crédito
+  // (principal + juros + multa). Não incide sobre custas.
+  const honPct = parseFloat(String(honSucumbenciaTaxa || '0').replace(',', '.')) || 0;
+  const valorHonSucumbencia = honPct > 0 ? subtotalComMulta * (honPct / 100) : 0;
+
+  // Total devido = principal corrigido com juros + multa + sucumbência + custas
+  const totalGeral = subtotalComMulta + valorHonSucumbencia + subtotalCustasCorrigido;
+
   return {
     parciais,
     totalOriginal,
     totalCorrigido,
     totalJuros,
-    totalGeral: totalCorrigido + totalJuros,
+    subtotalPrincipalCorrJuros,
+    subtotalCustasCorrigido,
+    valorMulta,
+    multaTaxa: multaPct,
+    valorHonSucumbencia,
+    honSucumbenciaTaxa: honPct,
+    totalGeral,
     indiceLabel,
     dataFinal,
     indice,
-    jurosTaxa, jurosTipo, jurosPeriodo
+    jurosTaxa, jurosTipo, jurosPeriodo,
+    termoQuoJuros, dataJurosGlobal
   };
 }
 
@@ -10716,6 +10754,22 @@ async function renderCalculadora() {
             : 'Coluna "Data juros" na tabela vira editável — você define por linha.'}
         </p>
       </div>
+      <!-- Multa contratual e honorários sucumbência -->
+      <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--uc-line-soft);">
+        <div class="grid gap-3" style="grid-template-columns: 1fr 1fr;">
+          <div>
+            <label class="label">Multa contratual (%)</label>
+            <input type="number" id="calcMultaTaxa" class="input" step="0.01" min="0" max="100" placeholder="0" value="${_calcState.multaTaxa || ''}" onchange="_calcState.multaTaxa = this.value">
+            <p class="help-text" style="margin-top:4px;font-size:11px;">CC art. 412 · sobre (principal corrigido + juros). Não incide sobre custas.</p>
+          </div>
+          <div>
+            <label class="label">Honorários sucumbência (%)</label>
+            <input type="number" id="calcHonSucTaxa" class="input" step="0.01" min="0" max="100" placeholder="0" value="${_calcState.honSucumbenciaTaxa || ''}" onchange="_calcState.honSucumbenciaTaxa = this.value">
+            <p class="help-text" style="margin-top:4px;font-size:11px;">CPC art. 85 · sobre total final do crédito (principal + juros + multa).</p>
+          </div>
+        </div>
+      </div>
+
       <div style="margin-top:12px;">
         <label class="label">Nome do cálculo (opcional)</label>
         <input type="text" id="calcNome" class="input" placeholder="Ex.: Liquidação ACME × Banco" value="${_calcState.nome || ''}" onchange="_calcState.nome = this.value">
@@ -10834,6 +10888,24 @@ function _calcRenderResultado(r) {
         <p style="font-size:20px;font-weight:600;color:var(--uc-amber);margin:0;">${brl(r.totalJuros)}</p>
         <p class="help-text" style="margin-top:4px;">${r.jurosTipo === 'legal_cc406' ? '⚖ Taxa legal CC 406 (SELIC−IPCA)' : `${r.jurosTaxa}% ${r.jurosPeriodo} (${r.jurosTipo})`}</p>
       </div>` : ''}
+      ${r.valorMulta > 0 ? `
+      <div class="card">
+        <p class="text-xs smallcaps" style="color:var(--uc-warm-gray);margin:0 0 4px;">+ Multa</p>
+        <p style="font-size:20px;font-weight:600;color:var(--uc-amber);margin:0;">${brl(r.valorMulta)}</p>
+        <p class="help-text" style="margin-top:4px;">${r.multaTaxa}% sobre (corrigido + juros)</p>
+      </div>` : ''}
+      ${r.valorHonSucumbencia > 0 ? `
+      <div class="card">
+        <p class="text-xs smallcaps" style="color:var(--uc-warm-gray);margin:0 0 4px;">+ Honorários sucumb.</p>
+        <p style="font-size:20px;font-weight:600;color:var(--uc-amber);margin:0;">${brl(r.valorHonSucumbencia)}</p>
+        <p class="help-text" style="margin-top:4px;">${r.honSucumbenciaTaxa}% sobre total c/ multa</p>
+      </div>` : ''}
+      ${r.subtotalCustasCorrigido > 0 ? `
+      <div class="card">
+        <p class="text-xs smallcaps" style="color:var(--uc-warm-gray);margin:0 0 4px;">+ Custas corrigidas</p>
+        <p style="font-size:20px;font-weight:600;color:var(--uc-amber);margin:0;">${brl(r.subtotalCustasCorrigido)}</p>
+        <p class="help-text" style="margin-top:4px;">Reembolso CPC art. 84 (sem juros/multa/honorários)</p>
+      </div>` : ''}
       <div class="card" style="border-left:3px solid var(--uc-green);">
         <p class="text-xs smallcaps" style="color:var(--uc-warm-gray);margin:0 0 4px;">Total devido</p>
         <p style="font-size:22px;font-weight:700;color:var(--uc-green);margin:0;">${brl(r.totalGeral)}</p>
@@ -10878,12 +10950,27 @@ function _calcRenderResultado(r) {
         </tbody>
         <tfoot style="font-weight:600;background:var(--uc-cream);">
           <tr>
-            <td colspan="2" style="padding:10px 8px;">TOTAIS</td>
+            <td colspan="2" style="padding:10px 8px;">TOTAIS (lançamentos)</td>
             <td style="padding:10px 8px;text-align:right;">${brl(r.totalOriginal)}</td>
             <td colspan="2"></td>
             <td style="padding:10px 8px;text-align:right;">${brl(r.totalCorrigido)}</td>
             <td style="padding:10px 8px;text-align:right;">${brl(r.totalJuros)}</td>
-            <td style="padding:10px 8px;text-align:right;color:var(--uc-green);">${brl(r.totalGeral)}</td>
+            <td style="padding:10px 8px;text-align:right;">${brl(r.totalCorrigido + r.totalJuros)}</td>
+          </tr>
+          ${(r.valorMulta > 0 || r.valorHonSucumbencia > 0) ? `
+          <tr style="background:rgba(184,127,28,0.08);">
+            <td colspan="7" style="padding:8px;text-align:right;font-weight:500;color:var(--uc-warm-gray);">
+              ${r.valorMulta > 0 ? `+ Multa (${r.multaTaxa}% sobre principal+juros)` : ''}
+              ${r.valorMulta > 0 ? `<strong style="color:var(--uc-black);"> ${brl(r.valorMulta)}</strong>` : ''}
+              ${r.valorMulta > 0 && r.valorHonSucumbencia > 0 ? ' · ' : ''}
+              ${r.valorHonSucumbencia > 0 ? `+ Honorários (${r.honSucumbenciaTaxa}%)` : ''}
+              ${r.valorHonSucumbencia > 0 ? `<strong style="color:var(--uc-black);"> ${brl(r.valorHonSucumbencia)}</strong>` : ''}
+            </td>
+            <td></td>
+          </tr>` : ''}
+          <tr style="background:var(--uc-green);color:white;">
+            <td colspan="7" style="padding:10px 8px;text-align:right;font-weight:700;">TOTAL DEVIDO em ${_brDate(r.dataFinal)}</td>
+            <td style="padding:10px 8px;text-align:right;font-weight:700;font-size:14px;">${brl(r.totalGeral)}</td>
           </tr>
         </tfoot>
       </table>
@@ -11022,7 +11109,9 @@ async function _calcExecutar() {
       jurosTipo,
       jurosPeriodo,
       termoQuoJuros,
-      dataJurosGlobal
+      dataJurosGlobal,
+      multaTaxa: _calcState.multaTaxa,
+      honSucumbenciaTaxa: _calcState.honSucumbenciaTaxa
     });
     _calcState.resultado = resultado;
     _calcState.erro = null;

@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.60.4 (Calculadora: termo a quo global dos juros — vencimento/citação/trânsito/mora/manual)
-const CACHE_NAME = 'uc-juridico-v6-60-4';
+// Service Worker — UC Jurídico v6.60.5 (Calculadora: multa contratual + honorários sucumbência sobre bases legais corretas)
+const CACHE_NAME = 'uc-juridico-v6-60-5';
 const APP_SHELL = [
   './',
   './index.html',
