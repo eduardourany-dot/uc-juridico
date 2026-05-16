@@ -10851,10 +10851,20 @@ async function renderCalculadora() {
 
     <!-- ===== Tabela de lançamentos ===== -->
     <div class="card mb-4">
-      <div class="flex justify-between items-center mb-3">
+      <div class="flex justify-between items-center mb-3" style="flex-wrap:wrap;gap:8px;">
         <h3 class="font-serif text-lg font-semibold smallcaps" style="color: var(--uc-black);">Lançamentos · ${lancs.length}</h3>
-        <div class="flex gap-2">
+        <div class="flex gap-2" style="flex-wrap:wrap;align-items:center;">
           <button class="btn btn-outline btn-sm" onclick="_calcAddLancamento()" title="Adicionar mais uma linha">+ Lançamento</button>
+          <!-- Replicar última linha N vezes -->
+          <span style="display:inline-flex;align-items:center;gap:4px;font-size:11px;background:var(--uc-cream);padding:4px 8px;border-radius:4px;">
+            <span style="color:var(--uc-warm-gray);">Replicar última</span>
+            <input type="number" id="calcReplicarN" min="1" max="240" placeholder="N" value="11" style="width:50px;padding:2px 6px;font-size:12px;border:1px solid var(--uc-line);border-radius:3px;text-align:center;">
+            <select id="calcReplicarIntervalo" style="padding:2px 6px;font-size:12px;border:1px solid var(--uc-line);border-radius:3px;">
+              <option value="mensal">x mensal</option>
+              <option value="anual">x anual</option>
+            </select>
+            <button class="btn btn-outline btn-sm" onclick="_calcReplicarUltimaNx()" title="Replica a última linha N vezes avançando a data" style="padding:2px 8px;font-size:11px;">🔁</button>
+          </span>
           <button class="btn btn-ghost btn-sm" onclick="_calcLimparLancamentos()" title="Remove todas as linhas" style="color:var(--uc-warm-gray);">Limpar tudo</button>
         </div>
       </div>
@@ -10895,8 +10905,9 @@ async function renderCalculadora() {
               ` : ''}
               <td style="padding:6px;"><input type="number" class="input" step="0.01" min="0" placeholder="0.00" style="padding:6px 8px;text-align:right;" value="${l.valor || ''}" onchange="_calcUpdateLancamento('${l.id}', 'valor', this.value)"></td>
               <td style="padding:6px;"><input type="text" class="input" placeholder="${ehCustas ? 'Ex.: Custas iniciais' : 'Ex.: Parcela ' + (i+1)}" style="padding:6px 8px;" value="${escapeHtml(l.descricao || '')}" onchange="_calcUpdateLancamento('${l.id}', 'descricao', this.value)"></td>
-              <td style="padding:6px;text-align:center;">
-                ${lancs.length > 1 ? `<button class="btn btn-ghost btn-sm" onclick="_calcRemoveLancamento('${l.id}')" title="Remover" style="padding:4px 8px;color:var(--uc-red);">✕</button>` : ''}
+              <td style="padding:6px;text-align:center;white-space:nowrap;">
+                <button class="btn btn-ghost btn-sm" onclick="_calcReplicarLancamento('${l.id}')" title="Replicar linha (mesma data + 1 mês)" style="padding:4px 6px;color:var(--uc-warm-gray);">↻</button>
+                ${lancs.length > 1 ? `<button class="btn btn-ghost btn-sm" onclick="_calcRemoveLancamento('${l.id}')" title="Remover" style="padding:4px 6px;color:var(--uc-red);">✕</button>` : ''}
               </td>
             </tr>
           `;}).join('')}
@@ -11132,6 +11143,78 @@ function _calcAddLancamento() {
     descricao: '',
     tipo: 'principal'
   });
+  renderCalculadora();
+}
+
+// Avança uma data ISO (YYYY-MM-DD) em N meses ou N anos.
+// Cuida de meses curtos (ex: 31/01 + 1 mês = 28/02 não 31/02).
+function _calcAvancarData(isoData, n, intervalo) {
+  if (!isoData) return isoData;
+  const [y, m, d] = isoData.split('-').map(Number);
+  let novoY = y, novoM = m, novoD = d;
+  if (intervalo === 'anual') {
+    novoY = y + n;
+  } else {
+    // mensal
+    const total = (y * 12 + (m - 1)) + n;
+    novoY = Math.floor(total / 12);
+    novoM = (total % 12) + 1;
+  }
+  // Ajusta dia se mês alvo tem menos dias (ex: 31 jan → 28/29 fev)
+  const ultimoDia = new Date(novoY, novoM, 0).getDate();
+  if (novoD > ultimoDia) novoD = ultimoDia;
+  return `${String(novoY).padStart(4,'0')}-${String(novoM).padStart(2,'0')}-${String(novoD).padStart(2,'0')}`;
+}
+
+// Replica UMA linha (a do id) avançando 1 mês na data.
+function _calcReplicarLancamento(id) {
+  const lancs = _calcState.lancamentos;
+  const idx = lancs.findIndex(l => l.id === id);
+  if (idx < 0) return;
+  const origem = lancs[idx];
+  const novoLanc = {
+    id: 'l_' + Date.now() + Math.random().toString(36).slice(2, 6),
+    tipo: origem.tipo || 'principal',
+    data: _calcAvancarData(origem.data, 1, 'mensal'),
+    dataJuros: origem.dataJuros ? _calcAvancarData(origem.dataJuros, 1, 'mensal') : '',
+    valor: origem.valor,
+    descricao: origem.descricao || ''
+  };
+  // Insere logo após a origem
+  lancs.splice(idx + 1, 0, novoLanc);
+  renderCalculadora();
+}
+
+// Replica a ÚLTIMA linha N vezes avançando data a cada réplica
+// (mensal ou anual). Útil pra prestações mensais/anuais.
+function _calcReplicarUltimaNx() {
+  const inN = document.getElementById('calcReplicarN');
+  const inI = document.getElementById('calcReplicarIntervalo');
+  const n = Math.max(1, Math.min(240, parseInt(inN?.value || '0', 10)));
+  const intervalo = inI?.value || 'mensal';
+  if (!n) { toast('Informe N', 'Quantas vezes replicar?', 'error'); return; }
+
+  const lancs = _calcState.lancamentos;
+  const ultima = lancs[lancs.length - 1];
+  if (!ultima || !ultima.data || !ultima.valor) {
+    toast('Última linha incompleta', 'Preencha data e valor antes de replicar.', 'error');
+    return;
+  }
+  let dataAtual = ultima.data;
+  let dataJurosAtual = ultima.dataJuros || '';
+  for (let i = 0; i < n; i++) {
+    dataAtual = _calcAvancarData(dataAtual, 1, intervalo);
+    if (dataJurosAtual) dataJurosAtual = _calcAvancarData(dataJurosAtual, 1, intervalo);
+    lancs.push({
+      id: 'l_' + Date.now() + Math.random().toString(36).slice(2, 6) + '_' + i,
+      tipo: ultima.tipo || 'principal',
+      data: dataAtual,
+      dataJuros: dataJurosAtual,
+      valor: ultima.valor,
+      descricao: ultima.descricao || ''
+    });
+  }
+  toast(`${n} lançamento(s) criado(s)`, `Intervalo ${intervalo}`, 'success');
   renderCalculadora();
 }
 

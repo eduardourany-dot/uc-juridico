@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.60.7 (Calculadora: opção 'Sem correção monetária' pra contratos bancários com juros embutidos)
-const CACHE_NAME = 'uc-juridico-v6-60-7';
+// Service Worker — UC Jurídico v6.60.8 (Calculadora: replicar lançamento — 1x (+mês) ou N vezes mensal/anual)
+const CACHE_NAME = 'uc-juridico-v6-60-8';
 const APP_SHELL = [
   './',
   './index.html',
