@@ -169,15 +169,41 @@ A POC TJGO foi **bem-sucedida** em 11/05/2026:
 
 ## Setup MNI.4 fase 2 (Apps Script cron DJEN)
 
+### IMPORTANTE — API DJEN é geo-bloqueada
+
+A API pública DJEN (`comunicaapi.pje.jus.br`) é hospedada em AWS CloudFront com geo-restriction: **bloqueia requests fora do Brasil** (HTTP 403 com body "The Amazon CloudFront distribution is configured to block access from your country.").
+
+Apps Script roda em IPs Google Cloud (datacenters EUA, POP Atlanta) → bloqueado.
+
+**Solução:** Cloudflare Worker proxy. Cloudflare tem POPs no Brasil (SAO/GIG), o request sai de IP BR e passa.
+
+### Passo 1 · Deploy do worker proxy
+
+Arquivo: `workers/djen-proxy-worker.js`
+
+1. `dash.cloudflare.com` → **Workers & Pages** → **Create application** → **Create Worker**
+2. Nome: `uc-djen-proxy` → Deploy
+3. Edit code → apaga template → cola **tudo** de `workers/djen-proxy-worker.js`
+4. Save and deploy
+5. Anota a URL: `https://uc-djen-proxy.SEU-USUARIO.workers.dev`
+6. Testa abrindo no browser: `https://uc-djen-proxy.SEU.workers.dev/health` → deve retornar JSON `{ service: 'uc-djen-proxy', ok: true }`
+
+### Passo 2 · Cron Apps Script
+
 Arquivo: `backend/DjenCron.gs`
 
-1. Cola o arquivo no Apps Script Editor (script.google.com do projeto UC Jurídico)
-2. Confirma que `FCM_SERVICE_ACCOUNT_JSON` está em **Script Properties** (já está, configurado pra cron de Lembretes)
-3. Testa sem efeitos colaterais:
-   - Execute → `_previewDjenCron` → "Ver registros" mostra quantas pubs seriam encontradas, sem gravar nem mandar push
-4. Testa com efeitos (cuidado: vai mandar push real):
+1. Cola o arquivo no Apps Script Editor (script.google.com → **UC Jurídico Backend**)
+2. **⚙ Configurações do projeto → Propriedades do script → Adicionar**:
+   - Propriedade: `DJEN_PROXY_URL`
+   - Valor: a URL do worker (passo anterior)
+3. Confirma que `FCM_SERVICE_ACCOUNT_JSON` também está nas Script Properties (já está, do cron de Lembretes)
+4. Testa o proxy:
+   - Execute → `_diagDjenApi` → deve mostrar `HTTP 200 · OK — items recebidos: N`
+5. Testa o cron sem efeitos colaterais:
+   - Execute → `_previewDjenCron` → mostra quantas pubs seriam encontradas, sem gravar
+6. Testa com efeitos (cuidado: vai mandar push real):
    - Execute → `_testarDjenCron`
-5. Cria trigger:
+7. Cria trigger:
    - Acionadores (⏰) → **+ Adicionar acionador**
    - Função: `cron_djenAutoCheck`
    - Tipo de fonte: **Time-driven**

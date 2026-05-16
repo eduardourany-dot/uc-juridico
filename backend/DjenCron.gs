@@ -30,7 +30,17 @@
 // CONFIG
 // =====================================================================
 
+// API direta do CNJ — Apps Script (IPs Google) é geo-bloqueado pelo
+// CloudFront que serve essa API. Usar via DJEN_PROXY_URL (Cloudflare
+// Worker em POP brasileiro) quando configurado em Script Properties.
 const DJEN_API_URL = 'https://comunicaapi.pje.jus.br/api/v1/comunicacao';
+
+// Lê URL do proxy das Script Properties. Configurar em:
+//   Apps Script Editor → ⚙ Configurações do projeto → Propriedades do script
+//   → Adicionar propriedade: chave=DJEN_PROXY_URL, valor=https://uc-djen-proxy.SEU.workers.dev
+function _djenProxyUrl() {
+  return PropertiesService.getScriptProperties().getProperty('DJEN_PROXY_URL');
+}
 
 // OABs varridas — espelho da DJEN_DEFAULT_OABS no app.
 // Mover pra settings/djenCron.oabs no futuro se precisar editar sem deploy.
@@ -126,20 +136,29 @@ function _djenFetchPage(oab, dataInicio, dataFim, pagina) {
   const qs = Object.keys(params)
     .map(function(k) { return k + '=' + encodeURIComponent(params[k]); })
     .join('&');
-  const url = DJEN_API_URL + '?' + qs;
+
+  // Usa proxy Cloudflare se configurado (única via que funciona — API
+  // direta dá HTTP 403 do CloudFront por geo-restriction). Sem proxy,
+  // o cron loga warning e devolve vazio.
+  const proxy = _djenProxyUrl();
+  if (!proxy) {
+    Logger.log('[DJEN cron] DJEN_PROXY_URL não configurado em Script Properties — pulando OAB ' + oab.numero + '/' + oab.uf);
+    return [];
+  }
+  const url = proxy + '?' + qs;
+
   const resp = UrlFetchApp.fetch(url, {
     method: 'get',
     headers: {
-      'Accept': 'application/json, text/plain, */*',
-      'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
-      'Referer': 'https://comunicaapi.pje.jus.br/'
+      'Accept': 'application/json',
+      'User-Agent': 'uc-juridico-cron/1.0'
     },
     muteHttpExceptions: true
   });
   const code = resp.getResponseCode();
   if (code !== 200) {
-    Logger.log('[DJEN cron] API ' + oab.numero + '/' + oab.uf + ' pg' + pagina + ' HTTP ' + code);
+    const upstreamStatus = resp.getHeaders()['X-Upstream-Status'] || '';
+    Logger.log('[DJEN cron] proxy ' + oab.numero + '/' + oab.uf + ' pg' + pagina + ' HTTP ' + code + (upstreamStatus ? ' (upstream ' + upstreamStatus + ')' : ''));
     return [];
   }
   try {
@@ -463,14 +482,21 @@ function _resetDjenCron() {
 }
 
 /**
- * Diagnóstico: 1 fetch isolado à API DJEN com log de tudo.
- * Use pra investigar HTTP 403 / bloqueio / parsing.
+ * Diagnóstico: 1 fetch isolado à API DJEN (via proxy) com log de tudo.
+ * Use pra confirmar que DJEN_PROXY_URL está respondendo OK.
  * NÃO grava nada nem manda push.
  */
 function _diagDjenApi() {
-  // OAB de teste — Eduardo Urany GO (com publicações esperadas)
+  const proxy = _djenProxyUrl();
+  if (!proxy) {
+    Logger.log('=== DIAG DJEN API ===');
+    Logger.log('ERRO: DJEN_PROXY_URL não configurado em Script Properties');
+    Logger.log('Vá em ⚙ Configurações do projeto → Propriedades do script');
+    Logger.log('Adicione: DJEN_PROXY_URL=https://uc-djen-proxy.SEU.workers.dev');
+    return;
+  }
+
   const oab = { numero: '16539', uf: 'GO', nome: 'Eduardo' };
-  // Janela: últimos 7 dias úteis pra garantir que tem dados
   const fim = new Date();
   fim.setDate(fim.getDate() - 1);
   const inicio = new Date(fim);
@@ -486,20 +512,16 @@ function _diagDjenApi() {
     pagina: 1
   };
   const qs = Object.keys(params).map(k => k + '=' + encodeURIComponent(params[k])).join('&');
-  const url = DJEN_API_URL + '?' + qs;
+  const url = proxy + '?' + qs;
 
-  Logger.log('=== DIAG DJEN API ===');
-  Logger.log('URL: ' + url);
+  Logger.log('=== DIAG DJEN API (via proxy) ===');
+  Logger.log('Proxy: ' + proxy);
+  Logger.log('URL completa: ' + url);
   Logger.log('Janela: ' + fmt(inicio) + ' → ' + fmt(fim));
 
   const resp = UrlFetchApp.fetch(url, {
     method: 'get',
-    headers: {
-      'Accept': 'application/json, text/plain, */*',
-      'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
-      'Referer': 'https://comunicaapi.pje.jus.br/'
-    },
+    headers: { 'Accept': 'application/json' },
     muteHttpExceptions: true
   });
 
@@ -507,19 +529,23 @@ function _diagDjenApi() {
   const respHeaders = resp.getAllHeaders();
   const body = resp.getContentText();
   Logger.log('HTTP ' + code);
-  Logger.log('Response headers: ' + JSON.stringify(respHeaders));
+  Logger.log('Headers (parcial): X-Proxy-By=' + (respHeaders['X-Proxy-By'] || '?') + ' · X-Upstream-Status=' + (respHeaders['X-Upstream-Status'] || '?'));
   Logger.log('Body (primeiros 1500 chars): ' + body.slice(0, 1500));
 
   if (code === 200) {
     try {
       const data = JSON.parse(body);
-      Logger.log('Items: ' + (data.items ? data.items.length : 'N/A'));
-      Logger.log('TotalRegistros: ' + (data.count || data.totalRegistros || 'N/A'));
+      const n = data.items ? data.items.length : 0;
+      Logger.log('OK — items recebidos: ' + n);
+      if (n > 0) {
+        Logger.log('Exemplo: CNJ=' + (data.items[0].numero_processo || data.items[0].numeroProcesso) +
+                   ' · tipo=' + (data.items[0].tipoComunicacao || '?') +
+                   ' · data=' + (data.items[0].data_disponibilizacao || '?'));
+      }
     } catch (e) {
       Logger.log('JSON parse falhou: ' + e.message);
     }
   } else {
-    Logger.log('FAIL — ver headers/body acima pra diagnóstico');
-    if (code === 403) Logger.log('Dica: WAF bloqueia IP Google Cloud ou User-Agent. Tentar via Cloudflare Worker proxy.');
+    Logger.log('FAIL — ver headers/body acima');
   }
 }
