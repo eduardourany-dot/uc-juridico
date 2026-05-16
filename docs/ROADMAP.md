@@ -42,14 +42,25 @@ Validar tudo que está em staging antes de deploy prod:
 #### P1 — Calculadora de atualização monetária + análise de cobranças
 *(bate com Módulo 85 INTEGRA + sugestão #3 do escritório)*
 
-- [ ] **Card Civil**: liquidação de sentença + confronto com índices BACEN/contratuais
-- [ ] **Card Fiscal**: dívidas fiscais com índices legais (Selic federal, IPCA, juros legais por esfera)
-- [ ] Tela em `/financeiro/calculadora` (ou novo menu)
-- [ ] API BCB pra puxar séries históricas (INPC, IGP-M, IPCA, SELIC, TR)
-- [ ] Vincular cálculo a processo/cliente (opcional)
+**FASE 1 ✅ CONCLUÍDA** (commits `1de1f0f` → `36aeb44`):
+- [x] Menu lateral + rota `/calculadora` com tab Cível
+- [x] 6 índices BCB (INPC, IGP-M, IPCA, SELIC, TR, CDI) + opção "Sem correção"
+- [x] Múltiplos lançamentos em tabela editável
+- [x] Tipo de lançamento: Principal (correção + juros) ou Custas/Despesa (só correção · CPC 84)
+- [x] Juros simples, composto ou **Taxa legal CC art. 406** (SELIC − IPCA com floor 0)
+- [x] Termo a quo dos juros: vencimento / citação / trânsito / mora / manual
+- [x] Multa contratual (CC 412) + honorários sucumbência (CPC 85) com bases corretas
+- [x] Multa + honorários CPC art. 523 §1º (cumprimento de sentença não pago)
+- [x] Replicar lançamentos: 1x inline ou Nx mensal/anual em massa
+- [x] Salvar cálculos no Firestore `calculos/{id}`
+
+**FASE 2 — pendente:**
+- [ ] **Tab Fiscal**: índices legais por esfera (Selic federal, IPCA, juros legais), confronto com cobrança tributária
+- [ ] Vincular cálculo a processo/cliente
+- [ ] Listar cálculos salvos (tab "Histórico" pra reabrir/excluir)
 - [ ] Exportar memória do cálculo em PDF/Word
 
-**Esforço estimado:** 2-3 dias. **Quem usa:** todos os advogados, diário.
+**Esforço fase 2:** 4-5 horas restantes.
 
 ---
 
