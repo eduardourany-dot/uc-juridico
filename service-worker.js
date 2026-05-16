@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.59.0 (logo animada — substitui logo.png por logo.mp4 no sidebar)
-const CACHE_NAME = 'uc-juridico-v6-59-0';
+// Service Worker — UC Jurídico v6.59.1 (logo animada — max-width 180→240 + padding lateral menor)
+const CACHE_NAME = 'uc-juridico-v6-59-1';
 const APP_SHELL = [
   './',
   './index.html',
