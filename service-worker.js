@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.63.0 (P2 MVP: Relatório consolidado pra cliente em .doc — sob demanda)
-const CACHE_NAME = 'uc-juridico-v6-63-0';
+// Service Worker — UC Jurídico v6.63.1 (Relatório auditoria 1/3: schema CPC 25 + UI de classificação no processo)
+const CACHE_NAME = 'uc-juridico-v6-63-1';
 const APP_SHELL = [
   './',
   './index.html',

@@ -3759,6 +3759,96 @@ function _renderParteLi(parte) {
   return `<li>${escapeHtml(nome)}${doc ? ` <small style="color:var(--uc-warm-gray);">· ${escapeHtml(doc)}</small>` : ''}</li>`;
 }
 
+// ====================================================================
+// Classificação CPC 25 / IAS 37 — Probabilidade de êxito do cliente
+// ====================================================================
+// PROVÁVEL (>50%): risco perda remoto / ativo virtualmente certo
+// POSSÍVEL (10-50%): divulgação em nota (sem provisão / ativo possível)
+// REMOTO (<10%): provisão obrigatória (cliente perdendo) / sem divulgação (ativo)
+// Tradução varia conforme polo: ATIVO vs PASSIVO.
+
+function _cpc25Badge(prob) {
+  const map = {
+    PROVAVEL: { label: 'PROVÁVEL (>50% êxito)', cls: 'badge-green' },
+    POSSIVEL: { label: 'POSSÍVEL (10-50%)', cls: 'badge-amber' },
+    REMOTO:   { label: 'REMOTO (<10%)', cls: 'badge-red' }
+  };
+  const cfg = map[prob];
+  return cfg ? `<span class="badge ${cfg.cls}" style="font-size:11px;">${cfg.label}</span>` : '—';
+}
+
+function _cpcPoloLabel(polo) {
+  if (polo === 'AT') return 'Ativo (autor)';
+  if (polo === 'PA') return 'Passivo (réu)';
+  return polo || 'Não definido';
+}
+
+/**
+ * Traduz a probabilidade de êxito do cliente para a linguagem CPC 25,
+ * considerando o polo processual.
+ * Quando cliente é PASSIVO: probabilidade alta de êxito = baixo risco de perda.
+ * Quando cliente é ATIVO: probabilidade alta de êxito = ativo contingente provável.
+ */
+function _cpcTratamentoContabil(prob, polo) {
+  const ehAtivo = polo === 'AT';
+  if (prob === 'PROVAVEL') {
+    return ehAtivo
+      ? 'Ativo contingente provável — divulgação em nota explicativa (só reconhece se virtualmente certo).'
+      : 'Risco de perda remoto — sem provisão e sem divulgação.';
+  }
+  if (prob === 'POSSIVEL') {
+    return ehAtivo
+      ? 'Ativo contingente possível — sem divulgação contábil obrigatória.'
+      : 'Risco de perda possível — sem provisão; divulgação em nota explicativa.';
+  }
+  if (prob === 'REMOTO') {
+    return ehAtivo
+      ? 'Ativo contingente remoto — sem qualquer divulgação.'
+      : 'Risco de perda provável — exige provisão contábil pelo valor melhor estimado.';
+  }
+  return '—';
+}
+
+async function editarClassificacaoCpc25Flow(processId) {
+  const p = await DB.getProcess(processId);
+  if (!p) { toast('Processo não encontrado', '', 'error'); return; }
+
+  const ehAtivo = p.polo === 'AT';
+  const r = await showModal(`⚖ Classificação CPC 25 · ${p.name || ''}`, [
+    { label: 'Probabilidade de êxito do cliente', name: 'probabilidade', type: 'select',
+      default: p.probabilidadeExito || 'POSSIVEL',
+      options: [
+        { value: 'PROVAVEL', label: 'PROVÁVEL — êxito >50% (' + (ehAtivo ? 'ativo contingente provável' : 'risco de perda remoto') + ')' },
+        { value: 'POSSIVEL', label: 'POSSÍVEL — êxito 10-50% (' + (ehAtivo ? 'ativo contingente possível' : 'divulgação em nota') + ')' },
+        { value: 'REMOTO',   label: 'REMOTO — êxito <10% (' + (ehAtivo ? 'ativo contingente remoto' : 'PROVISÃO OBRIGATÓRIA') + ')' }
+      ],
+      help: 'Classificação refere-se à probabilidade do CLIENTE OBTER ÊXITO na ação. O sistema traduz pra CPC 25 conforme polo (' + _cpcPoloLabel(p.polo) + ').'
+    },
+    { label: 'Justificativa técnica (mínimo 200 caracteres)', name: 'justificativa', type: 'textarea',
+      default: p.justificativaClassificacao || '',
+      placeholder: 'Fundamente a classificação com base no estado processual, teses do escritório e adversárias, jurisprudência aplicável e atos pendentes. Este texto será adensado pela IA no relatório de auditoria.',
+      rows: 8, mono: false,
+      help: 'Mínimo 200 caracteres. Será reproduzida e adensada pela IA na geração do relatório.'
+    }
+  ], { confirmLabel: 'Salvar classificação' });
+  if (!r) return;
+  const [probabilidade, justificativa] = r;
+  if (!justificativa || justificativa.trim().length < 200) {
+    toast('Justificativa insuficiente', 'Mínimo 200 caracteres — fundamente tecnicamente.', 'error');
+    return;
+  }
+  p.probabilidadeExito = probabilidade;
+  p.justificativaClassificacao = justificativa.trim();
+  p.probabilidadeExitoAtualizadaEm = new Date().toISOString();
+  try {
+    await DB.saveProcess(p);
+    toast('Classificação salva', '', 'success');
+    if (state.currentRoute === 'process') renderProcessDetail();
+  } catch (e) {
+    toast('Falha ao salvar', e.message || String(e), 'error');
+  }
+}
+
 function renderProcessOverview(p, events, deadlines, notes, jurisprudence) {
   const activeDeadlines = deadlines.filter(d => prazoEstaAtivo(d));
   const compromissos = state._processView?.compromissos || [];
@@ -3825,6 +3915,35 @@ function renderProcessOverview(p, events, deadlines, notes, jurisprudence) {
         ${p.risco ? `<div style="color: var(--uc-warm-gray);">Risco:</div><div><span class="badge ${riscoBadgeClass(p.risco)}">${escapeHtml(riscoLabel(p.risco))}</span></div>` : ''}
         ${p.honTipo ? `<div style="color: var(--uc-warm-gray);">Honorários:</div><div>${escapeHtml(honLabel(p.honTipo))}${p.honValor ? ' · ' + escapeHtml(p.honValor) : ''}</div>` : ''}
       </div>
+    </div>
+    ` : ''}
+
+    ${!_isClienteMode() ? `
+    <div class="card mb-4" style="${p.probabilidadeExito ? '' : 'border-left:3px solid var(--uc-warm-gray);'}">
+      <div class="flex justify-between items-center mb-3">
+        <h3 class="font-serif text-lg font-semibold smallcaps" style="color: var(--uc-black);">⚖ Classificação CPC 25 / IAS 37</h3>
+        <button class="btn btn-ghost btn-sm" onclick="editarClassificacaoCpc25Flow('${p.id}')" style="padding:4px 10px;font-size:11px;">${p.probabilidadeExito ? '✎ Editar' : '+ Classificar'}</button>
+      </div>
+      ${p.probabilidadeExito ? `
+        <div class="grid gap-2" style="grid-template-columns: 200px 1fr; font-size: 13px;">
+          <div style="color: var(--uc-warm-gray);">Probabilidade de êxito:</div>
+          <div>${_cpc25Badge(p.probabilidadeExito)}</div>
+          <div style="color: var(--uc-warm-gray);">Polo do cliente:</div>
+          <div>${escapeHtml(_cpcPoloLabel(p.polo))}</div>
+          <div style="color: var(--uc-warm-gray);">Tratamento contábil:</div>
+          <div style="font-style:italic;color:var(--uc-graphite);">${_cpcTratamentoContabil(p.probabilidadeExito, p.polo)}</div>
+          ${p.justificativaClassificacao ? `
+            <div style="color: var(--uc-warm-gray);">Justificativa técnica:</div>
+            <div style="white-space:pre-wrap;font-size:12px;line-height:1.5;background:var(--uc-cream);padding:8px 10px;border-radius:4px;border-left:3px solid var(--uc-gold);">${escapeHtml(p.justificativaClassificacao)}</div>
+          ` : ''}
+          ${p.probabilidadeExitoAtualizadaEm ? `
+            <div style="color: var(--uc-warm-gray);">Última revisão:</div>
+            <div style="font-size:12px;color:var(--uc-warm-gray);">${formatDate(p.probabilidadeExitoAtualizadaEm)}</div>
+          ` : ''}
+        </div>
+      ` : `
+        <p class="help-text">Sem classificação CPC 25 cadastrada. Clique em <strong>+ Classificar</strong> para definir a probabilidade de êxito + justificativa técnica — necessárias pra gerar relatório de auditoria externa.</p>
+      `}
     </div>
     ` : ''}
 
