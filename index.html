@@ -10752,12 +10752,18 @@ const _calcState = {
   // débitos estaduais/municipais não podem ter correção + juros que
   // excedam a SELIC praticada pela União. Quando ligado, app compara
   // o método local com a SELIC e aplica o menor (limita ao teto).
-  aplicarTetoSelic: true
+  aplicarTetoSelic: true,
+  // Decomposição da cobrança da Fazenda (Fiscal): permite informar
+  // como a Fazenda calculou — multa% e juros% que ELA aplicou — pra
+  // identificar exatamente onde está o erro/excesso na cobrança.
+  decompFazenda: false,
+  multaFazendaTaxa: '',
+  jurosFazendaTaxa: ''
 };
 
 // Aplica correção+juros pra UMA LISTA de lançamentos (cada um com data
 // e valor próprios), tudo até uma data final comum. Soma os parciais.
-async function calcularLancamentosMultiplos({ lancamentos, dataFinal, indice, jurosTaxa, jurosTipo, jurosPeriodo, termoQuoJuros, dataJurosGlobal, multaTaxa, honSucumbenciaTaxa, aplicarArt523, art523MultaTaxa, art523HonTaxa, aplicarDL1025, dl1025Taxa, aplicarTetoSelic, esfera }) {
+async function calcularLancamentosMultiplos({ lancamentos, dataFinal, indice, jurosTaxa, jurosTipo, jurosPeriodo, termoQuoJuros, dataJurosGlobal, multaTaxa, honSucumbenciaTaxa, aplicarArt523, art523MultaTaxa, art523HonTaxa, aplicarDL1025, dl1025Taxa, aplicarTetoSelic, esfera, decompFazenda, multaFazendaTaxa, jurosFazendaTaxa }) {
   const parciais = [];
   let totalOriginal = 0, totalCorrigido = 0, totalJuros = 0;
   // Subtotais separados pra base de cálculo da multa e sucumbência:
@@ -10928,6 +10934,42 @@ async function calcularLancamentosMultiplos({ lancamentos, dataFinal, indice, ju
   // Total devido = débito da fase de conhecimento + art. 523 + DL 1025 + custas
   const totalGeral = debitoConhecimento + valorMulta523 + valorHon523 + valorDL1025 + subtotalCustasCorrigido;
 
+  // === DECOMPOSIÇÃO DA COBRANÇA DA FAZENDA ===
+  // Permite simular o cálculo COMO A FAZENDA fez (multa% + juros% que
+  // ELA aplicou) pra comparar lado a lado com o cálculo legal correto.
+  // Útil em embargos pra apontar exatamente ONDE está o excesso.
+  let cenarioFazenda = null;
+  if (decompFazenda) {
+    const multaFzPct = parseFloat(String(multaFazendaTaxa || '0').replace(',', '.')) || 0;
+    const jurosFzPct = parseFloat(String(jurosFazendaTaxa || '0').replace(',', '.')) || 0;
+    // Usa o MESMO valorCorrigido nosso como base (assumindo Fazenda
+    // usou o mesmo índice de correção) e aplica multa/juros que ELA usou.
+    // Custas não recebem multa nem juros (CPC 84).
+    let principalCorrigidoFz = 0;
+    let valorJurosFz = 0;
+    for (const p of parciais) {
+      if (p.tipo === 'custas') continue;
+      principalCorrigidoFz += p.valorCorrigido;
+      // Juros Fazenda: simples por mês ponderado por lançamento
+      valorJurosFz += p.valorCorrigido * (jurosFzPct / 100) * p.mesesPeriodo;
+    }
+    const valorMultaFz = principalCorrigidoFz * (multaFzPct / 100);
+    const totalFazenda = principalCorrigidoFz + valorMultaFz + valorJurosFz + subtotalCustasCorrigido;
+    const diferencaFazenda = totalFazenda - totalGeral;  // positivo = Fazenda cobrando a mais
+    cenarioFazenda = {
+      principalCorrigido: principalCorrigidoFz,
+      valorMulta: valorMultaFz,
+      valorJuros: valorJurosFz,
+      custas: subtotalCustasCorrigido,
+      total: totalFazenda,
+      multaTaxa: multaFzPct,
+      jurosTaxa: jurosFzPct,
+      diferenca: diferencaFazenda,
+      diferencaMulta: valorMultaFz - valorMulta,   // multa fazenda vs multa contratual nossa
+      diferencaJuros: valorJurosFz - totalJuros    // juros fazenda vs nossos juros
+    };
+  }
+
   return {
     parciais,
     totalOriginal,
@@ -10954,6 +10996,7 @@ async function calcularLancamentosMultiplos({ lancamentos, dataFinal, indice, ju
     subtotalSelicPrincipal,  // valor com SELIC aplicada (pra confronto)
     usouTetoSelic,           // se houve limitação pelo teto
     excessoTeto,             // diferença local − SELIC (excesso identificado)
+    cenarioFazenda,          // null ou { total, valorMulta, valorJuros, diferenca, ... }
     totalGeral,
     indiceLabel,
     dataFinal,
@@ -11147,6 +11190,36 @@ async function renderCalculadora() {
           </div>
         </div>
       </div>
+
+      ${tab === 'fiscal' ? `
+        <!-- Decomposição da cobrança Fazenda — só Fiscal -->
+        <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--uc-line-soft);">
+          <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;">
+            <input type="checkbox" id="calcDecompFazenda" ${_calcState.decompFazenda ? 'checked' : ''} onchange="_calcState.decompFazenda = this.checked; renderCalculadora();" style="margin-top:3px;">
+            <div>
+              <strong style="font-size:13px;">📊 Decomposição da cobrança da Fazenda</strong>
+              <p class="help-text" style="margin:2px 0 0;font-size:11px;">
+                Quando souber COMO a Fazenda calculou (multa% e juros% que ELA lançou), informe aqui.
+                App refaz o cálculo com esses parâmetros pra mostrar exatamente ONDE está o erro/excesso.
+              </p>
+            </div>
+          </label>
+          ${_calcState.decompFazenda ? `
+            <div class="grid gap-3" style="grid-template-columns: 1fr 1fr;margin-top:10px;margin-left:24px;">
+              <div>
+                <label class="label">Multa lançada pela Fazenda (%)</label>
+                <input type="number" id="calcMultaFazendaTaxa" class="input" step="0.01" min="0" max="100" placeholder="Ex.: 20" value="${_calcState.multaFazendaTaxa || ''}" onchange="_calcState.multaFazendaTaxa = this.value">
+                <p class="help-text" style="margin-top:4px;font-size:11px;">% que a Fazenda aplicou sobre o principal corrigido.</p>
+              </div>
+              <div>
+                <label class="label">Juros lançado pela Fazenda (% a.m.)</label>
+                <input type="number" id="calcJurosFazendaTaxa" class="input" step="0.01" min="0" max="100" placeholder="Ex.: 1" value="${_calcState.jurosFazendaTaxa || ''}" onchange="_calcState.jurosFazendaTaxa = this.value">
+                <p class="help-text" style="margin-top:4px;font-size:11px;">Taxa mensal simples que a Fazenda usou.</p>
+              </div>
+            </div>
+          ` : ''}
+        </div>
+      ` : ''}
 
       <div style="margin-top:12px;">
         <label class="label">Nome do cálculo (opcional)</label>
@@ -11744,6 +11817,8 @@ function _calcRenderResultado(r) {
       ${_calcRenderConfrontoTema(r)}
     </div>
 
+    ${r.cenarioFazenda ? _calcRenderDecompFazenda(r) : ''}
+
     <!-- Tabela de parciais (1 linha por lançamento) -->
     <div class="card mb-4">
       <h3 class="font-serif text-lg font-semibold smallcaps mb-3" style="color:var(--uc-black);">Parciais por lançamento</h3>
@@ -12056,6 +12131,67 @@ function _brDate(iso) {
   return `${d}/${m}/${y}`;
 }
 
+// Decomposição comparativa: como a Fazenda calculou × como deveria
+// ter sido calculado conforme a legislação. Aponta exatamente qual
+// componente (multa ou juros) está superdimensionado.
+function _calcRenderDecompFazenda(r) {
+  const f = r.cenarioFazenda;
+  if (!f) return '';
+  const brl = v => 'R$ ' + (v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const fmtDiff = (diff, label) => {
+    if (Math.abs(diff) < 0.01) return `<span style="color:var(--uc-warm-gray);">— ${label} ok</span>`;
+    const cor = diff > 0 ? 'var(--uc-red)' : 'var(--uc-green)';
+    const sinal = diff > 0 ? '+' : '';
+    return `<span style="color:${cor};font-weight:600;">${sinal}${brl(diff)} ${label}</span>`;
+  };
+  const ehExcesso = f.diferenca > 0;
+  return `
+    <div class="card mb-4" style="border-left:3px solid ${ehExcesso ? 'var(--uc-red)' : 'var(--uc-green)'};background:linear-gradient(135deg,rgba(178,34,52,0.03) 0%,white 50%);">
+      <h3 class="font-serif text-lg font-semibold smallcaps mb-3" style="color:var(--uc-black);">📊 Decomposição comparativa Fazenda × Devido</h3>
+      <p class="help-text" style="margin-bottom:12px;">Calcula como a Fazenda lançou (com os percentuais informados) e identifica qual componente está superdimensionado.</p>
+      <div class="grid gap-3" style="grid-template-columns: 1fr 1fr;">
+        <!-- Lado A: Fazenda -->
+        <div style="padding:12px;background:rgba(178,34,52,0.04);border-radius:6px;">
+          <p class="smallcaps text-xs" style="color:var(--uc-red);font-weight:600;margin:0 0 8px;">Como a Fazenda calculou</p>
+          <table style="width:100%;font-size:12px;border-collapse:collapse;">
+            <tr><td>Principal corrigido</td><td style="text-align:right;">${brl(f.principalCorrigido)}</td></tr>
+            <tr><td>+ Multa ${f.multaTaxa}%</td><td style="text-align:right;">${brl(f.valorMulta)}</td></tr>
+            <tr><td>+ Juros ${f.jurosTaxa}% a.m.</td><td style="text-align:right;">${brl(f.valorJuros)}</td></tr>
+            ${f.custas > 0 ? `<tr><td>+ Custas</td><td style="text-align:right;">${brl(f.custas)}</td></tr>` : ''}
+            <tr style="border-top:1px solid var(--uc-line);font-weight:600;">
+              <td style="padding-top:6px;">Total Fazenda</td>
+              <td style="text-align:right;padding-top:6px;color:var(--uc-red);">${brl(f.total)}</td>
+            </tr>
+          </table>
+        </div>
+        <!-- Lado B: Devido (nosso) -->
+        <div style="padding:12px;background:rgba(74,124,74,0.04);border-radius:6px;">
+          <p class="smallcaps text-xs" style="color:var(--uc-green);font-weight:600;margin:0 0 8px;">Devido (legalmente correto)</p>
+          <table style="width:100%;font-size:12px;border-collapse:collapse;">
+            <tr><td>Principal corrigido</td><td style="text-align:right;">${brl(r.totalCorrigido - r.subtotalCustasCorrigido)}</td></tr>
+            ${r.valorMulta > 0 ? `<tr><td>+ Multa ${r.multaTaxa}% (CC 412)</td><td style="text-align:right;">${brl(r.valorMulta)}</td></tr>` : '<tr><td style="color:var(--uc-warm-gray);">+ Multa</td><td style="text-align:right;color:var(--uc-warm-gray);">R$ 0,00</td></tr>'}
+            <tr><td>+ Juros (nosso método)</td><td style="text-align:right;">${brl(r.totalJuros)}</td></tr>
+            ${r.subtotalCustasCorrigido > 0 ? `<tr><td>+ Custas</td><td style="text-align:right;">${brl(r.subtotalCustasCorrigido)}</td></tr>` : ''}
+            <tr style="border-top:1px solid var(--uc-line);font-weight:600;">
+              <td style="padding-top:6px;">Total devido</td>
+              <td style="text-align:right;padding-top:6px;color:var(--uc-green);">${brl(r.totalGeral)}</td>
+            </tr>
+          </table>
+        </div>
+      </div>
+      <div style="margin-top:12px;padding:10px;background:${ehExcesso ? 'rgba(178,34,52,0.06)' : 'rgba(74,124,74,0.06)'};border-radius:6px;text-align:center;">
+        <p style="margin:0 0 6px;font-size:11px;color:var(--uc-warm-gray);text-transform:uppercase;letter-spacing:0.04em;">Diagnóstico do excesso</p>
+        <p style="margin:0;font-size:16px;font-weight:700;color:${ehExcesso ? 'var(--uc-red)' : 'var(--uc-green)'};">
+          ${ehExcesso ? '+' : ''}${brl(f.diferenca)} ${ehExcesso ? '(Fazenda cobrando a MAIS)' : '(cobrança dentro do devido)'}
+        </p>
+        <p style="margin-top:6px;font-size:12px;">
+          ${fmtDiff(f.diferencaMulta, 'na multa')} · ${fmtDiff(f.diferencaJuros, 'nos juros')}
+        </p>
+      </div>
+    </div>
+  `;
+}
+
 // Card de confronto método local vs SELIC (Tema 1062 estados / 1217 municípios STF).
 // Mostra os 2 cálculos lado a lado + identifica EXCESSO da legislação local.
 function _calcRenderConfrontoTema(r) {
@@ -12208,7 +12344,10 @@ async function _calcExecutar() {
       aplicarDL1025: _calcState.aplicarDL1025,
       dl1025Taxa: _calcState.dl1025Taxa,
       aplicarTetoSelic: _calcState.aplicarTetoSelic,
-      esfera: _calcState.esfera
+      esfera: _calcState.esfera,
+      decompFazenda: _calcState.decompFazenda,
+      multaFazendaTaxa: _calcState.multaFazendaTaxa,
+      jurosFazendaTaxa: _calcState.jurosFazendaTaxa
     });
     _calcState.resultado = resultado;
     _calcState.erro = null;

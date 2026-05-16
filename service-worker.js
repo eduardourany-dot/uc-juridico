@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.62.5 (Calculadora: validação melhor de datas inválidas com diagnóstico claro)
-const CACHE_NAME = 'uc-juridico-v6-62-5';
+// Service Worker — UC Jurídico v6.62.6 (Calculadora Fiscal: decomposição da cobrança Fazenda — Fazenda × Devido)
+const CACHE_NAME = 'uc-juridico-v6-62-6';
 const APP_SHELL = [
   './',
   './index.html',
