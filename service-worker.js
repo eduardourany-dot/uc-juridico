@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.63.2 (Relatório auditoria 2/3: geração via Claude API — modos Individual + Consolidado)
-const CACHE_NAME = 'uc-juridico-v6-63-2';
+// Service Worker — UC Jurídico v6.63.3 (Relatório auditoria: botão '⚖ Classificar CPC 25' no header do processo)
+const CACHE_NAME = 'uc-juridico-v6-63-3';
 const APP_SHELL = [
   './',
   './index.html',

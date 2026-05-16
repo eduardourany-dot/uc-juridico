@@ -3537,6 +3537,7 @@ async function renderProcessDetail() {
         ${_isClienteMode() ? '' : `<button class="btn btn-secondary btn-sm" onclick="setProcessTab('analysis')" title="Abre análise IA do processo">🧠 Análise IA</button>`}
         ${_isClienteMode() ? '' : `<button class="btn btn-primary btn-sm" onclick="gerarPeticaoEscolhaFlow()" title="Gerar petição — escolha entre modelo cadastrado ou geração via IA">📝 Gerar petição</button>`}
         ${(p.cnj && !_isClienteMode()) ? `<button class="btn btn-primary btn-sm" onclick="mniProtocolarFlow('${p.id}')" title="Protocolar petição/manifestação direto no tribunal via SOAP/MNI" style="background:linear-gradient(135deg,#b87f1c 0%,#c9a14c 100%);">📤 Protocolar</button>` : ''}
+        ${!_isClienteMode() ? `<button class="btn btn-outline btn-sm" onclick="editarClassificacaoCpc25Flow('${p.id}')" title="Cadastrar/editar classificação CPC 25 (probabilidade de êxito + justificativa)">⚖ ${p.probabilidadeExito ? 'CPC 25 (' + p.probabilidadeExito.slice(0, 3) + ')' : 'Classificar CPC 25'}</button>` : ''}
         ${(!_isClienteMode() && p.probabilidadeExito) ? `<button class="btn btn-outline btn-sm" onclick="gerarRelatorioAuditoriaIndividualFlow('${p.id}')" title="Gerar relatório técnico-jurídico para auditoria externa (CPC 25/IAS 37)">🏛 Relatório auditoria</button>` : ''}
       </div>
     </div>
