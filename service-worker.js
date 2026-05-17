@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.64.5 (remove botão 'Tentar via DJEN' do card de partes vazias)
-const CACHE_NAME = 'uc-juridico-v6-64-5';
+// Service Worker — UC Jurídico v6.64.6 (substitui 'Re-extrair (DJEN)' por nota explicativa quando sem CNJ)
+const CACHE_NAME = 'uc-juridico-v6-64-6';
 const APP_SHELL = [
   './',
   './index.html',

@@ -4437,7 +4437,7 @@ function renderProcessOverview(p, events, deadlines, notes, jurisprudence) {
         <h3 class="font-serif text-lg font-semibold smallcaps" style="color: var(--uc-black);">Partes e advogados</h3>
         ${p.cnj
           ? `<button class="btn btn-ghost btn-sm" onclick="mniBuscarProcessoFlow('${p.id}')" title="Atualizar partes, advogados e movimentos consultando o tribunal via SOAP/MNI">🔍 Atualizar via MNI</button>`
-          : `<button class="btn btn-ghost btn-sm" onclick="djenReExtractParties('${p.id}')" title="Re-extrair partes e advogados do texto das publicações DJEN">🔄 Re-extrair (DJEN)</button>`
+          : `<span style="font-size: 11px; color: var(--uc-warm-gray); font-style: italic;" title="MNI exige o número do CNJ pra consultar o tribunal">Processo sem CNJ — adicione o número pra atualizar via MNI</span>`
         }
       </div>
       <p class="help-text" style="margin-bottom: 10px;">${p.mniLastSync
