@@ -16242,8 +16242,8 @@ async function renderSettings() {
     tab = 'appearance';
     state._settingsTab = tab;
   }
-  // Tabs restritas a admin: DJEN, MNI, Acessos. Advogado comum cai pra appearance.
-  if (!isAdmin && ['djen', 'mni', 'acessos'].includes(tab)) {
+  // Tabs restritas a admin: DJEN, MNI, Acessos, Manutenção. Advogado comum cai pra appearance.
+  if (!isAdmin && ['djen', 'mni', 'acessos', 'maintenance'].includes(tab)) {
     tab = 'appearance';
     state._settingsTab = tab;
   }
@@ -16265,7 +16265,7 @@ async function renderSettings() {
       ${_isClienteMode() ? '' : `<button class="tab ${tab === 'backup' ? 'active' : ''}" onclick="setSettingsTab('backup')">Backup</button>`}
       ${_isClienteMode() ? '' : `<button class="tab ${tab === 'sync' ? 'active' : ''}" onclick="setSettingsTab('sync')">Sincronização</button>`}
       ${isAdmin ? `<button class="tab ${tab === 'acessos' ? 'active' : ''}" onclick="setSettingsTab('acessos')">🔐 Acessos</button>` : ''}
-      ${_isClienteMode() ? '' : `<button class="tab ${tab === 'maintenance' ? 'active' : ''}" onclick="setSettingsTab('maintenance')">Manutenção</button>`}
+      ${(!_isClienteMode() && isAdmin) ? `<button class="tab ${tab === 'maintenance' ? 'active' : ''}" onclick="setSettingsTab('maintenance')">Manutenção</button>` : ''}
       <button class="tab ${tab === 'security' ? 'active' : ''}" onclick="setSettingsTab('security')">Segurança</button>
       <button class="tab ${tab === 'about' ? 'active' : ''}" onclick="setSettingsTab('about')">Sobre</button>
     </div>
@@ -16284,7 +16284,7 @@ function renderSettingsTab(tab, prompts, defaultPromptId) {
   // Defesa em camadas: se alguém chamar diretamente com tab restrita
   // (sem passar pelo renderSettings), bloqueia o render.
   const isAdmin = window.UC_Auth?.getUser?.()?.role === 'admin';
-  if (!isAdmin && ['djen', 'mni', 'acessos'].includes(tab)) {
+  if (!isAdmin && ['djen', 'mni', 'acessos', 'maintenance'].includes(tab)) {
     return '<p class="help-text" style="padding: 24px;">Esta seção é restrita aos administradores do escritório.</p>';
   }
 

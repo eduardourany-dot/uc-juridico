@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.64.8 (Configurações: tabs DJEN/MNI/Acessos restritas a admins)
-const CACHE_NAME = 'uc-juridico-v6-64-8';
+// Service Worker — UC Jurídico v6.64.9 (Configurações: tab Manutenção também restrita a admin)
+const CACHE_NAME = 'uc-juridico-v6-64-9';
 const APP_SHELL = [
   './',
   './index.html',
