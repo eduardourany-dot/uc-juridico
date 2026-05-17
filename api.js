@@ -571,6 +571,16 @@ const RemoteDB = {
   async deleteCalculo(id) { return await softDelete_('calculos', id); },
   async deleteCliente(id) { return await softDelete_('clientes', id); },
 
+  // ====== Custas processuais (P5) ======
+  // Salva cálculos de custas iniciais por processo. Uma coleção separada
+  // dos cálculos monetários (que vão em /calculos) — schema diferente,
+  // contexto diferente.
+  async getCustasByProcess(pid) {
+    return (await getAll_('custas')).filter(c => c.processoId === pid && !c.deletedAt);
+  },
+  async saveCusta(c) { return await upsert_('custas', c); },
+  async deleteCusta(id) { return await softDelete_('custas', id); },
+
   // ====== Comunicações (v6.23 — Cli.4) ======
   async getAllComunicacoes() { return await getAll_('comunicacoes'); },
   async getComunicacoesByCliente(cid) {
