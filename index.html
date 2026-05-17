@@ -1886,6 +1886,43 @@ async function _buscarCep(cep) {
   }
 }
 
+/**
+ * Busca dados de empresa via BrasilAPI (gratuita, sem auth, com CORS).
+ * Documentação: https://brasilapi.com.br/docs#tag/CNPJ
+ *
+ * Retorna objeto normalizado pronto pra preencher form de cliente PJ,
+ * ou null se CNPJ inválido / não encontrado / API indisponível.
+ */
+async function _buscarCnpj(cnpj) {
+  const limpo = String(cnpj || '').replace(/\D/g, '');
+  if (limpo.length !== 14) return null;
+  try {
+    const resp = await fetch(`https://brasilapi.com.br/api/cnpj/v1/${limpo}`);
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    if (!data.cnpj && !data.razao_social) return null;
+    // Telefone vem como string '62999999999' (DDD + número, sem máscara)
+    const telefoneRaw = data.ddd_telefone_1 || data.ddd_telefone_2 || '';
+    return {
+      nome: (data.razao_social || data.nome_fantasia || '').toUpperCase(),
+      email: data.email || '',
+      telefone: telefoneRaw,  // será mascarado pelo onInput do campo
+      cep: data.cep || '',
+      logradouro: data.logradouro || '',
+      numero: data.numero || '',
+      complemento: data.complemento || '',
+      bairro: data.bairro || '',
+      cidade: data.municipio || '',
+      estado: data.uf || '',
+      situacao: data.situacao_cadastral || '',  // 'ATIVA', 'BAIXADA', etc
+      atividade: data.cnae_fiscal_descricao || ''
+    };
+  } catch (e) {
+    console.warn('BrasilAPI CNPJ falhou', e);
+    return null;
+  }
+}
+
 // Compose endereco como string única (compat com clientes antigos que tinham
 // só endereco string). Útil pra buscar e exibir.
 function _composeEndereco(c) {
@@ -1926,8 +1963,46 @@ async function _formClienteFlow(clienteAtual) {
     ]},
     { label: 'CPF/CNPJ', name: 'cpfCnpj',
       default: _maskCpfCnpj(clienteAtual?.cpfCnpj || ''),
-      placeholder: 'CPF: 000.000.000-00 · CNPJ: 00.000.000/0000-00',
-      onInput: v => _maskCpfCnpj(v) },
+      placeholder: 'CPF: 000.000.000-00 · CNPJ: 00.000.000/0000-00 (busca dados automaticamente)',
+      onInput: v => _maskCpfCnpj(v),
+      onChange: async (val, ctx) => {
+        // Só auto-busca CNPJ (14 dígitos). CPF não tem API pública pra dados.
+        const limpo = String(val || '').replace(/\D/g, '');
+        if (limpo.length !== 14) return;
+        // Só busca se for novo cadastro OU se o nome estiver vazio
+        // (evita sobrescrever dados editados manualmente em edição)
+        const nomeAtual = (ctx.getByName('nome') || '').trim();
+        if (clienteAtual?.id && nomeAtual) {
+          // Edição com nome já preenchido — pergunta antes
+          const ok = await confirmDialog('Atualizar dados via CNPJ?',
+            'Buscar e sobrescrever Nome, Endereço, Telefone, Email com dados da Receita Federal (BrasilAPI)?',
+            true);
+          if (!ok) return;
+        }
+        if (typeof toast === 'function') toast('Consultando Receita Federal…', 'BrasilAPI', 'info');
+        const dados = await _buscarCnpj(val);
+        if (!dados) {
+          if (typeof toast === 'function') toast('CNPJ não encontrado', 'Verifique o número ou a API pode estar indisponível', 'error');
+          return;
+        }
+        // Auto-set tipo PJ
+        ctx.setByName('tipoPessoa', 'PJ');
+        if (dados.nome) ctx.setByName('nome', dados.nome);
+        if (dados.email) ctx.setByName('email', dados.email);
+        if (dados.telefone) ctx.setByName('telefone', _maskTelefone(dados.telefone));
+        if (dados.cep) ctx.setByName('cep', dados.cep);
+        if (dados.logradouro) ctx.setByName('logradouro', dados.logradouro);
+        if (dados.numero) ctx.setByName('numero', dados.numero);
+        if (dados.complemento) ctx.setByName('complemento', dados.complemento);
+        if (dados.bairro) ctx.setByName('bairro', dados.bairro);
+        if (dados.cidade) ctx.setByName('cidade', dados.cidade);
+        if (dados.estado) ctx.setByName('estado', dados.estado);
+        const aviso = dados.situacao && dados.situacao !== 'ATIVA'
+          ? ` · Situação: ${dados.situacao}`
+          : '';
+        if (typeof toast === 'function') toast('Dados preenchidos', (dados.nome || 'CNPJ encontrado') + aviso, 'success');
+      }
+    },
     { label: 'Email', name: 'email', default: clienteAtual?.email || '', placeholder: 'opcional' },
     { label: 'Telefone', name: 'telefone',
       default: _maskTelefone(clienteAtual?.telefone || ''),
