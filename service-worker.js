@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.64.11 (fix p.partes — normaliza array→objeto na leitura)
-const CACHE_NAME = 'uc-juridico-v6-64-11';
+// Service Worker — UC Jurídico v6.64.12 (users 'user' podem habilitar acesso de clientes ao sistema)
+const CACHE_NAME = 'uc-juridico-v6-64-12';
 const APP_SHELL = [
   './',
   './index.html',

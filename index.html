@@ -1960,10 +1960,12 @@ async function _formClienteFlow(clienteAtual) {
     { label: 'Ativo', name: 'ativo', type: 'checkbox', default: clienteAtual ? clienteAtual.ativo !== false : true }
   ];
 
-  // Field visible só pra admin: libera acesso do cliente ao sistema (modo cliente,
-  // somente leitura dos próprios processos). Precisa de email cadastrado.
+  // Field visible pra admin + user: libera acesso do cliente ao sistema
+  // (modo cliente, somente leitura dos próprios processos). Precisa de email
+  // cadastrado. Firestore Rules só permitem role='cliente' aqui — non-admin
+  // não consegue criar/promover admins/users via este caminho.
   const meRole = (window.UC_Auth?.getUser?.() || {}).role;
-  if (meRole === 'admin') {
+  if (['admin', 'user'].includes(meRole)) {
     fields.push({
       label: '🔓 Habilitar acesso ao sistema',
       name: 'temAcessoSistema',
@@ -2031,16 +2033,17 @@ async function _formClienteFlow(clienteAtual) {
   // Sincroniza acesso ao sistema: cria/ativa/bloqueia user doc conforme flag.
   // Só roda quando o flag MUDOU pra evitar overwrites desnecessários.
   // Errors aqui não bloqueiam o save do cliente — só notifica via toast.
+  // Usa toggleClienteAccess (aceita admin + user; rules só permitem role='cliente').
   const flagMudou = (!!temAcessoSistema) !== (clienteAtual?.temAcessoSistema === true);
   const emailMudou = (clienteAtual?.email || null) !== (cliente.email || null);
   if ((flagMudou || (temAcessoSistema && emailMudou)) && cliente.email) {
     try {
       if (temAcessoSistema) {
-        await window.UC_admin.addUser(cliente.email, cliente.nome, 'cliente', cliente.id);
+        await window.UC_admin.toggleClienteAccess(cliente.email, true, cliente.nome, cliente.id);
         toast('Acesso liberado', `${cliente.email} agora pode logar como cliente`, 'success');
       } else if (clienteAtual?.email) {
         // Desligou o flag — bloqueia o user antigo (preserva histórico)
-        await window.UC_admin.setActive(clienteAtual.email, false);
+        await window.UC_admin.toggleClienteAccess(clienteAtual.email, false);
         toast('Acesso bloqueado', `${clienteAtual.email} não pode mais logar`, 'info');
       }
     } catch (err) {
