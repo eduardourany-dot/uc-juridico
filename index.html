@@ -13949,7 +13949,7 @@ async function _modeloFormFlow({ titulo, modelo, isNovo }) {
       default: modelo.promptSistema || '' }
   ], {
     confirmLabel: isNovo ? 'Cadastrar' : 'Salvar',
-    intro: 'Use placeholders como <code>{{cliente.nome}}</code>, <code>{{processo.cnj}}</code>, <code>{{data.hojeExtenso}}</code>. <strong>System prompt</strong> é instrução pra Claude quando este template for escolhido em "Gerar com IA" — deixe vazio pra usar o prompt genérico.'
+    intro: 'Use placeholders como <code>{{cliente.nome}}</code>, <code>{{processo.cnj}}</code>, <code>{{data.hojeExtenso}}</code>. <strong>System prompt</strong> é instrução pro modelo de IA (Gemini) quando este template for escolhido em "Gerar com IA" — deixe vazio pra usar o prompt genérico.'
   });
   if (!r) return;
   const [nome, tipo, descricao, ativo, conteudo, promptSistema] = r;
@@ -14006,7 +14006,7 @@ async function gerarPeticaoEscolhaFlow() {
         <h3 class="modal-title">Como gerar a petição?</h3>
         <p class="help-text" style="margin-bottom: 20px;">
           Escolha o caminho: modelo já cadastrado (rápido, previsível) ou
-          geração via Claude API (mais adaptável, cobrança no seu Anthropic).
+          geração via Gemini (mais adaptável, depois revise no Claude Chat).
         </p>
         <div class="flex flex-col gap-2">
           <button class="btn btn-primary" id="_gpModelo" style="text-align:left;padding:14px 16px;">
@@ -14014,8 +14014,8 @@ async function gerarPeticaoEscolhaFlow() {
             <div style="font-size:12px;opacity:0.85;margin-top:2px;font-weight:normal;">Usa templates em Modelos → preenche placeholders com dados do processo</div>
           </button>
           <button class="btn btn-primary" id="_gpIA" style="text-align:left;padding:14px 16px;background:#8a6f3d;border-color:#8a6f3d;">
-            <div style="font-weight:600;">🤖 Geração com IA (Claude)</div>
-            <div style="font-size:12px;opacity:0.85;margin-top:2px;font-weight:normal;">Claude API gera texto adaptado · requer CLAUDE_API_KEY em Configurações</div>
+            <div style="font-weight:600;">🤖 Geração com IA (Gemini)</div>
+            <div style="font-size:12px;opacity:0.85;margin-top:2px;font-weight:normal;">Gemini 2.5 Flash gera texto adaptado · revise depois no Claude Chat</div>
           </button>
           <button class="btn btn-ghost" id="_gpCancel" style="margin-top:8px;">Cancelar</button>
         </div>
@@ -14843,15 +14843,15 @@ async function gerarPeticaoIAFlow() {
       })
   ];
 
-  const escolha = await showModal('🤖 Gerar petição com Claude', [
+  const escolha = await showModal('🤖 Gerar petição com Gemini', [
     { label: 'Briefing — o que precisa ser argumentado?', name: 'briefing', type: 'textarea', rows: 8,
       placeholder: 'Ex: Fazer contestação alegando ilegitimidade passiva. Cliente nunca contratou o serviço executado pela autora. CDA é nula porque não consta o número do processo administrativo. Pedir improcedência total.' },
     { label: 'Template (opcional — só pra system prompt)', name: 'modeloId', type: 'select', default: '', options: tiposOpts },
     { label: 'Tipo da peça', name: 'tipo', type: 'select', default: 'outro',
       options: PETICAO_TIPOS.map(t => ({ value: t.value, label: t.label })) }
   ], {
-    confirmLabel: '🤖 Gerar (envia pra Claude)',
-    intro: `Processo: <strong>${escapeHtml(proc.name || proc.cnj || '—')}</strong>${cliente ? ' · Cliente: <strong>' + escapeHtml(cliente.nome) + '</strong>' : ''}<br>O briefing + contexto do processo (CNJ, partes, eventos recentes, prazos ativos) são enviados pra Claude. Cobranças por uso da API ficam na sua conta Anthropic.`
+    confirmLabel: '🤖 Gerar (envia pra Gemini)',
+    intro: `Processo: <strong>${escapeHtml(proc.name || proc.cnj || '—')}</strong>${cliente ? ' · Cliente: <strong>' + escapeHtml(cliente.nome) + '</strong>' : ''}<br>O briefing + contexto do processo (CNJ, partes, eventos recentes, prazos ativos) são enviados pro Gemini 2.5 Flash. Use depois o botão "Revisar no Claude" pra checagem crítica.`
   });
   if (!escolha) return;
   const [briefing, modeloId, tipo] = escolha;
@@ -18800,7 +18800,7 @@ const _VIEWER_HIDE_PATTERNS = [
   /mniResetCofre/, /mniRevealSenhaFlow/, /mniSaveConfigFlow/, /mniAvisosPendentesFlow/,
   // DJEN (importa, agenda)
   /djenRunSearch/, /djenAgendarPrazos/, /djenAddOabFlow/, /djenRemoveOab/,
-  /djenToggleOab/, /djenToggleAllOabs/, /djenReExtractParties/,
+  /djenToggleOab/, /djenToggleAllOabs/,
   // PDF import
   /importPdfToProcess/, /importPdf/,
   // Settings (admin)
@@ -18808,7 +18808,7 @@ const _VIEWER_HIDE_PATTERNS = [
   /scanDuplicates/, /mergeAllDuplicates/,
   /scanClientesSujos/, /aplicarLimpezaClientes/,
   /limparClientesEDesligarMigracao/, /reabilitarMigracaoClientes/,
-  /wipeAllData/, /exportAllJSON/, /importAllJSON/,
+  /exportAllJSON/, /importAllJSON/,
   // Backup
   /backupNow/, /restoreFromBackup/,
   // Prompts
@@ -19003,20 +19003,6 @@ async function adminDeleteUserFlow(email, nome) {
   } catch (e) {
     toast('Falha ao excluir', e.message || String(e), 'error');
   }
-}
-
-async function wipeAllData() {
-  const c1 = await confirmDialog('Apagar TODOS os dados?', 'Isso removerá processos, eventos, prazos, notas, jurisprudência, PDFs, prompts personalizados e histórico DJEN. Faça backup antes!', true);
-  if (!c1) return;
-  const c2 = await confirmDialog('Tem certeza absoluta?', 'Última chance. Esta ação é PERMANENTE.', true);
-  if (!c2) return;
-  for (const store of ['processes', 'events', 'deadlines', 'notes', 'jurisprudence', 'pdfs', 'prompts', 'djen_publications']) {
-    if (db.objectStoreNames.contains(store)) {
-      await dbPromise(store, 'readwrite', s => s.clear());
-    }
-  }
-  toast('Dados apagados', 'Tudo limpo.', 'success');
-  navigate('dashboard');
 }
 
 // ====================================================================
@@ -20063,75 +20049,6 @@ async function djenEnrichProcessFromPublication(processId, pub) {
     proc.updatedAt = Date.now();
     await DB.saveProcess(proc);
   }
-}
-
-// Re-extrai partes/advogados de TODAS as publicações DJEN já importadas para o processo
-// Útil quando o processo foi cadastrado antes desta funcionalidade existir
-async function djenReExtractParties(processId) {
-  const proc = await DB.getProcess(processId);
-  if (!proc) return;
-
-  // Buscar todas as publicações DJEN deste processo
-  const pubs = await DB.getDjenPublicationsByProcess(processId);
-  if (!pubs || pubs.length === 0) {
-    toast('Nenhuma publicação DJEN', 'Este processo não tem publicações DJEN importadas. Importe via "Pesquisar DJ" na aba Publicações.', 'error');
-    return;
-  }
-
-  // Limpa partes/advogados anteriores para re-extrair limpo
-  proc.partes = { ativo: [], passivo: [] };
-  proc.advogados = { ativo: [], passivo: [] };
-
-  let extraidasDe = 0;
-  for (const pub of pubs) {
-    if (pub.texto) {
-      const partes = djenParsePartes(pub.texto);
-      if (partes) {
-        // Adiciona partes (sem duplicar)
-        for (const p of partes.poloAtivo) {
-          if (!proc.partes.ativo.includes(p)) proc.partes.ativo.push(p);
-        }
-        for (const p of partes.poloPassivo) {
-          if (!proc.partes.passivo.includes(p)) proc.partes.passivo.push(p);
-        }
-        const seenA = new Set(proc.advogados.ativo.map(a => a.oab));
-        for (const adv of partes.advogadosAtivo) {
-          if (!seenA.has(adv.oab)) { proc.advogados.ativo.push(adv); seenA.add(adv.oab); }
-        }
-        const seenP = new Set(proc.advogados.passivo.map(a => a.oab));
-        for (const adv of partes.advogadosPassivo) {
-          if (!seenP.has(adv.oab)) { proc.advogados.passivo.push(adv); seenP.add(adv.oab); }
-        }
-        extraidasDe++;
-      }
-    }
-  }
-
-  // Se cliente vazio e temos polo, tenta inferir
-  if (!proc.client && proc.polo) {
-    // Tolera nomenclatura nova ('Ativo'/'Passivo') e legacy ('Ataque'/'Defesa')
-    const _pn = _normalizarPolo(proc.polo);
-    const meuPolo = _pn === 'Ativo' ? proc.partes.ativo : proc.partes.passivo;
-    if (meuPolo && meuPolo.length) {
-      proc.client = meuPolo[0];
-    }
-  }
-
-  proc.updatedAt = Date.now();
-  await DB.saveProcess(proc);
-
-  const totalPartes = proc.partes.ativo.length + proc.partes.passivo.length;
-  const totalAdvs = proc.advogados.ativo.length + proc.advogados.passivo.length;
-  if (totalPartes === 0 && totalAdvs === 0) {
-    toast('Nada a extrair',
-      `Vasculhei ${pubs.length} publicação(ões) mas não encontrei "POLO ATIVO/PASSIVO" no texto delas.`,
-      'error');
-  } else {
-    toast('Partes extraídas',
-      `${totalPartes} parte(s), ${totalAdvs} advogado(s) — de ${extraidasDe} publicação(ões)`,
-      'success');
-  }
-  renderProcessDetail();
 }
 
 async function djenImportSelected(modal) {

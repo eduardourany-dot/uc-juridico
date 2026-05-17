@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.64.12 (users 'user' podem habilitar acesso de clientes ao sistema)
-const CACHE_NAME = 'uc-juridico-v6-64-12';
+// Service Worker — UC Jurídico v6.64.13 (limpeza dead code: djenReExtract, wipeAllData, actionDebugToken + textos Claude→Gemini)
+const CACHE_NAME = 'uc-juridico-v6-64-13';
 const APP_SHELL = [
   './',
   './index.html',
