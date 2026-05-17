@@ -4427,7 +4427,28 @@ function renderProcessOverview(p, events, deadlines, notes, jurisprudence) {
         ${p.comarca ? `<div style="color: var(--uc-warm-gray);">Comarca:</div><div>${escapeHtml(p.comarca)}</div>` : ''}
         ${(p.sistema || p.datajudData?.sistema) ? `<div style="color: var(--uc-warm-gray);">Sistema:</div><div>${escapeHtml(p.sistema || p.datajudData.sistema)}${p.datajudData?.formato ? ' · ' + escapeHtml(p.datajudData.formato) : ''}</div>` : ''}
         ${p.type ? `<div style="color: var(--uc-warm-gray);">Tipo:</div><div>${escapeHtml(p.type)}</div>` : ''}
-        ${p.fase ? `<div style="color: var(--uc-warm-gray);">Fase:</div><div>${escapeHtml(faseLabel(p.fase))}</div>` : ''}
+        ${(() => {
+          // Fase: prioriza p.fase (manual), fallback pra MNI sync
+          const fase = p.fase || p.mniData?.processoFase || '';
+          if (!fase) return '';
+          // faseLabel só funciona com keys conhecidos do app — se vier texto livre do MNI, mostra como veio
+          const label = (p.fase && typeof faseLabel === 'function') ? faseLabel(p.fase) : fase;
+          return `<div style="color: var(--uc-warm-gray);">Fase:</div><div>${escapeHtml(label)}</div>`;
+        })()}
+        ${(() => {
+          // Status: prioriza texto do MNI (Arquivado, Em curso, etc), fallback pra status interno do app
+          const mniStatus = p.mniData?.processoStatus || '';
+          const internoStatus = p.status || 'active';
+          const internoLabel = ({ active: 'Ativo', archived: 'Arquivado', suspended: 'Suspenso' })[internoStatus] || internoStatus;
+          const display = mniStatus || internoLabel;
+          if (!display) return '';
+          // Cor do badge: verde pra ativo, cinza pra arquivado, amber pra outros
+          const lower = display.toLowerCase();
+          const cor = (lower.includes('arquiv') || internoStatus === 'archived') ? 'gray'
+                    : (lower.includes('ativ') || lower.includes('em curso') || internoStatus === 'active') ? 'green'
+                    : 'amber';
+          return `<div style="color: var(--uc-warm-gray);">Status:</div><div><span class="badge badge-${cor}">${escapeHtml(display)}</span></div>`;
+        })()}
         ${p.polo ? `<div style="color: var(--uc-warm-gray);">Polo:</div><div>${escapeHtml(p.polo)}</div>` : ''}
         ${p.area ? `<div style="color: var(--uc-warm-gray);">Área:</div><div>${escapeHtml(p.area)}</div>` : ''}
         ${(p.dataDistribuicao || p.datajudData?.dataAjuizamento) ? `<div style="color: var(--uc-warm-gray);">Distribuição:</div><div>${formatDate(p.dataDistribuicao || p.datajudData.dataAjuizamento)}</div>` : ''}
