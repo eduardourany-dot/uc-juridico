@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.64.17 (Identificação mostra Fase e Status — dados do MNI visíveis)
-const CACHE_NAME = 'uc-juridico-v6-64-17';
+// Service Worker — UC Jurídico v6.64.18 (badge Status arquivado: cinza → vermelho)
+const CACHE_NAME = 'uc-juridico-v6-64-18';
 const APP_SHELL = [
   './',
   './index.html',
