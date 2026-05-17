@@ -414,10 +414,68 @@ function blobToBase64(blob) {
   });
 }
 
+/**
+ * Normaliza p.partes e p.advogados pra formato objeto consistente.
+ *
+ * Contexto: o app tem 2 formatos historicamente em uso:
+ *   - ARRAY (legacy / importação Astrea): [{polo:'AT', nome, advogados:[]}, ...]
+ *   - OBJETO (MNI / UI nova):              {ativo:[{nome}], passivo:[{nome}]}
+ *
+ * O card detalhado de processo, render de polo ativo/passivo e várias
+ * funções esperam formato OBJETO. Esta normalização garante consistência
+ * na leitura — toda função de getProcess/getAllProcesses passa por aqui.
+ *
+ * Idempotente: se já estiver em formato objeto, retorna sem alterar.
+ */
+function _normalizarProcesso(p) {
+  if (!p || typeof p !== 'object') return p;
+  // partes array → objeto + extrai advogados aninhados pra p.advogados
+  if (Array.isArray(p.partes) && p.partes.length > 0) {
+    const ativo = [];
+    const passivo = [];
+    const advAtivo = [];
+    const advPassivo = [];
+    for (const item of p.partes) {
+      if (!item || typeof item !== 'object') continue;
+      const isAtivo = item.polo === 'AT';
+      // Clona a parte sem o polo nem advogados aninhados
+      const { polo: _polo, advogados: aninhados, ...resto } = item;
+      (isAtivo ? ativo : passivo).push(resto);
+      // Promove advogados aninhados pra estrutura paralela
+      if (Array.isArray(aninhados)) {
+        const target = isAtivo ? advAtivo : advPassivo;
+        for (const adv of aninhados) target.push(adv);
+      }
+    }
+    p.partes = { ativo, passivo };
+    // Se p.advogados não existe ou também é array, usa os promovidos
+    if (!p.advogados || Array.isArray(p.advogados)) {
+      p.advogados = { ativo: advAtivo, passivo: advPassivo };
+    }
+  }
+  // advogados array isolado (sem partes em array) → objeto (caso edge)
+  if (Array.isArray(p.advogados)) {
+    const ativo = [];
+    const passivo = [];
+    for (const adv of p.advogados) {
+      if (!adv) continue;
+      (adv.polo === 'AT' ? ativo : passivo).push(adv);
+    }
+    p.advogados = { ativo, passivo };
+  }
+  return p;
+}
+
 const RemoteDB = {
   // Processos
-  async getAllProcesses()    { return await getAll_('processos'); },
-  async getProcess(id)       { return await getById_('processos', id); },
+  async getAllProcesses()    {
+    const list = await getAll_('processos');
+    return list.map(_normalizarProcesso);
+  },
+  async getProcess(id)       {
+    const p = await getById_('processos', id);
+    return p ? _normalizarProcesso(p) : null;
+  },
   async saveProcess(p)       { return await upsert_('processos', p); },
   async deleteProcess(id) {
     await softDelete_('processos', id);
@@ -439,7 +497,7 @@ const RemoteDB = {
     const map = new Map();
     s1.forEach(d => { const p = d.data(); if (!p.deletedAt) map.set(p.id, p); });
     s2.forEach(d => { const p = d.data(); if (!p.deletedAt) map.set(p.id, p); });
-    return Array.from(map.values());
+    return Array.from(map.values()).map(_normalizarProcesso);
   },
   // Compromissos filtrados por clienteId (rule permite cliente ler só os dele)
   async getCompromissosByClienteIdRemote(clienteId) {
