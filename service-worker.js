@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.64.3 (toast de erro IA mostra mensagem detalhada do Gemini/Claude)
-const CACHE_NAME = 'uc-juridico-v6-64-3';
+// Service Worker — UC Jurídico v6.64.4 (fix p.partes objeto/array no Relatório Auditoria + textos Gemini)
+const CACHE_NAME = 'uc-juridico-v6-64-4';
 const APP_SHELL = [
   './',
   './index.html',
