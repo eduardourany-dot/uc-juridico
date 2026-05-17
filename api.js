@@ -376,6 +376,9 @@ async function ensureGoogleIdToken() {
 }
 
 async function callAppsScript(action, params, body) {
+  if (!cfg.WEB_APP_URL) {
+    throw new Error('Apps Script não configurado neste ambiente (WEB_APP_URL vazia em config.js).');
+  }
   const token = await ensureGoogleIdToken();
   const url = new URL(cfg.WEB_APP_URL);
   url.searchParams.set('action', action);

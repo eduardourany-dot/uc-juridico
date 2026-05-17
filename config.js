@@ -22,10 +22,14 @@
     || new URLSearchParams(location.search).has('staging');
 
   // ============ STAGING — projeto Firebase isolado pra testes ============
-  // Apps Script (PDFs, cron lembretes, cron backup, Claude API) NÃO está
-  // configurado — funcionalidades dependentes ficam desabilitadas em
-  // staging. Foco do staging: testar fluxo de cadastro / UI sem afetar
-  // dados reais do escritório.
+  // Firebase é isolado (uc-juridico-staging) mas o Apps Script aponta pro
+  // MESMO deploy de produção — porque Apps Script só chama APIs externas
+  // (Gemini/Claude) e o Drive de prod via OAuth do usuário. Pra testar
+  // gerarPeticaoIA o staging precisa do mesmo Web App URL.
+  //
+  // CUIDADO: actions que escrevem em Drive/Sheets (uploadPdf, cron) vão
+  // mexer nos dados reais do escritório. Se for testar geração de PDF,
+  // cria um deploy separado pra staging.
   const STAGING = {
     firebaseConfig: {
       apiKey: 'AIzaSyBXt1rV9aLX_vWdQPIPBrqUscWhysFUK-M',
@@ -35,10 +39,10 @@
       messagingSenderId: '228970789029',
       appId: '1:228970789029:web:37122d09a35d67df25354c'
     },
-    // Apps Script Web App — não configurado pra staging. PDFs ficam desabilitados.
-    WEB_APP_URL: '',
-    OAUTH_CLIENT_ID: '',
-    DRIVE_FOLDER_ID: '',
+    // Apps Script Web App — aponta pro mesmo deploy de prod (compartilhado).
+    WEB_APP_URL: 'https://script.google.com/macros/s/AKfycby1TCUDv9yb070adZdpYQAFDxz0K--tjJ-NrvlOE4g6qVXRdhpz17ceFcE0NG5-cqBd/exec',
+    OAUTH_CLIENT_ID: '353399924339-m68p647osnb47mhurqc3ctpfkde2ig9h.apps.googleusercontent.com',
+    DRIVE_FOLDER_ID: '1tAOYow447n9Ayw67SGqMOhhrvyGgWmf_',
     // Push notifications — staging não usa FCM.
     FCM_VAPID_PUBLIC_KEY: '',
     SPREADSHEET_ID: ''

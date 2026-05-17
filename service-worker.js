@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.64.0 (IA: Claude → Gemini 2.5 Pro + prompt de revisão pra Claude Chat)
-const CACHE_NAME = 'uc-juridico-v6-64-0';
+// Service Worker — UC Jurídico v6.64.1 (staging usa WEB_APP_URL de prod pra testar Gemini)
+const CACHE_NAME = 'uc-juridico-v6-64-1';
 const APP_SHELL = [
   './',
   './index.html',
