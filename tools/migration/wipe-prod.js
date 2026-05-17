@@ -28,7 +28,7 @@ const PROJECTS = {
 
 // Coleções a PRESERVAR — não deletar essas
 const PRESERVE = new Set([
-  'usuarios',   // allowlist de auth (sem isso ninguém loga)
+  'users',      // allowlist de auth (sem isso ninguém loga) — nome em inglês no Firestore
   'settings'    // configurações globais
 ]);
 
