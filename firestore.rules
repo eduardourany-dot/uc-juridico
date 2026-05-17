@@ -1,12 +1,40 @@
 rules_version = '2';
 
-// UC Jurídico — Security Rules do Firestore.
-// Modelo: collection `users` é a allowlist; doc id = email do usuário (lowercase).
-// Quem está em users/{email} com ativo=true pode ler/escrever todas as outras
-// collections. Apenas admins editam users.
+// =====================================================================
+// UC Jurídico — Firestore Security Rules
+// =====================================================================
+//
+// Modelo: collection `users` é a allowlist; doc id = email (lowercase).
+// Quem está em users/{email} com ativo=true pode ler o próprio doc
+// mais collections de domínio CONFORME O role:
+//
+//   admin   → tudo (gerencia users também)
+//   user    → tudo de domínio (não mexe em users nem audit)
+//   viewer  → read-only em tudo de domínio
+//   cliente → SÓ seus dados:
+//             - users/{próprio email}
+//             - processos onde clienteId/clienteIds bate
+//             - clientes/{próprio clienteId}
+//             - compromissos próprios (clienteId match)
+//             - honorarios próprios (clienteId match)
+//             Bloqueado em: prazos, eventos, notas, jurisprudência,
+//             djen, comunicações, petições, financeiro interno,
+//             settings, audit
+//
+// Cloud Functions (Admin SDK) bypassa rules — cron DJEN continua escrevendo.
+//
+// Pra mudar a rule e deployar:
+//   firebase deploy --only firestore:rules                  (prod)
+//   firebase deploy --only firestore:rules --project staging (staging)
+//
+// Documentação Firebase: https://firebase.google.com/docs/firestore/security/rules-structure
 
 service cloud.firestore {
   match /databases/{database}/documents {
+
+    // ============================================================
+    // HELPERS
+    // ============================================================
 
     function isSignedIn() {
       return request.auth != null
@@ -28,18 +56,61 @@ service cloud.firestore {
         && userDoc().ativo == true;
     }
 
-    function isAdmin() {
-      return isAllowed() && userDoc().role == 'admin';
+    function role() {
+      return userDoc().role;
     }
 
-    // ====== Allowlist ======
-    // Qualquer usuário autenticado pode ler (precisa para checar próprio acesso/role).
-    // Só admin escreve, com uma exceção: o BOOTSTRAP_ADMIN se autocria no primeiro
-    // login se ainda não existir nenhum doc com seu email.
+    function isAdmin()   { return isAllowed() && role() == 'admin'; }
+    function isCliente() { return isAllowed() && role() == 'cliente'; }
+
+    // Pode escrever em collections de domínio (admin + user)
+    function canWrite() {
+      return isAllowed() && (role() == 'admin' || role() == 'user');
+    }
+
+    // Pode ler dados internos do escritório (admin + user + viewer)
+    function isInternal() {
+      return isAllowed() && (role() == 'admin' || role() == 'user' || role() == 'viewer');
+    }
+
+    // clienteId do user atual (null se não vinculado)
+    function meuClienteId() {
+      return userDoc().get('clienteId', '');
+    }
+
+    // Cliente está vinculado a este processo?
+    // Cobre tanto clienteId (1:1 legado) quanto clienteIds[] (multi-cliente novo).
+    function isProcDoCliente(p) {
+      return isCliente()
+        && meuClienteId() != ''
+        && (p.get('clienteId', '') == meuClienteId()
+            || meuClienteId() in p.get('clienteIds', []));
+    }
+
+    // Cliente está vinculado ao processo de ID `pid`? Faz lookup.
+    // Custo: 1 read em /processos/{pid} por avaliação. Firestore faz cache
+    // por path dentro de 1 request — se app fizer query
+    // `where('processId', '==', X)` retornando N docs filhos, só 1 lookup
+    // é cobrado (cache hit). Por isso o app DEVE filtrar por processId
+    // quando role=cliente — sem filtro, Firestore tenta N lookups diferentes
+    // e bate o limite de 10 reads em rules por query.
+    function processoIdDoCliente(pid) {
+      return isCliente()
+        && meuClienteId() != ''
+        && pid != null
+        && pid != ''
+        && exists(/databases/$(database)/documents/processos/$(pid))
+        && isProcDoCliente(get(/databases/$(database)/documents/processos/$(pid)).data);
+    }
+
+    // ============================================================
+    // users (allowlist)
+    // ============================================================
+    // Read aberto pra signedIn — precisa pra checar o próprio role.
+    // Write só admin, exceto bootstrap inicial do dono do escritório.
     match /users/{email} {
       allow read: if isSignedIn();
       allow create: if isAdmin() || (
-        // Bootstrap clause — só pega no primeiríssimo login do admin do escritório.
         isSignedIn()
         && email == userEmail()
         && userEmail() == 'eduardourany@uranydecastro.com.br'
@@ -50,8 +121,11 @@ service cloud.firestore {
       allow update, delete: if isAdmin();
     }
 
-    // ====== Audit log ======
-    // Qualquer usuário autorizado escreve (immutable). Só admin lê histórico.
+    // ============================================================
+    // audit (log de ações)
+    // ============================================================
+    // Qualquer user autorizado (inclusive cliente) cria log próprio.
+    // Só admin lê. Imutável.
     match /audit/{auditId} {
       allow create: if isAllowed()
         && request.resource.data.userEmail == userEmail();
@@ -59,69 +133,100 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
-    // ====== Coleções de domínio ======
-    match /clientes/{id} {
-      allow read, create, update, delete: if isAllowed();
-    }
+    // ============================================================
+    // PROCESSOS
+    // ============================================================
+    // Cliente vê só processos vinculados via clienteId / clienteIds.
     match /processos/{id} {
-      allow read, create, update, delete: if isAllowed();
+      allow read: if isInternal() || isProcDoCliente(resource.data);
+      allow create, update, delete: if canWrite();
+    }
+
+    // ============================================================
+    // CLIENTES (cadastros)
+    // ============================================================
+    // Cliente vê só o próprio cadastro.
+    match /clientes/{id} {
+      allow read: if isInternal() || (isCliente() && id == meuClienteId());
+      allow create, update, delete: if canWrite();
+    }
+
+    // ============================================================
+    // COMPROMISSOS (agenda)
+    // ============================================================
+    // Cliente vê só os próprios.
+    match /compromissos/{id} {
+      allow read: if isInternal()
+                  || (isCliente() && resource.data.get('clienteId', '') == meuClienteId());
+      allow create, update, delete: if canWrite();
+    }
+
+    // ============================================================
+    // HONORÁRIOS
+    // ============================================================
+    // Cliente vê só os próprios.
+    match /honorarios/{id} {
+      allow read: if isInternal()
+                  || (isCliente() && resource.data.get('clienteId', '') == meuClienteId());
+      allow create, update, delete: if canWrite();
+    }
+
+    // ============================================================
+    // COLEÇÕES DE HISTÓRICO DO PROCESSO
+    // ============================================================
+    // Eventos (movimentos), prazos (publicações com data fatal) e djen
+    // (publicações cruas) são informações do processo que cliente vê
+    // legitimamente — não são interno-escritório. Rule libera SE o
+    // processId está vinculado ao cliente (via lookup).
+
+    match /eventos/{id} {
+      allow read: if isInternal() || processoIdDoCliente(resource.data.processId);
+      allow create, update, delete: if canWrite();
     }
     match /prazos/{id} {
-      allow read, create, update, delete: if isAllowed();
-    }
-    match /eventos/{id} {
-      allow read, create, update, delete: if isAllowed();
-    }
-    match /notas/{id} {
-      allow read, create, update, delete: if isAllowed();
-    }
-    match /jurisprudencia/{id} {
-      allow read, create, update, delete: if isAllowed();
+      allow read: if isInternal() || processoIdDoCliente(resource.data.processId);
+      allow create, update, delete: if canWrite();
     }
     match /djen/{hash} {
-      allow read, create, update, delete: if isAllowed();
+      allow read: if isInternal() || processoIdDoCliente(resource.data.get('processId', ''));
+      allow create, update, delete: if canWrite();
     }
+
+    // ============================================================
+    // COLEÇÕES INTERNAS (cliente bloqueado)
+    // ============================================================
+    // Notas, jurisprudência, comunicações, petições — escritório.
+
+    match /notas/{id}               { allow read: if isInternal(); allow create, update, delete: if canWrite(); }
+    match /jurisprudencia/{id}      { allow read: if isInternal(); allow create, update, delete: if canWrite(); }
+    match /comunicacoes/{id}        { allow read: if isInternal(); allow create, update, delete: if canWrite(); }
+    match /peticao_modelos/{id}     { allow read: if isInternal(); allow create, update, delete: if canWrite(); }
+    match /peticoes/{id}            { allow read: if isInternal(); allow create, update, delete: if canWrite(); }
+    match /calculos/{id}            { allow read: if isInternal(); allow create, update, delete: if canWrite(); }
+
+    // ============================================================
+    // MÓDULO FINANCEIRO (cliente bloqueado)
+    // ============================================================
+
+    match /bancos/{id}          { allow read: if isInternal(); allow create, update, delete: if canWrite(); }
+    match /cartoes/{id}         { allow read: if isInternal(); allow create, update, delete: if canWrite(); }
+    match /categorias_fin/{id}  { allow read: if isInternal(); allow create, update, delete: if canWrite(); }
+    match /transacoes/{id}      { allow read: if isInternal(); allow create, update, delete: if canWrite(); }
+    match /recorrencias/{id}    { allow read: if isInternal(); allow create, update, delete: if canWrite(); }
+
+    // ============================================================
+    // SETTINGS
+    // ============================================================
+    // ATENÇÃO: settings/fcmTokens contém tokens de TODOS os users —
+    // cliente NÃO pode ler isso. Bloqueio total pra cliente.
     match /settings/{chave} {
-      allow read, create, update, delete: if isAllowed();
+      allow read: if isInternal();
+      allow create, update, delete: if canWrite();
     }
 
-    // ====== Módulo Financeiro (v6.16+) ======
-    match /bancos/{id} {
-      allow read, create, update, delete: if isAllowed();
-    }
-    match /cartoes/{id} {
-      allow read, create, update, delete: if isAllowed();
-    }
-    match /categorias_fin/{id} {
-      allow read, create, update, delete: if isAllowed();
-    }
-    match /transacoes/{id} {
-      allow read, create, update, delete: if isAllowed();
-    }
-    match /recorrencias/{id} {
-      allow read, create, update, delete: if isAllowed();
-    }
-    match /honorarios/{id} {
-      allow read, create, update, delete: if isAllowed();
-    }
-    match /comunicacoes/{id} {
-      allow read, create, update, delete: if isAllowed();
-    }
-    match /compromissos/{id} {
-      allow read, create, update, delete: if isAllowed();
-    }
-
-    // ====== Módulo Petições — Modelos (v6.27+) ======
-    match /peticao_modelos/{id} {
-      allow read, create, update, delete: if isAllowed();
-    }
-
-    // ====== Módulo Petições — Versões (v6.31+, Sprint Pet.1) ======
-    match /peticoes/{id} {
-      allow read, create, update, delete: if isAllowed();
-    }
-
-    // Negar tudo o que não estiver explicitamente acima.
+    // ============================================================
+    // DEFAULT DENY
+    // ============================================================
     match /{document=**} {
       allow read, write: if false;
     }

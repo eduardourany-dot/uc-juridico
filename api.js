@@ -12,7 +12,7 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
 import {
   getFirestore, collection, doc,
-  getDoc, getDocs, setDoc, updateDoc,
+  getDoc, getDocs, setDoc, updateDoc, deleteDoc,
   query, where, writeBatch, addDoc, Timestamp
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
 
@@ -376,6 +376,9 @@ async function ensureGoogleIdToken() {
 }
 
 async function callAppsScript(action, params, body) {
+  if (!cfg.WEB_APP_URL) {
+    throw new Error('Apps Script não configurado neste ambiente (WEB_APP_URL vazia em config.js).');
+  }
   const token = await ensureGoogleIdToken();
   const url = new URL(cfg.WEB_APP_URL);
   url.searchParams.set('action', action);
@@ -389,7 +392,12 @@ async function callAppsScript(action, params, body) {
   const resp = await fetch(url.toString(), opts);
   if (!resp.ok) throw new Error('http_' + resp.status);
   const data = await resp.json();
-  if (data.error) throw new Error(data.error);
+  if (data.error) {
+    // Propaga mensagem detalhada (ex: erro da API Gemini/Claude com 429, 500, etc)
+    // mantendo o código de erro como prefixo pra debug.
+    const detail = data.message ? ': ' + data.message.slice(0, 300) : '';
+    throw new Error(data.error + detail);
+  }
   return data;
 }
 
@@ -417,6 +425,53 @@ const RemoteDB = {
       await cascadeSoftDelete_(col, 'processId', id);
     }
   },
+  // Query restrita por clienteId — usada pelo bootApp do cliente.
+  // Firestore não aceita OR — fazemos 2 queries (campo legado `clienteId`
+  // e campo novo `clienteIds[]`) e mergemos por id. Security Rules
+  // permitem cliente ler apenas docs onde o campo bate.
+  async getProcessosByClienteId(clienteId) {
+    if (!clienteId) return [];
+    const cid = String(clienteId);
+    const [s1, s2] = await Promise.all([
+      getDocs(query(collection(db, 'processos'), where('clienteId', '==', cid))),
+      getDocs(query(collection(db, 'processos'), where('clienteIds', 'array-contains', cid)))
+    ]);
+    const map = new Map();
+    s1.forEach(d => { const p = d.data(); if (!p.deletedAt) map.set(p.id, p); });
+    s2.forEach(d => { const p = d.data(); if (!p.deletedAt) map.set(p.id, p); });
+    return Array.from(map.values());
+  },
+  // Compromissos filtrados por clienteId (rule permite cliente ler só os dele)
+  async getCompromissosByClienteIdRemote(clienteId) {
+    if (!clienteId) return [];
+    const snap = await getDocs(query(collection(db, 'compromissos'),
+      where('clienteId', '==', String(clienteId))));
+    const out = [];
+    snap.forEach(d => { const v = d.data(); if (!v.deletedAt) out.push(v); });
+    return out;
+  },
+  // Lista docs filtrados por processId — usado por cliente com Security
+  // Rules estritas (rule só libera doc se processoIdDoCliente bate).
+  // Como TODOS os docs retornados têm o mesmo processId, o lookup
+  // `get(/processos/X)` em rules é cached (1 read total, não N).
+  async getByProcessIdRemote(collectionName, processId, field) {
+    if (!processId) return [];
+    const f = field || 'processId';
+    const snap = await getDocs(query(collection(db, collectionName),
+      where(f, '==', String(processId))));
+    const out = [];
+    snap.forEach(d => { const v = d.data(); if (!v.deletedAt) out.push(v); });
+    return out;
+  },
+  // Honorários filtrados por clienteId (rule permite cliente ler só os dele)
+  async getHonorariosByClienteIdRemote(clienteId) {
+    if (!clienteId) return [];
+    const snap = await getDocs(query(collection(db, 'honorarios'),
+      where('clienteId', '==', String(clienteId))));
+    const out = [];
+    snap.forEach(d => { const v = d.data(); if (!v.deletedAt) out.push(v); });
+    return out;
+  },
 
   // Eventos
   async getEventsByProcess(pid) {
@@ -442,7 +497,20 @@ const RemoteDB = {
 
   // ====== Clientes (v6.19+) ======
   async getAllClientes() { return await getAll_('clientes'); },
+  async getCliente(id) { return await getById_('clientes', id); },
   async saveCliente(c) { return await upsert_('clientes', c); },
+
+  // Cálculos monetários (atualização monetária, juros, multa, honorários)
+  async getAllCalculos() { return await getAll_('calculos'); },
+  async getCalculo(id) { return await getById_('calculos', id); },
+  async getCalculosByProcess(pid) {
+    return (await getAll_('calculos')).filter(c => c.processoId === pid);
+  },
+  async getCalculosByCliente(cid) {
+    return (await getAll_('calculos')).filter(c => c.clienteId === cid);
+  },
+  async saveCalculo(c) { return await upsert_('calculos', c); },
+  async deleteCalculo(id) { return await softDelete_('calculos', id); },
   async deleteCliente(id) { return await softDelete_('clientes', id); },
 
   // ====== Comunicações (v6.23 — Cli.4) ======
@@ -477,7 +545,12 @@ const RemoteDB = {
   async savePeticao(p) { return await upsert_('peticoes', p); },
   async deletePeticao(id) { return await softDelete_('peticoes', id); },
 
-  // ====== Petições — Geração via Claude API (v6.35, Sprint Pet.3) ======
+  // ====== Geração IA (peças + relatórios) ======
+  // Default: gemini-2.5-flash (free tier do Google AI Studio, ~1500 reqs/dia).
+  // Pra usar gemini-2.5-pro (qualidade superior, ~$0.05-0.10/peça), é preciso
+  // ativar billing no projeto Google Cloud (https://console.cloud.google.com/billing).
+  // Quando billing estiver ativo, mudar 'gemini-2.5-flash' → 'gemini-2.5-pro' aqui.
+  //
   // briefing: string (requerimento do advogado)
   // contextoSnapshot: { processo, cliente, eventos[], prazos[], jurisprudencia[] }
   // opts: { modeloPromptSistema?, tipo?, modeloApi? }
@@ -487,7 +560,7 @@ const RemoteDB = {
       contextoSnapshot,
       modeloPromptSistema: opts.modeloPromptSistema || '',
       tipo: opts.tipo || 'outro',
-      modeloApi: opts.modeloApi || 'claude-opus-4-7'
+      modeloApi: opts.modeloApi || 'gemini-2.5-flash'
     });
   },
 
@@ -628,18 +701,29 @@ function requireAdmin_() {
 }
 
 window.UC_admin = {
-  async addUser(email, nome, role = 'user') {
+  async addUser(email, nome, role = 'user', clienteId = null) {
     requireAdmin_();
     const e = String(email || '').toLowerCase().trim();
     if (!e) throw new Error('email_required');
-    await setDoc(doc(db, 'users', e), {
+    const payload = {
       email: e,
       nome: nome || '',
       role,
       ativo: true,
       escritorioId: (currentUserDoc && currentUserDoc.escritorioId) || 'UC',
       criadoEm: Date.now()
-    }, { merge: true });
+    };
+    // Pra role 'cliente': linkar ao doc da coleção clientes via clienteId.
+    // O filtro de processos em bootApp do app usa esse campo pra mostrar
+    // só os processos que tem clienteIds incluindo esse clienteId.
+    if (clienteId) payload.clienteId = String(clienteId);
+    await setDoc(doc(db, 'users', e), payload, { merge: true });
+    return e;
+  },
+  async setClienteId(email, clienteId) {
+    requireAdmin_();
+    const e = String(email || '').toLowerCase().trim();
+    await updateDoc(doc(db, 'users', e), { clienteId: clienteId ? String(clienteId) : null });
     return e;
   },
   async backfillEscritorioId(escritorioId = 'UC') {
@@ -684,6 +768,21 @@ window.UC_admin = {
     requireAdmin_();
     const e = String(email || '').toLowerCase().trim();
     await updateDoc(doc(db, 'users', e), { role: String(role) });
+    return e;
+  },
+  // Exclusão definitiva — apaga o doc da coleção users. Diferente de setActive(false),
+  // que só desativa. Use com cuidado: se o user logar de novo e o allowlist não tiver
+  // o doc, ele é rejeitado pelo guard de auth (mesmo efeito de bloqueado), mas o
+  // histórico (escritorioId, clienteId, etc.) é perdido.
+  async deleteUser(email) {
+    requireAdmin_();
+    const e = String(email || '').toLowerCase().trim();
+    if (!e) throw new Error('email_required');
+    // Guard: não permite admin excluir a si mesmo (evita lockout do escritório).
+    if (currentUserDoc && (currentUserDoc.email || '').toLowerCase() === e) {
+      throw new Error('cannot_delete_self: você não pode excluir o próprio user');
+    }
+    await deleteDoc(doc(db, 'users', e));
     return e;
   }
 };

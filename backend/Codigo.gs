@@ -113,8 +113,16 @@ function validateToken_(idToken) {
   if (resp.getResponseCode() !== 200) return null;
   const info = JSON.parse(resp.getContentText());
 
-  const expectedAud = PropertiesService.getScriptProperties().getProperty('OAUTH_CLIENT_ID');
-  if (expectedAud && info.aud !== expectedAud) return null;
+  // Aceita Client ID único (OAUTH_CLIENT_ID) ou lista separada por vírgula
+  // (OAUTH_CLIENT_IDS, plural) — necessário pra suportar prod + staging no
+  // mesmo Apps Script, já que cada projeto Firebase emite tokens com aud
+  // diferente.
+  const props = PropertiesService.getScriptProperties();
+  const expectedAud = props.getProperty('OAUTH_CLIENT_ID');
+  const expectedAuds = (props.getProperty('OAUTH_CLIENT_IDS') || '')
+    .split(',').map(s => s.trim()).filter(Boolean);
+  const allowed = expectedAuds.length > 0 ? expectedAuds : (expectedAud ? [expectedAud] : []);
+  if (allowed.length > 0 && allowed.indexOf(info.aud) < 0) return null;
   if (info.email_verified !== 'true' && info.email_verified !== true) return null;
   if (Number(info.exp) * 1000 < Date.now()) return null;
 

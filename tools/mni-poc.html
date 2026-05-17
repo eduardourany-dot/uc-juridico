@@ -1,0 +1,472 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>UC Jurídico — MNI POC (multi-tribunal)</title>
+<style>
+:root{
+  --paper:#fafaf7; --line:#d4cfc0; --cream:#f4f1e8; --gold:#8a6f3d;
+  --black:#0a0a0a; --graphite:#1f1f1f; --warm:#6b6b68;
+  --green:#4a7c4a; --red:#a8472d; --amber:#b87f1c;
+}
+*{box-sizing:border-box}
+body{margin:0;font:14px/1.5 -apple-system,BlinkMacSystemFont,'Segoe UI',Inter,sans-serif;background:var(--paper);color:var(--graphite)}
+.container{max-width:960px;margin:0 auto;padding:24px 20px 80px}
+h1{font-family:'EB Garamond',Georgia,serif;font-size:28px;color:var(--black);margin:0 0 4px;letter-spacing:0.04em}
+.subtitle{font-style:italic;color:var(--warm);margin:0 0 24px}
+.card{background:#fff;border:1px solid var(--line);border-radius:8px;padding:20px;margin-bottom:16px}
+.card h2{margin:0 0 12px;font-size:15px;color:var(--black);font-weight:600;text-transform:uppercase;letter-spacing:0.08em}
+label{display:block;font-size:12px;font-weight:600;color:var(--black);margin-bottom:4px;text-transform:uppercase;letter-spacing:0.04em}
+.help{font-size:12px;color:var(--warm);margin:4px 0 8px}
+input,select{width:100%;padding:9px 11px;border:1px solid var(--line);border-radius:5px;background:#fff;font-size:14px;font-family:inherit;color:var(--graphite)}
+input:focus,select:focus{outline:none;border-color:var(--gold);box-shadow:0 0 0 3px #f0e9d6}
+.row{display:grid;gap:12px;grid-template-columns:1fr 1fr}
+@media(max-width:640px){.row{grid-template-columns:1fr}}
+.field{margin-bottom:12px}
+button{padding:10px 22px;border-radius:6px;background:var(--black);color:#fff;border:0;cursor:pointer;font-size:14px;font-weight:500;font-variant:small-caps;letter-spacing:0.06em}
+button:hover{background:var(--graphite)}
+button:disabled{opacity:0.5;cursor:not-allowed}
+.btn-secondary{background:transparent;color:var(--graphite);border:1px solid var(--line)}
+.btn-secondary:hover{border-color:var(--gold);color:var(--black);background:transparent}
+.status{padding:10px 12px;border-radius:6px;margin-bottom:12px;font-size:13px}
+.status.ok{background:#d4e8d4;color:#2a5a2a;border-left:3px solid var(--green)}
+.status.err{background:#f3d8cf;color:#7a2a18;border-left:3px solid var(--red)}
+.status.info{background:#f4f1e8;color:var(--graphite);border-left:3px solid var(--gold)}
+.status.warn{background:#f5e3c4;color:#5a4118;border-left:3px solid var(--amber)}
+pre{background:#f4f1e8;border:1px solid var(--line);border-radius:5px;padding:12px;overflow-x:auto;font-size:11px;line-height:1.4;max-height:500px;font-family:ui-monospace,Menlo,Consolas,monospace}
+table{width:100%;border-collapse:collapse;font-size:13px;margin:8px 0}
+th{text-align:left;padding:6px 8px;color:var(--warm);font-weight:500;font-size:11px;text-transform:uppercase;letter-spacing:0.06em;border-bottom:1px solid var(--line)}
+td{padding:7px 8px;border-bottom:1px solid var(--cream);vertical-align:top}
+.tag{display:inline-block;font-size:10px;padding:2px 7px;border-radius:10px;background:#f0e9d6;color:var(--gold);font-weight:600;letter-spacing:0.04em}
+.tag.green{background:#d4e8d4;color:#2a5a2a}
+.tag.red{background:#f3d8cf;color:#7a2a18}
+.tag.amber{background:#f5e3c4;color:#5a4118}
+small.warn{display:block;background:#f5e3c4;color:#5a4118;padding:8px 12px;border-radius:5px;border-left:3px solid var(--amber);margin-bottom:16px;font-size:12px;line-height:1.5}
+.smallcaps{text-transform:uppercase;letter-spacing:0.06em;font-size:11px}
+.spinner{display:inline-block;border:2px solid #d4cfc0;border-top-color:var(--gold);border-radius:50%;width:14px;height:14px;animation:spin 0.8s linear infinite;vertical-align:-2px;margin-right:6px}
+@keyframes spin{to{transform:rotate(360deg)}}
+.tribunal-meta{font-size:11px;color:var(--warm);margin-top:6px;line-height:1.5}
+.tribunal-meta code{background:#f4f1e8;padding:1px 5px;border-radius:3px;font-size:10px}
+</style>
+</head>
+<body>
+<div class="container">
+
+<h1>MNI POC — multi-tribunal</h1>
+<p class="subtitle">Prova de conceito · MNI 2.2.2 via Cloudflare Worker · sprint MNI.1</p>
+
+<small class="warn">
+  ⚠ <strong>Página standalone de teste.</strong> Sua senha PJe/Projudi é transmitida ao Cloudflare Worker
+  e dele ao tribunal. Use apenas em <code>localhost</code> ou após validar a Worker. Nada é persistido.
+  Senha trafega via HTTPS mas <strong>não</strong> é cifrada além disso (responsabilidade do TLS).
+</small>
+
+<div class="card">
+  <h2>1 · Configuração da Worker</h2>
+  <div class="field">
+    <label>URL da Worker Cloudflare</label>
+    <p class="help">Após deployar <code>workers/mni-worker.js</code>, cole a URL gerada (ex.: <code>https://uc-mni.SEU-USER.workers.dev</code>). Fica salva localmente.</p>
+    <input id="workerUrl" type="url" placeholder="https://uc-mni.SEU-USER.workers.dev">
+  </div>
+  <div class="field">
+    <button id="btnCarregarTribunais" class="btn-secondary">↻ Carregar lista de tribunais</button>
+    <span id="loadTribunaisStatus" style="margin-left:10px;font-size:12px;color:var(--warm);"></span>
+  </div>
+</div>
+
+<div class="card">
+  <h2>2 · Tribunal</h2>
+  <div class="field">
+    <label>Tribunal a consultar</label>
+    <p class="help">A lista é carregada do Worker (ou usa fallback embarcado se ainda não carregou).</p>
+    <select id="tribunalSelect"></select>
+    <div class="tribunal-meta" id="tribunalMeta"></div>
+  </div>
+  <div class="field">
+    <button id="btnHealth" class="btn-secondary">🩺 Health check (sem credenciais)</button>
+    <span id="healthStatus" style="margin-left:10px;font-size:12px;color:var(--warm);"></span>
+  </div>
+</div>
+
+<div class="card">
+  <h2>3 · Credenciais</h2>
+  <p class="help">CPF e senha do advogado cadastrado no tribunal selecionado.</p>
+  <div class="row">
+    <div class="field">
+      <label>CPF do advogado</label>
+      <input id="cpf" type="text" placeholder="000.000.000-00" autocomplete="off">
+    </div>
+    <div class="field">
+      <label>Senha</label>
+      <input id="senha" type="password" autocomplete="off">
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <h2>4 · Processo a consultar</h2>
+  <div class="field">
+    <label>Número CNJ</label>
+    <p class="help">Cole no formato <code>0000000-00.0000.0.00.0000</code> ou só dígitos.</p>
+    <input id="cnj" type="text" placeholder="0000000-00.0000.0.00.0000">
+  </div>
+  <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;margin:8px 0 12px;">
+    <input type="checkbox" id="debugMode" style="width:auto;cursor:pointer;">
+    🐞 Modo debug · retorna o XML cru completo (pra eu refinar o parser)
+  </label>
+  <button id="btnConsultar">▶ Consultar processo</button>
+  <button id="btnLimpar" class="btn-secondary" style="margin-left:8px;">Limpar resultado</button>
+</div>
+
+<div id="resultBox" style="display:none;">
+  <div class="card">
+    <h2>5 · Resultado</h2>
+    <div id="status"></div>
+    <div id="summary"></div>
+  </div>
+
+  <div class="card">
+    <h2>6 · JSON cru (response do Worker)</h2>
+    <pre id="rawJson"></pre>
+  </div>
+</div>
+
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+
+// ============================================================
+// Registry fallback embarcado — usado se a worker estiver offline.
+// Manter em sync com workers/mni-tribunais.json (essa cópia é só
+// pra UI mostrar o dropdown antes de o Worker responder).
+// ============================================================
+// Fallback compacto — pra dropdown funcionar antes do listarTribunais. 63
+// tribunais (cobertura completa Brasil: superiores + TRFs + TJs + TRTs 1-24).
+const FALLBACK_TRIBUNAIS = {
+  "STF": {"nome":"Supremo Tribunal Federal","sistema":"eSTF","validado":false},
+  "STJ": {"nome":"Superior Tribunal de Justiça","sistema":"eSTJ","validado":false},
+  "TST": {"nome":"Tribunal Superior do Trabalho","sistema":"pje","validado":false},
+  "TRF1": {"nome":"Tribunal Regional Federal da 1ª Região","sistema":"pje","validado":true,"validadoEm":"2026-05-11"},
+  "TRF1_eProc": {"nome":"TRF1 — eProc (sistema paralelo)","sistema":"eproc","validado":false,"naoSuportado":true,"motivo":"Health check confirmou: hostname eproc1g.trf1.jus.br não existe. eProc no TRF1 fica nas seções judiciárias (jfgo, jfdf) com hosts próprios."},
+  "TRF2": {"nome":"Tribunal Regional Federal da 2ª Região","sistema":"eproc","validado":false},
+  "TRF3": {"nome":"Tribunal Regional Federal da 3ª Região","sistema":"pje","validado":false},
+  "TRF4": {"nome":"Tribunal Regional Federal da 4ª Região","sistema":"eproc","validado":false},
+  "TRF5": {"nome":"Tribunal Regional Federal da 5ª Região","sistema":"pje","validado":true,"validadoEm":"2026-05-11"},
+  "TRF6": {"nome":"Tribunal Regional Federal da 6ª Região","sistema":"pje","validado":false},
+  "TJGO": {"nome":"Tribunal de Justiça de Goiás","sistema":"projudi","validado":true,"validadoEm":"2026-05-11"},
+  "TJDF": {"nome":"Tribunal de Justiça do Distrito Federal e Territórios","sistema":"pje","validado":false},
+  "TJSP": {"nome":"Tribunal de Justiça de São Paulo","sistema":"esaj","validado":true,"validadoEm":"2026-05-11"},
+  "TJRJ": {"nome":"Tribunal de Justiça do Rio de Janeiro","sistema":"pje","validado":false},
+  "TJMG": {"nome":"Tribunal de Justiça de Minas Gerais","sistema":"pje","validado":false},
+  "TJES": {"nome":"Tribunal de Justiça do Espírito Santo","sistema":"pje","validado":true,"validadoEm":"2026-05-11"},
+  "TJMT": {"nome":"Tribunal de Justiça de Mato Grosso","sistema":"pje","validado":true,"validadoEm":"2026-05-11"},
+  "TJMS": {"nome":"Tribunal de Justiça de Mato Grosso do Sul","sistema":"esaj","validado":true,"validadoEm":"2026-05-11"},
+  "TJPR": {"nome":"Tribunal de Justiça do Paraná (Projudi)","sistema":"projudi","validado":false},
+  "TJPR_PJe": {"nome":"Tribunal de Justiça do Paraná (PJe)","sistema":"pje","validado":false},
+  "TJSC": {"nome":"Tribunal de Justiça de Santa Catarina","sistema":"esaj","validado":false},
+  "TJRS": {"nome":"Tribunal de Justiça do Rio Grande do Sul","sistema":"eproc","validado":false},
+  "TJPI": {"nome":"Tribunal de Justiça do Piauí","sistema":"pje","validado":false},
+  "TJMA": {"nome":"Tribunal de Justiça do Maranhão","sistema":"pje","validado":true,"validadoEm":"2026-05-11"},
+  "TJBA": {"nome":"Tribunal de Justiça da Bahia","sistema":"pje","validado":false},
+  "TJPE": {"nome":"Tribunal de Justiça de Pernambuco","sistema":"pje","validado":false},
+  "TJCE": {"nome":"Tribunal de Justiça do Ceará","sistema":"pje","validado":true,"validadoEm":"2026-05-11"},
+  "TJRN": {"nome":"Tribunal de Justiça do Rio Grande do Norte","sistema":"pje","validado":false},
+  "TJPB": {"nome":"Tribunal de Justiça da Paraíba","sistema":"pje","validado":false},
+  "TJAL": {"nome":"Tribunal de Justiça de Alagoas","sistema":"esaj","validado":false},
+  "TJSE": {"nome":"Tribunal de Justiça de Sergipe","sistema":"eproc","validado":false},
+  "TJTO": {"nome":"Tribunal de Justiça do Tocantins","sistema":"eproc","validado":false},
+  "TJPA": {"nome":"Tribunal de Justiça do Pará (Projudi)","sistema":"projudi","validado":false},
+  "TJPA_PJe": {"nome":"Tribunal de Justiça do Pará (PJe)","sistema":"pje","validado":false},
+  "TJAM": {"nome":"Tribunal de Justiça do Amazonas","sistema":"projudi","validado":false},
+  "TJRR": {"nome":"Tribunal de Justiça de Roraima","sistema":"projudi","validado":false},
+  "TJAC": {"nome":"Tribunal de Justiça do Acre","sistema":"esaj","validado":true,"validadoEm":"2026-05-11"},
+  "TJAP": {"nome":"Tribunal de Justiça do Amapá","sistema":"tucujuris","validado":false,"naoSuportado":true,"motivo":"TJAP usa Tucujuris (sistema próprio) — sem MNI público."},
+  "TJRO": {"nome":"Tribunal de Justiça de Rondônia","sistema":"pje","validado":false},
+  "TRT1": {"nome":"TRT da 1ª Região (RJ)","sistema":"pje","validado":false},
+  "TRT2": {"nome":"TRT da 2ª Região (SP)","sistema":"pje","validado":false},
+  "TRT3": {"nome":"TRT da 3ª Região (MG)","sistema":"pje","validado":false},
+  "TRT4": {"nome":"TRT da 4ª Região (RS)","sistema":"pje","validado":false},
+  "TRT5": {"nome":"TRT da 5ª Região (BA)","sistema":"pje","validado":false},
+  "TRT6": {"nome":"TRT da 6ª Região (PE)","sistema":"pje","validado":false},
+  "TRT7": {"nome":"TRT da 7ª Região (CE)","sistema":"pje","validado":false},
+  "TRT8": {"nome":"TRT da 8ª Região (PA/AP)","sistema":"pje","validado":false},
+  "TRT9": {"nome":"TRT da 9ª Região (PR)","sistema":"pje","validado":false},
+  "TRT10": {"nome":"TRT da 10ª Região (DF/TO)","sistema":"pje","validado":false},
+  "TRT11": {"nome":"TRT da 11ª Região (AM/RR)","sistema":"pje","validado":false},
+  "TRT12": {"nome":"TRT da 12ª Região (SC)","sistema":"pje","validado":false},
+  "TRT13": {"nome":"TRT da 13ª Região (PB)","sistema":"pje","validado":false},
+  "TRT14": {"nome":"TRT da 14ª Região (RO/AC)","sistema":"pje","validado":false},
+  "TRT15": {"nome":"TRT da 15ª Região (Campinas/SP)","sistema":"pje","validado":false},
+  "TRT16": {"nome":"TRT da 16ª Região (MA)","sistema":"pje","validado":false},
+  "TRT17": {"nome":"TRT da 17ª Região (ES)","sistema":"pje","validado":false},
+  "TRT18": {"nome":"TRT da 18ª Região (GO)","sistema":"pje","validado":false},
+  "TRT19": {"nome":"TRT da 19ª Região (AL)","sistema":"pje","validado":false},
+  "TRT20": {"nome":"TRT da 20ª Região (SE)","sistema":"pje","validado":false},
+  "TRT21": {"nome":"TRT da 21ª Região (RN)","sistema":"pje","validado":false},
+  "TRT22": {"nome":"TRT da 22ª Região (PI)","sistema":"pje","validado":false},
+  "TRT23": {"nome":"TRT da 23ª Região (MT)","sistema":"pje","validado":false},
+  "TRT24": {"nome":"TRT da 24ª Região (MS)","sistema":"pje","validado":false},
+};
+let TRIBUNAIS = { ...FALLBACK_TRIBUNAIS };
+let DEFAULT_TRIBUNAL = 'TJGO';
+
+// ============================================================
+// Persistência localStorage
+// ============================================================
+const LS_KEY = 'uc_mni_poc_worker_url';
+const LS_CPF_KEY = 'uc_mni_poc_cpf';
+const LS_TRIB_KEY = 'uc_mni_poc_tribunal';
+$('workerUrl').value = localStorage.getItem(LS_KEY) || '';
+$('cpf').value = localStorage.getItem(LS_CPF_KEY) || '';
+
+$('workerUrl').addEventListener('change', e => localStorage.setItem(LS_KEY, e.target.value.trim()));
+$('cpf').addEventListener('change', e => localStorage.setItem(LS_CPF_KEY, e.target.value.trim()));
+$('tribunalSelect').addEventListener('change', e => {
+  localStorage.setItem(LS_TRIB_KEY, e.target.value);
+  renderTribunalMeta();
+});
+
+// ============================================================
+// Render dropdown + meta
+// ============================================================
+function renderDropdown() {
+  const sel = $('tribunalSelect');
+  const stored = localStorage.getItem(LS_TRIB_KEY) || DEFAULT_TRIBUNAL;
+  sel.innerHTML = '';
+  for (const [codigo, t] of Object.entries(TRIBUNAIS)) {
+    const opt = document.createElement('option');
+    opt.value = codigo;
+    const status = t.naoSuportado ? '⛔' : (t.validado ? '✓' : '⚠');
+    opt.textContent = `${status} ${codigo} · ${t.nome}`;
+    if (codigo === stored) opt.selected = true;
+    sel.appendChild(opt);
+  }
+  renderTribunalMeta();
+}
+
+function renderTribunalMeta() {
+  const codigo = $('tribunalSelect').value;
+  const t = TRIBUNAIS[codigo];
+  if (!t) { $('tribunalMeta').innerHTML = ''; return; }
+  let html = '';
+  if (t.naoSuportado) {
+    html += `<span class="tag red">não suportado</span> ${escapeHtml(t.motivo || '')}`;
+  } else if (t.validado) {
+    html += `<span class="tag green">validado ${t.validadoEm || ''}</span>`;
+  } else {
+    html += `<span class="tag amber">não validado</span> · endpoint inferido, rode o health check antes`;
+  }
+  if (t.endpoint) html += `<br><code>${escapeHtml(t.endpoint)}</code>`;
+  if (t.sistema)  html += ` · sistema: <code>${escapeHtml(t.sistema)}</code>`;
+  $('tribunalMeta').innerHTML = html;
+}
+
+renderDropdown();
+
+// ============================================================
+// Carregar registry da Worker
+// ============================================================
+$('btnCarregarTribunais').onclick = async () => {
+  const workerUrl = $('workerUrl').value.trim().replace(/\/$/, '');
+  if (!workerUrl) { alert('Preencha a URL da Worker primeiro'); return; }
+  $('loadTribunaisStatus').innerHTML = '<span class="spinner"></span> carregando…';
+  try {
+    const resp = await fetch(workerUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ operacao: 'listarTribunais' })
+    });
+    const data = await resp.json();
+    if (data.sucesso && data.tribunais) {
+      TRIBUNAIS = data.tribunais;
+      DEFAULT_TRIBUNAL = data.default || 'TJGO';
+      renderDropdown();
+      $('loadTribunaisStatus').innerHTML = `<span style="color:var(--green)">✓ ${Object.keys(TRIBUNAIS).length} tribunais</span>`;
+    } else {
+      $('loadTribunaisStatus').innerHTML = `<span style="color:var(--red)">✗ ${escapeHtml(data.error || 'falhou')}</span>`;
+    }
+  } catch (e) {
+    $('loadTribunaisStatus').innerHTML = `<span style="color:var(--red)">✗ ${escapeHtml(e.message || e)}</span>`;
+  }
+};
+
+// ============================================================
+// Health check
+// ============================================================
+$('btnHealth').onclick = async () => {
+  const workerUrl = $('workerUrl').value.trim().replace(/\/$/, '');
+  const tribunal = $('tribunalSelect').value;
+  if (!workerUrl) { alert('Preencha a URL da Worker'); return; }
+  $('healthStatus').innerHTML = '<span class="spinner"></span> testando…';
+  try {
+    const resp = await fetch(workerUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ operacao: 'health', tribunal })
+    });
+    const data = await resp.json();
+    if (data.status === 'ok') {
+      $('healthStatus').innerHTML = `<span style="color:var(--green)">✓ WSDL respondeu em ${data.elapsedMs}ms</span>`;
+    } else if (data.status === 'nao_suportado') {
+      $('healthStatus').innerHTML = `<span style="color:var(--amber)">⛔ ${escapeHtml(data.motivo || 'não suportado')}</span>`;
+    } else {
+      $('healthStatus').innerHTML = `<span style="color:var(--red)">✗ ${escapeHtml(data.status || 'falhou')} ${data.httpStatus ? '(HTTP '+data.httpStatus+')' : ''} ${data.erro ? '· '+escapeHtml(data.erro) : ''}</span>`;
+    }
+  } catch (e) {
+    $('healthStatus').innerHTML = `<span style="color:var(--red)">✗ ${escapeHtml(e.message || e)}</span>`;
+  }
+};
+
+// ============================================================
+// Limpar resultado
+// ============================================================
+$('btnLimpar').onclick = () => {
+  $('resultBox').style.display = 'none';
+  $('status').innerHTML = '';
+  $('summary').innerHTML = '';
+  $('rawJson').textContent = '';
+};
+
+// ============================================================
+// Consultar processo
+// ============================================================
+$('btnConsultar').onclick = async () => {
+  const workerUrl = $('workerUrl').value.trim().replace(/\/$/, '');
+  const tribunal = $('tribunalSelect').value;
+  const cpf = $('cpf').value.trim().replace(/\D/g, '');
+  const senha = $('senha').value;
+  const cnj = $('cnj').value.trim();
+
+  if (!workerUrl) { alert('Preencha a URL da Worker'); return; }
+  if (!tribunal) { alert('Selecione um tribunal'); return; }
+  if (TRIBUNAIS[tribunal]?.naoSuportado) {
+    alert(`${tribunal} não é suportado via MNI: ${TRIBUNAIS[tribunal].motivo || ''}`);
+    return;
+  }
+  if (!cpf || cpf.length !== 11) { alert('CPF inválido — precisa de 11 dígitos'); return; }
+  if (!senha) { alert('Preencha a senha'); return; }
+  if (!cnj.replace(/\D/g, '')) { alert('CNJ obrigatório'); return; }
+
+  const btn = $('btnConsultar');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Consultando…';
+
+  $('resultBox').style.display = 'block';
+  $('status').innerHTML = `<div class="status info">Enviando SOAP para ${tribunal} via Worker… (pode levar 5–30s)</div>`;
+  $('summary').innerHTML = '';
+  $('rawJson').textContent = '';
+
+  const t0 = Date.now();
+  try {
+    const debug = $('debugMode').checked;
+    const resp = await fetch(workerUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tribunal, cnj, cpf, senha, operacao: 'consultarProcesso', debug })
+    });
+    const elapsed = Date.now() - t0;
+    const data = await resp.json();
+    $('rawJson').textContent = JSON.stringify(data, null, 2);
+
+    if (!resp.ok || data.sucesso === false) {
+      $('status').innerHTML = `
+        <div class="status err">
+          <strong>✗ Falhou</strong> · HTTP ${resp.status} · ${data.erro || 'erro desconhecido'}<br>
+          ${data.mensagem ? '<small style="opacity:0.8;">' + escapeHtml(data.mensagem) + '</small>' : ''}
+          <br><small>Tribunal: ${tribunal} · Tempo total: ${elapsed}ms · Worker: ${data.elapsedMs || '?'}ms</small>
+        </div>
+      `;
+    } else {
+      $('status').innerHTML = `
+        <div class="status ok">
+          <strong>✓ Sucesso!</strong> · ${tribunal} · Worker: ${data.elapsedMs}ms · Total: ${elapsed}ms ·
+          ${data.movimentos?.length || 0} movimento(s) ·
+          ${data.partes?.length || 0} parte(s) ·
+          XML cru: ${(data.rawSize / 1024).toFixed(1)} KB
+        </div>
+      `;
+      renderSummary(data);
+    }
+  } catch (e) {
+    const elapsed = Date.now() - t0;
+    $('status').innerHTML = `
+      <div class="status err">
+        <strong>✗ Erro de rede</strong> · ${escapeHtml(e.message || e)}<br>
+        <small>Tempo: ${elapsed}ms · Confira: (1) URL da Worker correta? (2) CORS configurado pra ${location.origin}?</small>
+      </div>
+    `;
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '▶ Consultar processo';
+  }
+};
+
+function renderSummary(d) {
+  let html = '';
+
+  // Identificação
+  html += '<table>';
+  html += '<tr><th colspan="2">Identificação</th></tr>';
+  if (d.cnj) html += `<tr><td class="smallcaps" style="color:var(--warm);width:140px;">CNJ</td><td>${escapeHtml(d.cnj)}</td></tr>`;
+  if (d.classe?.codigo) html += `<tr><td class="smallcaps" style="color:var(--warm);">Classe (código TPU)</td><td>${escapeHtml(d.classe.codigo)}</td></tr>`;
+  if (d.processoTipo) html += `<tr><td class="smallcaps" style="color:var(--warm);">Tipo</td><td>${escapeHtml(d.processoTipo)}</td></tr>`;
+  if (d.area) html += `<tr><td class="smallcaps" style="color:var(--warm);">Área</td><td>${escapeHtml(d.area)}</td></tr>`;
+  if (d.assunto?.descricao) html += `<tr><td class="smallcaps" style="color:var(--warm);">Assunto</td><td>${escapeHtml(d.assunto.descricao)}</td></tr>`;
+  if (d.orgaoJulgador) html += `<tr><td class="smallcaps" style="color:var(--warm);">Vara/órgão</td><td>${escapeHtml(d.orgaoJulgador)}</td></tr>`;
+  if (d.serventia) html += `<tr><td class="smallcaps" style="color:var(--warm);">Serventia</td><td>${escapeHtml(d.serventia)}</td></tr>`;
+  if (d.dataAjuizamento) html += `<tr><td class="smallcaps" style="color:var(--warm);">Ajuizado em</td><td>${escapeHtml(d.dataAjuizamento)}</td></tr>`;
+  if (d.valorCausa) html += `<tr><td class="smallcaps" style="color:var(--warm);">Valor causa</td><td>R$ ${escapeHtml(d.valorCausa)}</td></tr>`;
+  if (d.processoFase) html += `<tr><td class="smallcaps" style="color:var(--warm);">Fase</td><td>${escapeHtml(d.processoFase)}</td></tr>`;
+  if (d.processoStatus) html += `<tr><td class="smallcaps" style="color:var(--warm);">Status</td><td>${escapeHtml(d.processoStatus)}</td></tr>`;
+  if (d.magistradoAtuante) html += `<tr><td class="smallcaps" style="color:var(--warm);">Magistrado</td><td><small>${escapeHtml(d.magistradoAtuante)}</small></td></tr>`;
+  html += '</table>';
+
+  // Partes
+  if (d.partes?.length) {
+    const poloLabels = { AT: 'ATIVO', PA: 'PASSIVO', TC: 'TERCEIRO' };
+    html += '<table><tr><th colspan="4">Partes (' + d.partes.length + ')</th></tr>';
+    html += '<tr><th>Nome</th><th>Polo</th><th>CPF/CNPJ</th><th>Advogados</th></tr>';
+    for (const p of d.partes) {
+      const advList = (p.advogados || []).map(a =>
+        `<div><strong>${escapeHtml(a.nome || '')}</strong>${a.oab ? ' · <small>OAB ' + escapeHtml(a.oab) + '</small>' : ''}</div>`
+      ).join('') || '<small style="color:var(--warm);">—</small>';
+      html += `<tr>
+        <td><strong>${escapeHtml(p.nome || '—')}</strong>${p.tipoPessoa ? `<br><small style="color:var(--warm);">${escapeHtml(p.tipoPessoa)}</small>` : ''}</td>
+        <td><span class="tag ${p.polo === 'AT' ? 'green' : p.polo === 'PA' ? 'red' : ''}">${escapeHtml(poloLabels[p.polo] || p.polo || '—')}</span></td>
+        <td><small>${escapeHtml(p.cpfCnpj || '—')}</small></td>
+        <td><small>${advList}</small></td>
+      </tr>`;
+    }
+    html += '</table>';
+  }
+
+  // Movimentos
+  if (d.movimentos?.length) {
+    html += '<table><tr><th colspan="3">Movimentos (' + d.movimentos.length + (d.movimentosTotal > d.movimentos.length ? ' de ' + d.movimentosTotal : '') + ')</th></tr>';
+    html += '<tr><th style="width:130px;">Data</th><th style="width:60px;">Cód.</th><th>Descrição</th></tr>';
+    for (const m of d.movimentos.slice(0, 30)) {
+      const dataExibir = m.dataIso ? m.dataIso.replace('T', ' ').slice(0, 16) : (m.dataHora || '').slice(0, 19);
+      const compl = m.complemento ? `<div style="font-size:11px;color:var(--warm);margin-top:2px;">${escapeHtml(m.complemento.slice(0, 200))}${m.complemento.length > 200 ? '…' : ''}</div>` : '';
+      html += `<tr>
+        <td><small>${escapeHtml(dataExibir)}</small></td>
+        <td><small>${escapeHtml(m.codigoNacional || '—')}</small></td>
+        <td><strong>${escapeHtml(m.descricao || '—')}</strong>${compl}</td>
+      </tr>`;
+    }
+    if (d.movimentos.length > 30) {
+      html += `<tr><td colspan="3" style="text-align:center;color:var(--warm);font-size:11px;">+${d.movimentos.length - 30} movimentos no JSON completo abaixo</td></tr>`;
+    }
+    html += '</table>';
+  }
+
+  $('summary').innerHTML = html;
+}
+
+function escapeHtml(s) {
+  return String(s ?? '').replace(/[<>&"']/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;',"'":'&#39;'}[c]));
+}
+</script>
+</body>
+</html>

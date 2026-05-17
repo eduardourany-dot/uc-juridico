@@ -1,0 +1,6 @@
+node_modules/
+service-account.json
+input/*.csv
+input/*.CSV
+output/*.json
+*.log

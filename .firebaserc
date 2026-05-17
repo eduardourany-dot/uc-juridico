@@ -1,5 +1,7 @@
 {
   "projects": {
-    "default": "uc-juridico"
+    "default": "uc-juridico",
+    "prod": "uc-juridico",
+    "staging": "uc-juridico-staging"
   }
 }

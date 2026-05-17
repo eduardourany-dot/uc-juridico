@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.38.1 (Hotfix: login Google no iPhone/iPad via signInWithRedirect + aviso PWA install)
-const CACHE_NAME = 'uc-juridico-v6-38-1';
+// Service Worker — UC Jurídico v6.64.7 (rodapé lê versão dinamicamente do SW via postMessage)
+const CACHE_NAME = 'uc-juridico-v6-64-7';
 const APP_SHELL = [
   './',
   './index.html',
@@ -8,6 +8,7 @@ const APP_SHELL = [
   './api.js',
   './messaging.js',
   './logo.png',
+  './logo.mp4',
   './icon-192.png',
   './icon-512.png',
   './icon-maskable-512.png',
@@ -39,6 +40,14 @@ self.addEventListener('activate', (event) => {
       Promise.all(keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k)))
     ).then(() => self.clients.claim())
   );
+});
+
+// Permite o app perguntar a versão do SW (rodapé exibe dinamicamente, sem
+// precisar atualizar string hardcoded no index.html a cada bump).
+self.addEventListener('message', (event) => {
+  if (event.data?.type === 'GET_VERSION') {
+    event.ports[0]?.postMessage({ cacheName: CACHE_NAME });
+  }
 });
 
 self.addEventListener('fetch', (event) => {

@@ -1,0 +1,16 @@
+{
+  "name": "uc-juridico-migration",
+  "description": "Scripts pra migrar dados de outros sistemas (Astrea/CSV) pro Firestore do UC Jurídico",
+  "private": true,
+  "scripts": {
+    "parse": "node parse.js",
+    "upload": "node upload.js",
+    "upload:staging": "node upload.js --project staging",
+    "upload:prod": "node upload.js --project prod"
+  },
+  "dependencies": {
+    "csv-parse": "^5.5.6",
+    "firebase-admin": "^13.0.0",
+    "xlsx": "^0.18.5"
+  }
+}
