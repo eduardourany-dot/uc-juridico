@@ -70,12 +70,6 @@ function handle_(e, method) {
 
     const ctx = { user: user, email: tokenInfo.email, params: params, body: body, method: method };
 
-    // ATENÇÃO: debugToken não exige autorização (mas mascara o token na resposta).
-    // Remover depois do diagnóstico.
-    if (action === 'debugToken') {
-      return json_(actionDebugToken_(params, body));
-    }
-
     switch (action) {
       case 'version':       return json_(actionVersion_(ctx));
       case 'getAll':        return json_(actionGetAll_(ctx));
@@ -191,28 +185,6 @@ function debugMyToken() {
     Logger.log('exp: ' + info.exp + ' (now=' + Math.floor(Date.now()/1000) + ')');
     Logger.log('Aud matches stored CLIENT_ID? ' + (info.aud === PropertiesService.getScriptProperties().getProperty('OAUTH_CLIENT_ID')));
   } catch (e) { Logger.log('Parse error: ' + e); }
-}
-
-function actionDebugToken_(params, body) {
-  const token = params.token || (body && body.token);
-  const out = { hasToken: !!token, tokenLen: token ? token.length : 0 };
-  out.expectedAud = PropertiesService.getScriptProperties().getProperty('OAUTH_CLIENT_ID');
-  if (!token) return out;
-  const resp = UrlFetchApp.fetch(
-    'https://oauth2.googleapis.com/tokeninfo?id_token=' + encodeURIComponent(token),
-    { muteHttpExceptions: true }
-  );
-  out.tokeninfoStatus = resp.getResponseCode();
-  let info = null;
-  try { info = JSON.parse(resp.getContentText()); } catch (_) {}
-  out.tokeninfoBody = info;
-  if (info) {
-    out.audMatches = info.aud === out.expectedAud;
-    out.emailVerified = info.email_verified === 'true' || info.email_verified === true;
-    out.notExpired = Number(info.exp) * 1000 >= Date.now();
-    out.passesAllChecks = (resp.getResponseCode() === 200) && out.audMatches && out.emailVerified && out.notExpired;
-  }
-  return out;
 }
 
 function actionVersion_(ctx) {
