@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.64.14 (P5: Custas processuais MVP Federal + Trabalhista)
-const CACHE_NAME = 'uc-juridico-v6-64-14';
+// Service Worker — UC Jurídico v6.64.15 (P5 refactor: Custas vira CRUD de cadastro, sem cálculo automático)
+const CACHE_NAME = 'uc-juridico-v6-64-15';
 const APP_SHELL = [
   './',
   './index.html',

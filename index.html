@@ -5024,206 +5024,97 @@ async function _calcExcluirCalculoNoProcesso(id, nome) {
 }
 
 // ====================================================================
-// === MÓDULO CUSTAS PROCESSUAIS (P5 — MVP Federal + Trabalhista) =====
+// === MÓDULO CUSTAS PROCESSUAIS (P5 — CRUD de cadastro) ==============
 // ====================================================================
 //
-// Calcula custas iniciais por tribunal. MVP cobre Justiça Federal e
-// Justiça do Trabalho (regras simples — alíquota fixa com min/max).
-// TJGO e TJDFT marcados como "em desenvolvimento" — precisam das tabelas
-// dos respectivos provimentos/resoluções pra implementação completa.
+// Cadastro manual de custas pagas/a pagar do processo. Não há cálculo
+// automático — o advogado calcula fora (sistema do tribunal) e registra
+// aqui pra controle de despesas, reembolso ao cliente e auditoria.
+//
+// Schema: { id, processoId, clienteId, data, descricao, tribunalNome,
+//           valor, status: 'a_pagar'|'pago'|'isento', dataPagamento,
+//           observacoes, createdAt, updatedAt }
 
-const CUSTAS_TRIBUNAIS = {
-  FEDERAL: {
-    nome: 'Justiça Federal',
-    fonte: 'Lei 9.289/1996 + Resolução CJF 963/2025',
-    vigencia: '2025-08-01',
-    implementado: true,
-    regras: {
-      civel: {
-        descricao: '1% sobre o valor da causa, com mínimo e máximo',
-        aliquota: 0.01,
-        minimo: 10.64,
-        maximo: 1915.38,
-        adicionais: []
-      },
-      penal: {
-        descricao: 'Custas fixas (final, pelo vencido)',
-        valorFixo: 297.95,
-        adicionais: []
-      }
-    }
-  },
-  TRABALHISTA: {
-    nome: 'Justiça do Trabalho',
-    fonte: 'CLT art. 789 + Ato TST.GP 158/2026',
-    vigencia: '2025-08-01',
-    implementado: true,
-    aviso: 'Reclamante é ISENTO de custas iniciais. Custas são pagas pelo VENCIDO ao final, em 2% sobre o valor da condenação (ou da causa, se improcedente).',
-    regras: {
-      reclamacao: {
-        descricao: '2% sobre o valor da causa (pelo vencido)',
-        aliquota: 0.02,
-        minimo: 10.64,
-        maximo: 91594.96, // 4× teto RGPS 2026 (~R$ 22.898,74)
-        adicionais: []
-      }
-    },
-    depositosRecursais: {
-      recursoOrdinario: 13813.83,
-      demaisRecursos: 27627.66,
-      vigencia: '2025-08-01',
-      fonte: 'TST — atualizado por INPC'
-    }
-  },
-  TJGO: {
-    nome: 'TJGO (Goiás)',
-    fonte: 'Provimento Conjunto 179/2025 (Corregedoria-Geral GO)',
-    vigencia: '2026-01-01',
-    implementado: false,
-    aviso: 'Tabela UPC × faixas em desenvolvimento. Tabela oficial em PDF do Provimento Conjunto 179/2025.'
-  },
-  TJDFT: {
-    nome: 'TJDFT (Distrito Federal)',
-    fonte: 'Resolução 4/2024 do Conselho da Magistratura (IPCA 2026)',
-    vigencia: '2026-01-01',
-    implementado: false,
-    aviso: 'Tabela em R$ por classe processual em desenvolvimento. Tabela oficial em PDF no portal TJDFT.'
-  }
-};
+const CUSTAS_STATUS = [
+  { value: 'a_pagar', label: 'A pagar', cor: 'amber' },
+  { value: 'pago',    label: 'Pago',    cor: 'green' },
+  { value: 'isento',  label: 'Isento',  cor: 'gray' }
+];
 
-/**
- * Detecta o tribunal provável a partir do p.court (string livre).
- * Retorna a chave (FEDERAL / TRABALHISTA / TJGO / TJDFT) ou null se ambíguo.
- */
-function _custasDetectarTribunal(p) {
-  const c = String(p?.court || '').toLowerCase();
-  if (!c) return null;
-  // Heurísticas por palavras-chave
-  if (/\b(trf|vara federal|justi[çc]a federal|jfgo|jfdf|jfes|jfsp|seç[ãa]o judici[áa]ria)\b/i.test(c)) {
-    return 'FEDERAL';
-  }
-  if (/\b(trt|vara do trabalho|justi[çc]a do trabalho|trabalhista)\b/i.test(c)) {
-    return 'TRABALHISTA';
-  }
-  // TJGO: vara de comarca em Goiás
-  if (/\b(tjgo|goi[áa]s|an[áa]polis|goi[âa]nia|rio verde|trindade|aparecida de goi[âa]nia|jata[íi]|catal[ãa]o|formosa|luziânia)\b/i.test(c)) {
-    return 'TJGO';
-  }
-  // TJDFT: vara em Brasília
-  if (/\b(tjdft|tjdf|distrito federal|bras[íi]lia|taguatinga|ceil[âa]ndia|gama|sobradinho|samambaia)\b/i.test(c)) {
-    return 'TJDFT';
-  }
-  return null;
+function _custasStatusLabel(status) {
+  return (CUSTAS_STATUS.find(s => s.value === status) || { label: '—' }).label;
 }
-
-/**
- * Calcula custas. Retorna { itens: [{nome, valor}], total, fonte, vigencia, aviso }.
- */
-function _custasCalcular(tribunalKey, tipoAcao, valorCausa) {
-  const t = CUSTAS_TRIBUNAIS[tribunalKey];
-  if (!t) return { erro: 'tribunal_desconhecido' };
-  if (!t.implementado) {
-    return { erro: 'nao_implementado', aviso: t.aviso, fonte: t.fonte };
-  }
-  const regra = t.regras?.[tipoAcao];
-  if (!regra) return { erro: 'tipo_nao_aplicavel', aviso: `Tipo "${tipoAcao}" não definido para ${t.nome}` };
-
-  const valor = Number(valorCausa) || 0;
-  const itens = [];
-
-  // Cálculo base: alíquota ou valor fixo
-  if (regra.valorFixo !== undefined) {
-    itens.push({ nome: regra.descricao, valor: regra.valorFixo });
-  } else if (regra.aliquota !== undefined) {
-    let calculado = valor * regra.aliquota;
-    let nome = `Custas (${(regra.aliquota * 100).toFixed(1)}% sobre valor da causa)`;
-    if (regra.minimo !== undefined && calculado < regra.minimo) {
-      calculado = regra.minimo;
-      nome += ` — limitado ao mínimo (R$ ${regra.minimo.toLocaleString('pt-BR', { minimumFractionDigits: 2 })})`;
-    } else if (regra.maximo !== undefined && calculado > regra.maximo) {
-      calculado = regra.maximo;
-      nome += ` — limitado ao máximo (R$ ${regra.maximo.toLocaleString('pt-BR', { minimumFractionDigits: 2 })})`;
-    }
-    itens.push({ nome, valor: calculado });
-  }
-
-  // Adicionais (FUNJURIS, taxas, etc) — vazios no MVP Federal/Trabalhista
-  for (const ad of (regra.adicionais || [])) {
-    itens.push({ nome: ad.nome, valor: ad.valor });
-  }
-
-  const total = itens.reduce((s, i) => s + (i.valor || 0), 0);
-
-  return {
-    tribunal: t.nome,
-    tipoAcao,
-    valorCausa: valor,
-    itens,
-    total,
-    fonte: t.fonte,
-    vigencia: t.vigencia,
-    aviso: t.aviso || null,
-    depositosRecursais: t.depositosRecursais || null
-  };
+function _custasStatusCor(status) {
+  return (CUSTAS_STATUS.find(s => s.value === status) || { cor: 'gray' }).cor;
 }
 
 function renderProcessCustas(p, custas) {
   const brl = v => 'R$ ' + (v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  const lista = (custas || []).filter(c => !c.deletedAt).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-  const tribDetected = _custasDetectarTribunal(p);
-  const tribInfo = tribDetected ? CUSTAS_TRIBUNAIS[tribDetected] : null;
+  const lista = (custas || []).filter(c => !c.deletedAt)
+    .sort((a, b) => (b.data || b.createdAt || 0) - (a.data || a.createdAt || 0));
+
+  // Totais por status
+  const totalAPagar = lista.filter(c => c.status === 'a_pagar').reduce((s, c) => s + (c.valor || 0), 0);
+  const totalPago = lista.filter(c => c.status === 'pago').reduce((s, c) => s + (c.valor || 0), 0);
 
   return `
     <div class="card mb-3">
       <div class="flex justify-between items-center mb-3">
-        <h3 class="font-serif text-lg font-semibold smallcaps" style="color: var(--uc-black);">Custas processuais · ${lista.length}</h3>
-        <button class="btn btn-primary btn-sm" onclick="_custasNovoCalculo('${p.id}')">+ Novo cálculo</button>
+        <h3 class="font-serif text-lg font-semibold smallcaps" style="color: var(--uc-black);">Custas do processo · ${lista.length}</h3>
+        <button class="btn btn-primary btn-sm" onclick="_custasNovo('${p.id}')">+ Adicionar</button>
       </div>
 
-      ${tribInfo ? `
-        <div style="background:var(--uc-cream);border-left:3px solid var(--uc-gold);padding:10px 14px;margin-bottom:14px;font-size:13px;">
-          <strong>Tribunal detectado:</strong> ${escapeHtml(tribInfo.nome)}
-          ${tribInfo.implementado
-            ? `<br><span style="color:var(--uc-graphite);font-size:12px;">Fonte: ${escapeHtml(tribInfo.fonte)} · vigente desde ${escapeHtml(tribInfo.vigencia)}</span>`
-            : `<br><span style="color:var(--uc-amber);font-size:12px;">⚠ Cálculo automático em desenvolvimento — ${escapeHtml(tribInfo.aviso || '')}</span>`}
-        </div>
-      ` : `
-        <div style="background:var(--uc-cream);border-left:3px solid var(--uc-warm-gray);padding:10px 14px;margin-bottom:14px;font-size:13px;color:var(--uc-graphite);">
-          Tribunal não detectado automaticamente pelo campo "Tribunal/Vara". Selecione manualmente no cálculo.
-        </div>
-      `}
+      <p class="help-text mb-3">
+        Cadastro de custas pagas e a pagar deste processo. O cálculo é feito fora do app (sistema do tribunal,
+        guia, planilha). Aqui você registra pra controle, reembolso ao cliente e auditoria.
+      </p>
 
       ${lista.length === 0 ? `
         <div class="empty-state">
-          <p class="empty-state-msg">Nenhum cálculo de custas registrado. Clique em <strong>+ Novo cálculo</strong> pra simular custas iniciais (Federal/Trabalhista) baseado no valor da causa.</p>
+          <p class="empty-state-msg">Nenhuma custa cadastrada. Clique em <strong>+ Adicionar</strong> pra registrar a primeira.</p>
         </div>
       ` : `
+        <div class="grid gap-2 mb-3" style="grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));">
+          <div class="stat-card">
+            <div class="stat-label">A pagar</div>
+            <div class="stat-value" style="color: var(--uc-amber);">${brl(totalAPagar)}</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Pago</div>
+            <div class="stat-value" style="color: var(--uc-green);">${brl(totalPago)}</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Total geral</div>
+            <div class="stat-value">${brl(totalAPagar + totalPago)}</div>
+          </div>
+        </div>
+
         <table style="width:100%;font-size:13px;border-collapse:collapse;">
           <thead style="background:var(--uc-cream);font-size:11px;text-transform:uppercase;letter-spacing:0.04em;">
             <tr>
               <th style="text-align:left;padding:8px;">Data</th>
+              <th style="text-align:left;padding:8px;">Descrição</th>
               <th style="text-align:left;padding:8px;">Tribunal</th>
-              <th style="text-align:left;padding:8px;">Tipo</th>
-              <th style="text-align:right;padding:8px;">Valor causa</th>
-              <th style="text-align:right;padding:8px;">Custas</th>
-              <th style="width:80px;"></th>
+              <th style="text-align:left;padding:8px;">Status</th>
+              <th style="text-align:right;padding:8px;">Valor</th>
+              <th style="width:90px;"></th>
             </tr>
           </thead>
           <tbody>
             ${lista.map(c => {
-              const dt = new Date(c.createdAt || 0);
-              const dtStr = `${String(dt.getDate()).padStart(2,'0')}/${String(dt.getMonth()+1).padStart(2,'0')}/${dt.getFullYear()}`;
-              const trib = CUSTAS_TRIBUNAIS[c.tribunalKey]?.nome || c.tribunalKey || '—';
+              const data = c.data ? new Date(c.data) : (c.createdAt ? new Date(c.createdAt) : null);
+              const dtStr = data ? `${String(data.getDate()).padStart(2,'0')}/${String(data.getMonth()+1).padStart(2,'0')}/${data.getFullYear()}` : '—';
+              const badgeCor = _custasStatusCor(c.status);
               return `
                 <tr style="border-bottom:1px solid var(--uc-line-soft);">
-                  <td style="padding:8px;font-size:12px;color:var(--uc-warm-gray);">${dtStr}</td>
-                  <td style="padding:8px;">${escapeHtml(trib)}</td>
-                  <td style="padding:8px;">${escapeHtml(c.tipoAcao || '—')}</td>
-                  <td style="padding:8px;text-align:right;">${brl(c.valorCausa)}</td>
-                  <td style="padding:8px;text-align:right;font-weight:600;">${brl(c.total)}</td>
-                  <td style="padding:8px;text-align:right;">
-                    <button class="btn btn-ghost btn-sm" onclick="_custasVerDetalhe('${c.id}')" title="Ver detalhe">👁</button>
-                    <button class="btn btn-ghost btn-sm" onclick="_custasExcluir('${c.id}','${escapeHtml(trib)}')" title="Excluir">🗑</button>
+                  <td style="padding:8px;font-size:12px;color:var(--uc-warm-gray);white-space:nowrap;">${dtStr}</td>
+                  <td style="padding:8px;">${escapeHtml(c.descricao || '—')}</td>
+                  <td style="padding:8px;color:var(--uc-graphite);">${escapeHtml(c.tribunalNome || '—')}</td>
+                  <td style="padding:8px;"><span class="badge badge-${badgeCor}">${escapeHtml(_custasStatusLabel(c.status))}</span></td>
+                  <td style="padding:8px;text-align:right;font-weight:600;">${brl(c.valor)}</td>
+                  <td style="padding:8px;text-align:right;white-space:nowrap;">
+                    <button class="btn btn-ghost btn-sm" onclick="_custasEditar('${c.id}')" title="Editar">✎</button>
+                    <button class="btn btn-ghost btn-sm" onclick="_custasExcluir('${c.id}','${escapeHtml((c.descricao || '').replace(/'/g, "\\'"))}')" title="Excluir">🗑</button>
                   </td>
                 </tr>
               `;
@@ -5235,210 +5126,126 @@ function renderProcessCustas(p, custas) {
   `;
 }
 
-async function _custasNovoCalculo(processoId) {
+async function _custasNovo(processoId) {
   const p = await DB.getProcess(processoId);
   if (!p) { toast('Processo não encontrado', '', 'error'); return; }
-  const tribDetected = _custasDetectarTribunal(p);
-
-  // Constrói opções de tribunais + tipos
-  const tribunaisOpts = Object.entries(CUSTAS_TRIBUNAIS).map(([k, v]) => ({
-    value: k,
-    label: v.nome + (v.implementado ? '' : ' (em desenvolvimento)')
-  }));
-
-  const r = await showModal('💰 Calcular custas processuais', [
-    {
-      label: 'Tribunal',
-      name: 'tribunal',
-      type: 'select',
-      default: tribDetected || 'FEDERAL',
-      options: tribunaisOpts
-    },
-    {
-      label: 'Tipo de ação',
-      name: 'tipoAcao',
-      type: 'select',
-      default: 'civel',
-      options: [
-        { value: 'civel', label: 'Cível em geral' },
-        { value: 'penal', label: 'Penal (custas finais)' },
-        { value: 'reclamacao', label: 'Reclamação trabalhista' }
-      ]
-    },
-    {
-      label: 'Valor da causa (R$)',
-      name: 'valorCausa',
-      type: 'number',
-      default: p.valorCausa || 0,
-      step: '0.01'
-    }
-  ], {
-    confirmLabel: '💰 Calcular',
-    intro: `Processo: <strong>${escapeHtml(p.name || p.cnj || '—')}</strong><br>Valor da causa pré-preenchido do cadastro. Tribunal sugerido pelo campo "Tribunal/Vara".`
-  });
-  if (!r) return;
-  const [tribunalKey, tipoAcao, valorCausaStr] = r;
-  const valorCausa = parseFloat(valorCausaStr) || 0;
-
-  const resultado = _custasCalcular(tribunalKey, tipoAcao, valorCausa);
-
-  if (resultado.erro === 'nao_implementado') {
-    toast('Em desenvolvimento',
-      `${CUSTAS_TRIBUNAIS[tribunalKey].nome}: ${resultado.aviso}`, 'info');
-    return;
-  }
-  if (resultado.erro === 'tipo_nao_aplicavel') {
-    toast('Tipo não aplicável', resultado.aviso, 'error');
-    return;
-  }
-  if (resultado.erro) {
-    toast('Falha no cálculo', resultado.erro, 'error');
-    return;
-  }
-
-  // Mostra modal com resultado + opção de salvar
-  await _custasMostrarResultado(p, tribunalKey, tipoAcao, valorCausa, resultado);
+  await _custasModalCadastro(p, null);
 }
 
-async function _custasMostrarResultado(p, tribunalKey, tipoAcao, valorCausa, resultado) {
-  const brl = v => 'R$ ' + (v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  const modal = document.createElement('div');
-  modal.className = 'modal-backdrop';
-  modal.innerHTML = `
-    <div class="modal scroll-thin" style="max-width: 640px;">
-      <h3 class="modal-title">💰 Custas calculadas · ${escapeHtml(resultado.tribunal)}</h3>
-
-      ${resultado.aviso ? `
-        <div style="background:var(--uc-amber-soft);border-left:3px solid var(--uc-amber);padding:10px 14px;margin-bottom:14px;font-size:12px;color:var(--uc-graphite);">
-          ⚠ ${escapeHtml(resultado.aviso)}
-        </div>
-      ` : ''}
-
-      <div style="background:var(--uc-cream);padding:14px 16px;border-radius:6px;margin-bottom:14px;font-size:13px;">
-        <div style="display:grid;grid-template-columns:160px 1fr;gap:6px 12px;">
-          <div style="color:var(--uc-warm-gray);">Tipo de ação:</div><div>${escapeHtml(tipoAcao)}</div>
-          <div style="color:var(--uc-warm-gray);">Valor da causa:</div><div><strong>${brl(valorCausa)}</strong></div>
-        </div>
-      </div>
-
-      <table style="width:100%;font-size:13px;border-collapse:collapse;margin-bottom:14px;">
-        <thead style="background:var(--uc-cream);">
-          <tr>
-            <th style="text-align:left;padding:8px;font-size:11px;text-transform:uppercase;letter-spacing:0.04em;">Item</th>
-            <th style="text-align:right;padding:8px;font-size:11px;text-transform:uppercase;letter-spacing:0.04em;">Valor</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${resultado.itens.map(i => `
-            <tr style="border-bottom:1px solid var(--uc-line-soft);">
-              <td style="padding:8px;">${escapeHtml(i.nome)}</td>
-              <td style="padding:8px;text-align:right;">${brl(i.valor)}</td>
-            </tr>
-          `).join('')}
-          <tr style="background:var(--uc-cream);font-weight:700;">
-            <td style="padding:10px 8px;">TOTAL</td>
-            <td style="padding:10px 8px;text-align:right;font-size:15px;">${brl(resultado.total)}</td>
-          </tr>
-        </tbody>
-      </table>
-
-      ${resultado.depositosRecursais ? `
-        <div style="border:1px dashed var(--uc-warm-gray);padding:10px 14px;border-radius:6px;margin-bottom:14px;font-size:12px;color:var(--uc-graphite);">
-          <strong style="color:var(--uc-black);">Depósitos recursais (referência):</strong><br>
-          • Recurso Ordinário: <strong>${brl(resultado.depositosRecursais.recursoOrdinario)}</strong><br>
-          • Demais recursos: <strong>${brl(resultado.depositosRecursais.demaisRecursos)}</strong><br>
-          <span style="font-size:11px;color:var(--uc-warm-gray);">Fonte: ${escapeHtml(resultado.depositosRecursais.fonte)} · vigência ${escapeHtml(resultado.depositosRecursais.vigencia)}</span>
-        </div>
-      ` : ''}
-
-      <p style="font-size:11px;color:var(--uc-warm-gray);margin-bottom:14px;">
-        Fonte: ${escapeHtml(resultado.fonte)} · vigência ${escapeHtml(resultado.vigencia || '—')}
-      </p>
-
-      <div class="flex gap-2 flex-wrap">
-        <button class="btn btn-primary" id="_custasSalvar">💾 Salvar no processo</button>
-        <button class="btn btn-outline" id="_custasCopiar">📋 Copiar</button>
-        <button class="btn btn-ghost" id="_custasFechar" style="margin-left:auto;">Fechar</button>
-      </div>
-    </div>
-  `;
-  $('modalContainer').appendChild(modal);
-  const cleanup = () => modal.remove();
-
-  modal.querySelector('#_custasFechar').onclick = cleanup;
-  modal.querySelector('#_custasCopiar').onclick = () => {
-    const linhas = [`Custas processuais · ${resultado.tribunal}`, ''];
-    linhas.push(`Tipo: ${tipoAcao}`);
-    linhas.push(`Valor da causa: ${brl(valorCausa)}`);
-    linhas.push('');
-    resultado.itens.forEach(i => linhas.push(`${i.nome}: ${brl(i.valor)}`));
-    linhas.push('');
-    linhas.push(`TOTAL: ${brl(resultado.total)}`);
-    linhas.push('');
-    linhas.push(`Fonte: ${resultado.fonte}`);
-    navigator.clipboard.writeText(linhas.join('\n')).then(() => {
-      toast('Copiado pro clipboard', '', 'success');
-    });
-  };
-  modal.querySelector('#_custasSalvar').onclick = async () => {
-    try {
-      const custa = {
-        id: uid(),
-        processoId: p.id,
-        clienteId: p.clienteId || null,
-        tribunalKey,
-        tribunalNome: resultado.tribunal,
-        tipoAcao,
-        valorCausa,
-        itens: resultado.itens,
-        total: resultado.total,
-        fonte: resultado.fonte,
-        vigencia: resultado.vigencia,
-        createdAt: Date.now()
-      };
-      await DB.saveCusta(custa);
-      toast('Cálculo salvo', `Total: ${brl(resultado.total)}`, 'success');
-      cleanup();
-      // Recarrega state + re-renderiza tab
-      state._processView.custas = await DB.getCustasByProcess(p.id);
-      renderProcessTabContent();
-    } catch (err) {
-      toast('Falha ao salvar', err.message || String(err), 'error');
-    }
-  };
-}
-
-async function _custasVerDetalhe(custaId) {
+async function _custasEditar(custaId) {
   const todas = state._processView?.custas || [];
   const c = todas.find(x => x.id === custaId);
-  if (!c) { toast('Cálculo não encontrado', '', 'error'); return; }
+  if (!c) { toast('Custa não encontrada', '', 'error'); return; }
   const p = state._processView?.p;
-  await _custasMostrarResultado(
-    p,
-    c.tribunalKey,
-    c.tipoAcao,
-    c.valorCausa,
-    {
-      tribunal: c.tribunalNome,
-      tipoAcao: c.tipoAcao,
-      valorCausa: c.valorCausa,
-      itens: c.itens || [],
-      total: c.total,
-      fonte: c.fonte,
-      vigencia: c.vigencia,
-      aviso: null,
-      depositosRecursais: null
-    }
-  );
+  if (!p) return;
+  await _custasModalCadastro(p, c);
 }
 
-async function _custasExcluir(custaId, tribunalNome) {
-  const ok = await confirmDialog('Excluir cálculo de custas?',
-    `Custas de "${tribunalNome}" — esta ação não pode ser desfeita.`, true);
+/**
+ * Modal de cadastro/edição. Se `existente` for null, cria novo.
+ */
+async function _custasModalCadastro(p, existente) {
+  const isEdit = !!existente;
+  const hoje = new Date().toISOString().slice(0, 10);
+
+  const fields = [
+    {
+      label: 'Descrição',
+      name: 'descricao',
+      type: 'text',
+      placeholder: 'Ex: Custas iniciais, Apelação, Perícia, Diligência…',
+      default: existente?.descricao || ''
+    },
+    {
+      label: 'Valor (R$)',
+      name: 'valor',
+      type: 'number',
+      step: '0.01',
+      default: existente?.valor || 0
+    },
+    {
+      label: 'Data',
+      name: 'data',
+      type: 'date',
+      default: existente?.data ? new Date(existente.data).toISOString().slice(0, 10) : hoje
+    },
+    {
+      label: 'Tribunal / Vara (opcional)',
+      name: 'tribunal',
+      type: 'text',
+      placeholder: 'Ex: TJGO, TJDFT, TRF1, TRT-18…',
+      default: existente?.tribunalNome || p.court || ''
+    },
+    {
+      label: 'Status',
+      name: 'status',
+      type: 'select',
+      default: existente?.status || 'a_pagar',
+      options: CUSTAS_STATUS.map(s => ({ value: s.value, label: s.label }))
+    },
+    {
+      label: 'Data do pagamento (opcional)',
+      name: 'dataPagamento',
+      type: 'date',
+      default: existente?.dataPagamento ? new Date(existente.dataPagamento).toISOString().slice(0, 10) : ''
+    },
+    {
+      label: 'Observações',
+      name: 'observacoes',
+      type: 'textarea',
+      rows: 3,
+      placeholder: 'Notas livres: número da guia, GRU, observações sobre reembolso, etc',
+      default: existente?.observacoes || ''
+    }
+  ];
+
+  const r = await showModal(isEdit ? '✎ Editar custa' : '+ Nova custa', fields, {
+    confirmLabel: isEdit ? 'Salvar' : 'Cadastrar',
+    intro: `Processo: <strong>${escapeHtml(p.name || p.cnj || '—')}</strong>`
+  });
+  if (!r) return;
+
+  const [descricao, valorStr, dataStr, tribunal, status, dataPagamentoStr, observacoes] = r;
+
+  if (!descricao?.trim()) { toast('Descrição obrigatória', '', 'error'); return; }
+  const valor = parseFloat(valorStr) || 0;
+  if (valor <= 0) { toast('Valor inválido', 'Informe um valor maior que zero.', 'error'); return; }
+
+  const dataMs = dataStr ? new Date(dataStr).getTime() : Date.now();
+  const dataPagamentoMs = dataPagamentoStr ? new Date(dataPagamentoStr).getTime() : null;
+
+  const custa = {
+    id: existente?.id || uid(),
+    processoId: p.id,
+    clienteId: p.clienteId || null,
+    descricao: descricao.trim(),
+    valor,
+    data: dataMs,
+    tribunalNome: (tribunal || '').trim() || null,
+    status: status || 'a_pagar',
+    dataPagamento: dataPagamentoMs,
+    observacoes: (observacoes || '').trim() || null,
+    createdAt: existente?.createdAt || Date.now(),
+    updatedAt: Date.now()
+  };
+
+  try {
+    await DB.saveCusta(custa);
+    toast(isEdit ? 'Custa atualizada' : 'Custa cadastrada', custa.descricao, 'success');
+    state._processView.custas = await DB.getCustasByProcess(p.id);
+    renderProcessTabContent();
+  } catch (err) {
+    toast('Falha ao salvar', err.message || String(err), 'error');
+  }
+}
+
+async function _custasExcluir(custaId, descricao) {
+  const ok = await confirmDialog('Excluir custa?',
+    `"${descricao || 'sem descrição'}" — esta ação não pode ser desfeita.`, true);
   if (!ok) return;
   try {
     await DB.deleteCusta(custaId);
-    toast('Cálculo excluído', '', 'success');
+    toast('Custa excluída', '', 'success');
     const p = state._processView?.p;
     if (p) {
       state._processView.custas = await DB.getCustasByProcess(p.id);
@@ -19232,7 +19039,7 @@ const _VIEWER_HIDE_PATTERNS = [
   /djenRunSearch/, /djenAgendarPrazos/, /djenAddOabFlow/, /djenRemoveOab/,
   /djenToggleOab/, /djenToggleAllOabs/,
   // Custas processuais (P5)
-  /_custasNovoCalculo/, /_custasExcluir/,
+  /_custasNovo/, /_custasEditar/, /_custasExcluir/,
   // PDF import
   /importPdfToProcess/, /importPdf/,
   // Settings (admin)
