@@ -4442,9 +4442,9 @@ function renderProcessOverview(p, events, deadlines, notes, jurisprudence) {
           const internoLabel = ({ active: 'Ativo', archived: 'Arquivado', suspended: 'Suspenso' })[internoStatus] || internoStatus;
           const display = mniStatus || internoLabel;
           if (!display) return '';
-          // Cor do badge: verde pra ativo, cinza pra arquivado, amber pra outros
+          // Cor do badge: verde pra ativo, vermelho pra arquivado, amber pra outros
           const lower = display.toLowerCase();
-          const cor = (lower.includes('arquiv') || internoStatus === 'archived') ? 'gray'
+          const cor = (lower.includes('arquiv') || internoStatus === 'archived') ? 'red'
                     : (lower.includes('ativ') || lower.includes('em curso') || internoStatus === 'active') ? 'green'
                     : 'amber';
           return `<div style="color: var(--uc-warm-gray);">Status:</div><div><span class="badge badge-${cor}">${escapeHtml(display)}</span></div>`;
