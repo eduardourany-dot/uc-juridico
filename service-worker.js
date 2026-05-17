@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.64.1 (staging usa WEB_APP_URL de prod pra testar Gemini)
-const CACHE_NAME = 'uc-juridico-v6-64-1';
+// Service Worker — UC Jurídico v6.64.2 (Apps Script aceita lista de OAUTH_CLIENT_IDS prod+staging)
+const CACHE_NAME = 'uc-juridico-v6-64-2';
 const APP_SHELL = [
   './',
   './index.html',

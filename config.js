@@ -41,7 +41,10 @@
     },
     // Apps Script Web App — aponta pro mesmo deploy de prod (compartilhado).
     WEB_APP_URL: 'https://script.google.com/macros/s/AKfycby1TCUDv9yb070adZdpYQAFDxz0K--tjJ-NrvlOE4g6qVXRdhpz17ceFcE0NG5-cqBd/exec',
-    OAUTH_CLIENT_ID: '353399924339-m68p647osnb47mhurqc3ctpfkde2ig9h.apps.googleusercontent.com',
+    // OAUTH_CLIENT_ID: Web Client ID do projeto Firebase staging (uc-juridico-staging).
+    // Diferente do prod — o Apps Script aceita ambos via OAUTH_CLIENT_IDS (plural)
+    // nas Script Properties: 'prod_id,staging_id'.
+    OAUTH_CLIENT_ID: '228970789029-37qapft47nftpq1vr75sm6mfkia7lk5r.apps.googleusercontent.com',
     DRIVE_FOLDER_ID: '1tAOYow447n9Ayw67SGqMOhhrvyGgWmf_',
     // Push notifications — staging não usa FCM.
     FCM_VAPID_PUBLIC_KEY: '',
