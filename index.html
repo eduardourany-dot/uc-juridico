@@ -349,7 +349,7 @@ body.cliente-mode .nav-section { display: none !important; }
         <span id="themeQuickToggleLabel">☀ Claro</span>
       </button>
       <p class="smallcaps font-serif" style="margin:0 0 4px;">Urany de Castro · 30 anos</p>
-      <p style="margin:0;">100% local · v6.38.0</p>
+      <p style="margin:0;">100% local · <span id="appVersion" title="Versão do Service Worker ativo">v…</span></p>
     </div>
   </aside>
 
@@ -21602,6 +21602,9 @@ async function bootApp() {
   // Service worker
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('service-worker.js').catch(() => {});
+    // Lê a versão do SW e injeta no rodapé. Fonte única de verdade =
+    // CACHE_NAME no service-worker.js (formato 'uc-juridico-vX-Y-Z').
+    _renderAppVersion();
   }
 
   // PWA install prompt
@@ -21609,6 +21612,29 @@ async function bootApp() {
     e.preventDefault();
     state.installPrompt = e;
   });
+}
+
+async function _renderAppVersion() {
+  const el = document.getElementById('appVersion');
+  if (!el) return;
+  try {
+    // Aguarda o SW estar pronto (pode ser o primeiro load, sem controller)
+    const reg = await navigator.serviceWorker.ready;
+    const sw = navigator.serviceWorker.controller || reg.active;
+    if (!sw) { el.textContent = 'v?'; return; }
+    const cacheName = await new Promise((resolve) => {
+      const channel = new MessageChannel();
+      channel.port1.onmessage = (e) => resolve(e.data?.cacheName || null);
+      sw.postMessage({ type: 'GET_VERSION' }, [channel.port2]);
+      setTimeout(() => resolve(null), 2000);
+    });
+    if (!cacheName) { el.textContent = 'v?'; return; }
+    // 'uc-juridico-v6-64-6' → 'v6.64.6'
+    const m = cacheName.match(/v(\d+)-(\d+)-(\d+)/);
+    el.textContent = m ? `v${m[1]}.${m[2]}.${m[3]}` : 'v?';
+  } catch (_) {
+    el.textContent = 'v?';
+  }
 }
 
 // Start

@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.64.6 (substitui 'Re-extrair (DJEN)' por nota explicativa quando sem CNJ)
-const CACHE_NAME = 'uc-juridico-v6-64-6';
+// Service Worker — UC Jurídico v6.64.7 (rodapé lê versão dinamicamente do SW via postMessage)
+const CACHE_NAME = 'uc-juridico-v6-64-7';
 const APP_SHELL = [
   './',
   './index.html',
@@ -40,6 +40,14 @@ self.addEventListener('activate', (event) => {
       Promise.all(keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k)))
     ).then(() => self.clients.claim())
   );
+});
+
+// Permite o app perguntar a versão do SW (rodapé exibe dinamicamente, sem
+// precisar atualizar string hardcoded no index.html a cada bump).
+self.addEventListener('message', (event) => {
+  if (event.data?.type === 'GET_VERSION') {
+    event.ports[0]?.postMessage({ cacheName: CACHE_NAME });
+  }
 });
 
 self.addEventListener('fetch', (event) => {
