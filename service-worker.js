@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.64.19 (cadastro de processo: busca MNI automática ao clicar Cadastrar)
-const CACHE_NAME = 'uc-juridico-v6-64-19';
+// Service Worker — UC Jurídico v6.64.20 (remove card 'Parte adversa (manual)' — MNI já traz partes/advogados)
+const CACHE_NAME = 'uc-juridico-v6-64-20';
 const APP_SHELL = [
   './',
   './index.html',
