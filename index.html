@@ -16899,6 +16899,17 @@ function renderSettingsTab(tab, prompts, defaultPromptId) {
         </div>
       </div>
 
+      <div class="card mb-3" style="border-left: 3px solid var(--uc-gold);">
+        <h4 class="font-serif font-semibold smallcaps mb-2" style="color: var(--uc-black);">🔄 Sincronização em massa</h4>
+        <p class="help-text mb-3">
+          Roda <strong>Buscar via MNI</strong> em todos os processos da carteira de uma vez. Útil
+          após importar dados antigos (Astrea) ou quando muitos processos precisam ser atualizados.
+          Operação serial com 2s entre consultas pra não sobrecarregar tribunais.
+          <strong>Demora cerca de 1h pra ~2.000 processos</strong> — a janela precisa ficar aberta.
+        </p>
+        <button class="btn btn-primary btn-sm" onclick="mniSincronizarCarteiraFlow()">🔄 Sincronizar carteira via MNI…</button>
+      </div>
+
       <div class="card mb-3">
         <h4 class="font-serif font-semibold smallcaps mb-2" style="color: var(--uc-black);">Worker MNI</h4>
         <p class="help-text mb-2">URL do Cloudflare Worker que roteia SOAP para os tribunais. Veja <code>workers/mni-worker.js</code>.</p>
@@ -18043,6 +18054,340 @@ async function mniBuscarProcessoFlow(processId) {
 }
 
 // ====================================================================
+// MNI — Sincronização em MASSA (carteira inteira) — v6.64.21
+// ====================================================================
+//
+// Roda mniBuscarProcessoFlow + mniAplicarMudancasFlow em todos os
+// processos da carteira (com CNJ + tribunal suportado + credencial
+// cadastrada). Serial com delay de 2s entre requests pra não bater
+// rate limit. Mostra progresso e permite cancelar.
+
+const MNI_BULK_DELAY_MS = 2000;  // delay entre requests
+let _mniBulkCancel = false;       // flag de cancelamento
+
+async function mniSincronizarCarteiraFlow() {
+  const config = await _mniGetConfig();
+  if (!config.workerUrl) {
+    toast('Worker MNI não configurada', 'Configure a URL acima antes.', 'error');
+    return;
+  }
+  if (!window.MniCrypto.isUnlocked()) {
+    toast('Cofre travado', 'Destrave o cofre MNI antes de rodar sincronização em massa.', 'error');
+    return;
+  }
+
+  // Carrega lista de processos + credenciais cadastradas
+  const todos = await DB.getAllProcesses();
+  const credenciais = (await DB.getSetting('mniCredentials', [])) || [];
+  const tribunaisComCredencial = new Set(credenciais.map(c => c.tribunal));
+
+  // Classifica processos
+  const semCnj = [];
+  const tribunaisSemSuporte = [];
+  const semCredencial = [];
+  const elegiveis = [];
+
+  for (const p of todos) {
+    if (p.deletedAt) continue;
+    if (!p.cnj || !p.cnj.replace(/\D/g, '').length) {
+      semCnj.push(p);
+      continue;
+    }
+    const detect = await _mniDetectarTribunal(p);
+    if (!detect || detect.conf?.naoSuportado) {
+      tribunaisSemSuporte.push({ p, motivo: detect?.conf?.motivo || 'tribunal desconhecido' });
+      continue;
+    }
+    if (!tribunaisComCredencial.has(detect.codigo)) {
+      semCredencial.push({ p, tribunal: detect.codigo });
+      continue;
+    }
+    elegiveis.push({ p, tribunal: detect.codigo });
+  }
+
+  // Pra cada elegível, marca se já tem sync MNI
+  const elegiveisSemSync = elegiveis.filter(({ p }) => !p.mniLastSync);
+  const elegiveisJaSync = elegiveis.filter(({ p }) => p.mniLastSync);
+  const elegiveisAtivos = elegiveis.filter(({ p }) => p.status !== 'archived');
+
+  // Modal de pré-execução com filtros
+  const r = await showModal('🔄 Sincronizar carteira via MNI', [
+    {
+      label: '✓ Pular processos já sincronizados via MNI',
+      name: 'pularJaSync',
+      type: 'checkbox',
+      default: true,
+      help: `${elegiveisJaSync.length} processo(s) já tem sync MNI prévio.`
+    },
+    {
+      label: '✓ Apenas processos ativos (ignora arquivados)',
+      name: 'apenasAtivos',
+      type: 'checkbox',
+      default: true,
+      help: `${elegiveis.length - elegiveisAtivos.length} processo(s) arquivado(s) seriam excluídos com este filtro.`
+    },
+    {
+      label: 'Delay entre requests (segundos)',
+      name: 'delay',
+      type: 'number',
+      default: 2,
+      step: '0.5',
+      help: 'Espera entre cada consulta MNI. 2s é seguro pra todos os tribunais. Reduza só se confirmado que tribunal suporta.'
+    }
+  ], {
+    confirmLabel: '🔄 Iniciar sincronização',
+    intro: `
+      <div style="background:var(--uc-cream);padding:12px 16px;border-radius:6px;font-size:13px;">
+        <strong>Status da carteira (${todos.filter(p => !p.deletedAt).length} processos):</strong><br>
+        ✓ Elegíveis pra sync: <strong>${elegiveis.length}</strong> (com CNJ + tribunal suportado + credencial)<br>
+        ↷ Sem CNJ: ${semCnj.length} (não dá pra detectar tribunal)<br>
+        ⛔ Tribunal não suportado: ${tribunaisSemSuporte.length}<br>
+        ⚠ Sem credencial cadastrada: ${semCredencial.length} ${semCredencial.length > 0 ? `<span style="color:var(--uc-amber);">(tribunais: ${[...new Set(semCredencial.map(x => x.tribunal))].join(', ')})</span>` : ''}<br>
+        <br>
+        <strong>Tempo estimado:</strong> ~${Math.ceil(elegiveisAtivos.length * 3 / 60)} min (2s delay + ~1s rede)
+      </div>
+    `
+  });
+  if (!r) return;
+
+  const [pularJaSync, apenasAtivos, delayStr] = r;
+  const delayMs = (parseFloat(delayStr) || 2) * 1000;
+
+  // Aplica filtros
+  let alvos = elegiveis;
+  if (pularJaSync) alvos = alvos.filter(({ p }) => !p.mniLastSync);
+  if (apenasAtivos) alvos = alvos.filter(({ p }) => p.status !== 'archived');
+
+  if (alvos.length === 0) {
+    toast('Nada a fazer', 'Nenhum processo elegível com os filtros selecionados.', 'info');
+    return;
+  }
+
+  // Confirmação final
+  const confirmFinal = await confirmDialog(
+    'Confirmar sincronização?',
+    `Vai consultar <strong>${alvos.length}</strong> processo(s) sequencialmente. Tempo estimado: ~${Math.ceil(alvos.length * 3 / 60)} min. Pode cancelar a qualquer momento.`,
+    true
+  );
+  if (!confirmFinal) return;
+
+  await _mniSyncCarteiraExecutar(alvos, delayMs, config);
+}
+
+async function _mniSyncCarteiraExecutar(alvos, delayMs, config) {
+  _mniBulkCancel = false;
+  const total = alvos.length;
+  const stats = {
+    sucesso: [],
+    falhas: [],
+    pulados: [],
+    inicio: Date.now()
+  };
+
+  // Modal de progresso
+  const modal = document.createElement('div');
+  modal.className = 'modal-backdrop';
+  modal.innerHTML = `
+    <div class="modal scroll-thin" style="max-width:560px;">
+      <h3 class="modal-title">🔄 Sincronizando carteira via MNI</h3>
+      <p class="help-text" id="_mniBulkStatus" style="margin-bottom:14px;">Iniciando…</p>
+      <div class="progress-wrap" style="margin-bottom:14px;">
+        <div class="progress-bar-bg"><div class="progress-bar-fg" id="_mniBulkBar" style="width:0%;"></div></div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:14px;font-size:12px;text-align:center;">
+        <div style="background:var(--uc-cream);padding:8px;border-radius:4px;">
+          <div style="color:var(--uc-warm-gray);font-size:10px;text-transform:uppercase;">Sucesso</div>
+          <div id="_mniBulkOk" style="color:var(--uc-green);font-weight:700;font-size:18px;">0</div>
+        </div>
+        <div style="background:var(--uc-cream);padding:8px;border-radius:4px;">
+          <div style="color:var(--uc-warm-gray);font-size:10px;text-transform:uppercase;">Falhas</div>
+          <div id="_mniBulkErr" style="color:var(--uc-red);font-weight:700;font-size:18px;">0</div>
+        </div>
+        <div style="background:var(--uc-cream);padding:8px;border-radius:4px;">
+          <div style="color:var(--uc-warm-gray);font-size:10px;text-transform:uppercase;">Restantes</div>
+          <div id="_mniBulkRest" style="font-weight:700;font-size:18px;">${total}</div>
+        </div>
+      </div>
+      <p class="help-text" id="_mniBulkProc" style="font-size:11px;color:var(--uc-warm-gray);margin-bottom:14px;font-family:ui-monospace,monospace;">Aguardando…</p>
+      <div class="flex gap-2">
+        <button class="btn btn-outline" id="_mniBulkCancel" style="flex:1;">⏸ Cancelar</button>
+      </div>
+    </div>
+  `;
+  $('modalContainer').appendChild(modal);
+
+  const elStatus = document.getElementById('_mniBulkStatus');
+  const elBar = document.getElementById('_mniBulkBar');
+  const elOk = document.getElementById('_mniBulkOk');
+  const elErr = document.getElementById('_mniBulkErr');
+  const elRest = document.getElementById('_mniBulkRest');
+  const elProc = document.getElementById('_mniBulkProc');
+  document.getElementById('_mniBulkCancel').onclick = () => { _mniBulkCancel = true; };
+
+  for (let i = 0; i < alvos.length; i++) {
+    if (_mniBulkCancel) break;
+    const { p, tribunal } = alvos[i];
+    const pct = Math.round(((i + 1) / total) * 100);
+    elBar.style.width = pct + '%';
+    elStatus.innerHTML = `Processando <strong>${i + 1} de ${total}</strong> (${pct}%)…`;
+    elProc.textContent = `${tribunal} · ${p.cnj || '(sem CNJ)'} · ${(p.name || '').slice(0, 50)}`;
+    elRest.textContent = total - i - 1;
+
+    try {
+      const resultado = await _mniSyncCarteiraProcessoUnico(p, tribunal, config);
+      if (resultado.sucesso) {
+        stats.sucesso.push({ id: p.id, cnj: p.cnj, name: p.name, tribunal });
+        elOk.textContent = stats.sucesso.length;
+      } else {
+        stats.falhas.push({ id: p.id, cnj: p.cnj, name: p.name, tribunal, erro: resultado.erro });
+        elErr.textContent = stats.falhas.length;
+      }
+    } catch (e) {
+      stats.falhas.push({ id: p.id, cnj: p.cnj, name: p.name, tribunal, erro: e.message || String(e) });
+      elErr.textContent = stats.falhas.length;
+    }
+
+    // Delay (exceto no último)
+    if (i < alvos.length - 1 && !_mniBulkCancel) {
+      await new Promise(res => setTimeout(res, delayMs));
+    }
+  }
+
+  modal.remove();
+  await _mniSyncCarteiraResumo(stats, total);
+}
+
+/**
+ * Sincroniza UM processo via MNI sem UI (silencioso). Retorna {sucesso, erro}.
+ * Reutiliza a lógica core do mniBuscarProcessoFlow + mniAplicarMudancasFlow.
+ */
+async function _mniSyncCarteiraProcessoUnico(p, tribunal, config) {
+  // Busca credencial
+  const meEmail = (window.UC_Auth?.getUser?.() || {}).email || '';
+  const meuNome = (typeof defaultAdvogado === 'function' ? defaultAdvogado(meEmail) : '') || '';
+  const candidatos = [p.advogadoResponsavel, p.advogadoSuplente, meuNome].filter(Boolean);
+  let cred = null;
+  for (const adv of candidatos) {
+    cred = await _mniBuscarCredencial(adv, tribunal);
+    if (cred) break;
+  }
+  if (!cred) {
+    // Fallback final: qualquer credencial do tribunal
+    const all = (await DB.getSetting('mniCredentials', [])) || [];
+    cred = all.find(c => c.tribunal === tribunal);
+  }
+  if (!cred) return { sucesso: false, erro: 'sem credencial pro tribunal' };
+
+  let senha;
+  try { senha = await window.MniCrypto.decrypt(cred.senhaCifrada); }
+  catch (e) { return { sucesso: false, erro: 'falha ao decifrar credencial' }; }
+
+  let data;
+  try {
+    const resp = await fetch(config.workerUrl.replace(/\/$/, ''), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        tribunal,
+        operacao: 'consultarProcesso',
+        cnj: p.cnj,
+        cpf: cred.cpf,
+        senha
+      })
+    });
+    data = await resp.json();
+  } catch (e) {
+    senha = null;
+    return { sucesso: false, erro: 'rede: ' + (e.message || String(e)) };
+  }
+  senha = null;
+
+  if (!data || data.sucesso === false) {
+    return { sucesso: false, erro: data?.erro || 'sem resposta' };
+  }
+
+  // Aplica mudanças silenciosamente (mesma função do flow normal)
+  try {
+    await mniAplicarMudancasFlow(p.id, tribunal, data);
+    return { sucesso: true };
+  } catch (e) {
+    return { sucesso: false, erro: 'apply: ' + (e.message || String(e)) };
+  }
+}
+
+async function _mniSyncCarteiraResumo(stats, totalPlanejado) {
+  const duracao = Math.round((Date.now() - stats.inicio) / 1000);
+  const totalProcessado = stats.sucesso.length + stats.falhas.length;
+  const cancelado = totalProcessado < totalPlanejado;
+
+  // Gera CSV de falhas pra download (se houver)
+  const csvFalhas = stats.falhas.length > 0
+    ? 'cnj,tribunal,nome,erro\n' + stats.falhas.map(f =>
+        `"${f.cnj || ''}","${f.tribunal}","${(f.name || '').replace(/"/g, '""')}","${(f.erro || '').replace(/"/g, '""')}"`
+      ).join('\n')
+    : '';
+
+  const modal = document.createElement('div');
+  modal.className = 'modal-backdrop';
+  modal.innerHTML = `
+    <div class="modal scroll-thin" style="max-width:600px;">
+      <h3 class="modal-title">${cancelado ? '⏸ Sincronização cancelada' : '✓ Sincronização concluída'}</h3>
+      <div style="background:var(--uc-cream);padding:14px 16px;border-radius:6px;margin-bottom:14px;">
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;text-align:center;">
+          <div>
+            <div style="color:var(--uc-warm-gray);font-size:11px;text-transform:uppercase;">Sucesso</div>
+            <div style="color:var(--uc-green);font-weight:700;font-size:24px;">${stats.sucesso.length}</div>
+          </div>
+          <div>
+            <div style="color:var(--uc-warm-gray);font-size:11px;text-transform:uppercase;">Falhas</div>
+            <div style="color:var(--uc-red);font-weight:700;font-size:24px;">${stats.falhas.length}</div>
+          </div>
+          <div>
+            <div style="color:var(--uc-warm-gray);font-size:11px;text-transform:uppercase;">Tempo</div>
+            <div style="font-weight:700;font-size:24px;">${Math.floor(duracao/60)}m ${duracao % 60}s</div>
+          </div>
+        </div>
+      </div>
+
+      ${stats.falhas.length > 0 ? `
+        <details style="margin-bottom:14px;">
+          <summary style="cursor:pointer;font-size:13px;color:var(--uc-gold);font-weight:600;">Ver ${stats.falhas.length} falha(s)</summary>
+          <div style="max-height:240px;overflow:auto;margin-top:10px;font-size:12px;background:var(--uc-cream);padding:10px;border-radius:4px;">
+            ${stats.falhas.slice(0, 50).map(f => `
+              <div style="border-bottom:1px solid var(--uc-line-soft);padding:6px 0;">
+                <code style="font-size:11px;">${escapeHtml(f.cnj || '?')}</code> · <span style="color:var(--uc-warm-gray);">${escapeHtml(f.tribunal)}</span><br>
+                <span style="font-size:11px;">${escapeHtml((f.name || '').slice(0, 80))}</span><br>
+                <span style="color:var(--uc-red);font-size:11px;">${escapeHtml(f.erro)}</span>
+              </div>
+            `).join('')}
+            ${stats.falhas.length > 50 ? `<p class="help-text" style="margin-top:8px;">...mais ${stats.falhas.length - 50} (baixe CSV pra ver tudo)</p>` : ''}
+          </div>
+        </details>
+      ` : ''}
+
+      <div class="flex gap-2 flex-wrap">
+        ${csvFalhas ? `<button class="btn btn-outline btn-sm" id="_mniBulkDlCsv">📋 Baixar CSV de falhas</button>` : ''}
+        <button class="btn btn-primary" id="_mniBulkClose" style="margin-left:auto;">Fechar</button>
+      </div>
+    </div>
+  `;
+  $('modalContainer').appendChild(modal);
+  document.getElementById('_mniBulkClose').onclick = () => modal.remove();
+  if (csvFalhas) {
+    document.getElementById('_mniBulkDlCsv').onclick = () => {
+      const blob = new Blob([csvFalhas], { type: 'text/csv;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `mni_bulk_falhas_${new Date().toISOString().slice(0, 10)}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 100);
+    };
+  }
+}
+
+// ====================================================================
 // MNI.5 — Protocolar petição via SOAP entregarManifestacaoProcessual
 // ====================================================================
 // Reusa toda infra de mniBuscarProcessoFlow (cofre, credenciais, worker).
@@ -19133,6 +19478,7 @@ const _VIEWER_HIDE_PATTERNS = [
   /mniBuscarProcessoFlow/, /mniBaixarDocumentosFlow/, /mniLimparMovimentosFlow/,
   /mniAddCredencialFlow/, /mniDeleteCredencial/, /mniEditCredencialFlow/,
   /mniResetCofre/, /mniRevealSenhaFlow/, /mniSaveConfigFlow/, /mniAvisosPendentesFlow/,
+  /mniSincronizarCarteiraFlow/,
   // DJEN (importa, agenda)
   /djenRunSearch/, /djenAgendarPrazos/, /djenAddOabFlow/, /djenRemoveOab/,
   /djenToggleOab/, /djenToggleAllOabs/,

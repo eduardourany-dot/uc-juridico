@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.64.20 (remove card 'Parte adversa (manual)' — MNI já traz partes/advogados)
-const CACHE_NAME = 'uc-juridico-v6-64-20';
+// Service Worker — UC Jurídico v6.64.21 (Sincronização MNI em massa — bulk sync da carteira)
+const CACHE_NAME = 'uc-juridico-v6-64-21';
 const APP_SHELL = [
   './',
   './index.html',
