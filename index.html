@@ -2557,9 +2557,9 @@ ${procsValidos.map((d, idx) => {
       </p>
 
       <table>
-        ${p.partes && p.partes.length ? `
-          <tr><th>Pólo ativo</th><td>${escapeHtml(p.partes.filter(pa => pa.polo === 'AT').map(pa => pa.nome).join(' · ') || '—')}</td></tr>
-          <tr><th>Pólo passivo</th><td>${escapeHtml(p.partes.filter(pa => pa.polo === 'PA').map(pa => pa.nome).join(' · ') || '—')}</td></tr>
+        ${(p.partes?.ativo?.length || p.partes?.passivo?.length) ? `
+          <tr><th>Pólo ativo</th><td>${escapeHtml((p.partes.ativo || []).map(pa => pa.nome).join(' · ') || '—')}</td></tr>
+          <tr><th>Pólo passivo</th><td>${escapeHtml((p.partes.passivo || []).map(pa => pa.nome).join(' · ') || '—')}</td></tr>
         ` : ''}
         ${p.type ? `<tr><th>Classe / Ação</th><td>${escapeHtml(p.type)}</td></tr>` : ''}
         ${p.dataDistribuicao ? `<tr><th>Data de distribuição</th><td>${_dt(p.dataDistribuicao)}</td></tr>` : ''}
