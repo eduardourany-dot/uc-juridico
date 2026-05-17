@@ -3107,10 +3107,10 @@ async function newProcessFlow() {
           </div>
           <div>
             <label class="label">Número CNJ (opcional)</label>
-            <p class="help-text" style="margin-bottom: 6px;">Tem o CNJ? Clique em <strong>Buscar MNI</strong> pra puxar tribunal, partes, advogados e movimentos direto do tribunal.</p>
+            <p class="help-text" style="margin-bottom: 6px;">Tem o CNJ? Os dados serão buscados automaticamente no tribunal ao clicar em <strong>Cadastrar</strong> (tribunal, partes, advogados, movimentos). Pra puxar antes e revisar, use <strong>Buscar MNI</strong>.</p>
             <div style="display: flex; gap: 8px; align-items: stretch;">
               <input type="text" class="input" id="newProcessCnj" placeholder="0000000-00.0000.0.00.0000" style="flex: 1;">
-              <button class="btn btn-secondary btn-sm" type="button" id="_npBuscarMniBtn" title="Detecta o tribunal pelo número do CNJ e busca dados via SOAP/MNI">🔍 Buscar MNI</button>
+              <button class="btn btn-secondary btn-sm" type="button" id="_npBuscarMniBtn" title="Detecta o tribunal pelo número do CNJ e busca dados via SOAP/MNI (também roda automático ao cadastrar)">🔍 Buscar MNI</button>
             </div>
             <div id="_npMniStatus" style="font-size:12px;color:var(--uc-warm-gray);margin-top:6px;"></div>
           </div>
@@ -3219,8 +3219,10 @@ async function newProcessFlow() {
     // Stash de dados MNI retornados pra anexar no save
     let _mniStash = null;
 
-    // ===== Botão "🔍 Buscar MNI" no campo CNJ =====
-    document.getElementById('_npBuscarMniBtn').onclick = async () => {
+    // ===== Função reutilizável: busca dados via MNI =====
+    // Chamada pelo botão "🔍 Buscar MNI" E também automaticamente no
+    // "Cadastrar" se CNJ preenchido + stash ainda vazio.
+    const executarBuscaMni = async () => {
       const cnj = document.getElementById('newProcessCnj').value.trim();
       const statusEl = document.getElementById('_npMniStatus');
       if (!cnj.replace(/\D/g, '')) {
@@ -3391,8 +3393,29 @@ async function newProcessFlow() {
       }
     };
 
+    // Botão "🔍 Buscar MNI" usa a função reutilizável
+    document.getElementById('_npBuscarMniBtn').onclick = executarBuscaMni;
+
     document.getElementById('_npCancel').onclick = () => { cleanup(); resolve(null); };
     document.getElementById('_npConfirm').onclick = async () => {
+      // Busca MNI automática: se tem CNJ preenchido e ainda não rodou busca,
+      // tenta consultar tribunal antes de salvar. Reaproveita toda a lógica
+      // do botão (cofre, credencial, erro tratado em statusEl).
+      const cnjAuto = document.getElementById('newProcessCnj').value.trim();
+      if (cnjAuto.replace(/\D/g, '').length >= 14 && !_mniStash) {
+        const confirmBtn = document.getElementById('_npConfirm');
+        confirmBtn.disabled = true;
+        const labelOriginal = confirmBtn.textContent;
+        confirmBtn.innerHTML = '<span style="display:inline-block;border:2px solid #d4cfc0;border-top-color:var(--uc-gold);border-radius:50%;width:12px;height:12px;animation:spin 0.8s linear infinite;vertical-align:-2px;margin-right:6px;"></span> Consultando tribunal…';
+        try {
+          await executarBuscaMni();
+        } catch (e) {
+          console.warn('[newProcess] busca MNI automática falhou', e);
+        }
+        confirmBtn.disabled = false;
+        confirmBtn.textContent = labelOriginal;
+      }
+
       const name = document.getElementById('newProcessName').value.trim();
       const cnj = document.getElementById('newProcessCnj').value.trim();
       const clienteId = document.getElementById('newProcessClienteId').value;
