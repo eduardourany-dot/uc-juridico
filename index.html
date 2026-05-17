@@ -4510,16 +4510,11 @@ function renderProcessOverview(p, events, deadlines, notes, jurisprudence) {
     </div>
     ` : ''}
 
-    ${(p.advNome || p.advLawyer) ? `
-    <div class="card mb-4">
-      <h3 class="font-serif text-lg font-semibold smallcaps mb-3" style="color: var(--uc-black);">Parte adversa (manual)</h3>
-      <div class="grid gap-2" style="grid-template-columns: 160px 1fr; font-size: 13px;">
-        ${p.advNome ? `<div style="color: var(--uc-warm-gray);">Nome:</div><div>${escapeHtml(p.advNome)}${p.advDoc ? ` <span style="color: var(--uc-warm-gray);">(${escapeHtml(p.advDoc)})</span>` : ''}</div>` : ''}
-        ${p.advLawyer ? `<div style="color: var(--uc-warm-gray);">Advogado:</div><div>${escapeHtml(_mergeAdvLawyer(p.advLawyer, p.advLawyerOab))}</div>` : ''}
-      </div>
-      <p class="help-text" style="margin-top: 8px;">Dados informados manualmente. A extração automática do DJEN aparece em card separado.</p>
-    </div>
-    ` : ''}
+${/* Card 'Parte adversa (manual)' removido em v6.64.20 — info de partes/advogados
+       agora vem do MNI no card 'Partes e advogados' abaixo. Os campos
+       p.advNome/p.advDoc/p.advLawyer continuam no schema pra compat de leitura
+       em outros lugares (export, busca, etc) mas não são mais exibidos nem
+       editáveis pelo form. */ ''}
 
     ${(isTributario(p.area) && (p.tipoExec || p.tributoPrincipal || p.statusFiscal || p.garantia || (p.cdas && p.cdas.length))) ? `
     <div class="card mb-4">
@@ -5763,12 +5758,10 @@ async function editProcessFlow() {
       { value: 'Passivo', label: 'Passivo (réu/executado)' }
     ]},
 
-    { label: 'Parte adversa — Nome', name: 'advNome', default: p.advNome || '', placeholder: 'opcional, se DJEN não extraiu' },
-    { label: 'Parte adversa — CPF/CNPJ', name: 'advDoc', default: p.advDoc || '', placeholder: 'opcional' },
-    { label: 'Advogado adverso', name: 'advLawyer',
-      // Migração: junta advLawyer + advLawyerOab legacy num campo só.
-      default: _mergeAdvLawyer(p.advLawyer, p.advLawyerOab),
-      placeholder: 'ex: João Silva · OAB/GO 12345' },
+    // Campos de parte adversa manual (advNome/advDoc/advLawyer) removidos do
+    // form em v6.64.20 — agora vêm do MNI no card 'Partes e advogados'.
+    // Valores existentes no schema são preservados (não sobrescritos) — só
+    // não são mais editáveis pelo form nem exibidos na visão geral.
 
     { label: 'Tribunal/Vara', name: 'court', default: p.court || '', placeholder: 'ex: TJGO 1ª Vara · TRF1 7ª Turma' },
     { label: 'Sistema', name: 'sistema', type: 'select', default: p.sistema || '', options: SISTEMA_OPTIONS },
@@ -5965,22 +5958,10 @@ async function editProcessFlow() {
           const match = _matchSelectOption(poloSelEl, polo);
           if (match) _setByName('polo', match);
         }
-        // Parte adversa: extrai do polo OPOSTO ao do cliente.
-        // Nova nomenclatura: 'Passivo' (cliente é réu → adversária ATIVO)
-        // ou 'Ativo' (cliente é autor → adversária PASSIVO). Tolera legacy
-        // 'Defesa'/'Ataque' via _normalizarPolo.
-        const meuPolo = _normalizarPolo(_getByName('polo') || p.polo) || 'Passivo';
-        const poloAdverso = meuPolo === 'Passivo' ? 'AT' : 'PA';
-        const partesAdversas = (data.partes || []).filter(x => x.polo === poloAdverso);
-        if (partesAdversas.length) {
-          if (!_getByName('advNome')) _setByName('advNome', partesAdversas[0].nome || '');
-          if (!_getByName('advDoc')) _setByName('advDoc', partesAdversas[0].cpfCnpj || '');
-          const advAdv = partesAdversas[0]?.advogados?.[0];
-          if (advAdv && !_getByName('advLawyer')) {
-            // Campo único combina nome + OAB ("João Silva · OAB/GO 12345")
-            _setByName('advLawyer', _mergeAdvLawyer(advAdv.nome, advAdv.oab));
-          }
-        }
+        // Parte adversa: auto-preenchimento dos campos advNome/advDoc/advLawyer
+        // removido em v6.64.20 — esses campos não existem mais no form. Info
+        // de partes/advogados já é salva via p.partes / p.advogados (objeto
+        // {ativo, passivo}) pelo próprio _mniAplicarMudancasFlow.
         // Valor da causa
         if (data.valorCausa && !_getByName('valorCausa')) {
           _setByName('valorCausa', String(data.valorCausa).replace(',', '.'));
@@ -6018,16 +5999,15 @@ async function editProcessFlow() {
 
   const r = await modalPromise;
   if (!r) return;
-  // Destructuring atualizado pra nova ordem dos fields:
-  // 0:name, 1:cnj, 2:clienteIds, 3:polo, 4:advNome, 5:advDoc, 6:advLawyer,
-  // 7:court, 8:sistema, 9:area, 10:type, 11:fase, 12:valorCausa,
-  // 13:dataDistribuicao, 14:risco, 15:advogadoResponsavel, 16:advogadoSuplente,
-  // 17+: tributário (condicional)
+  // Destructuring atualizado em v6.64.20 (removidos advNome/advDoc/advLawyer):
+  // 0:name, 1:cnj, 2:clienteIds, 3:polo,
+  // 4:court, 5:sistema, 6:area, 7:type, 8:fase, 9:valorCausa,
+  // 10:dataDistribuicao, 11:risco, 12:advogadoResponsavel, 13:advogadoSuplente,
+  // 14+: tributário (condicional)
   const [
     name, cnj,
     clienteIds,
     polo,
-    advNome, advDoc, advLawyer,
     court, sistema,
     area, type, fase,
     valorCausa, dataDistribuicao,
@@ -6049,10 +6029,9 @@ async function editProcessFlow() {
     clienteId: idsArray[0] || null,         // legacy: 1º do array
     client: nomesArray.join(', ') || null,  // legacy: string concatenada
     polo: polo || null,                     // 'Ativo' ou 'Passivo' (nova nomenclatura)
-    advNome: advNome || null,
-    advDoc: advDoc || null,
-    advLawyer: advLawyer || null,           // agora inclui nome + OAB juntos no mesmo campo
-    advLawyerOab: null,                     // legacy: limpa pra evitar duplicação visual em display
+    // advNome/advDoc/advLawyer/advLawyerOab removidos do form em v6.64.20 —
+    // os valores existentes em p são PRESERVADOS (não sobrescritos aqui).
+    // Partes/advogados agora vêm do MNI no p.partes / p.advogados.
     court: court || null,
     comarca: null,                          // campo removido do form — limpa pra coerência
     sistema: sistema || null,
