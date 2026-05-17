@@ -16236,8 +16236,14 @@ async function renderSettings() {
   const defaultPromptId = await DB.getSetting('defaultPromptId');
   state.prompts = prompts;
   let tab = state._settingsTab || 'appearance';
+  const isAdmin = window.UC_Auth?.getUser?.()?.role === 'admin';
   // Cliente só vê: appearance / security / about — qualquer outra cai pra appearance.
   if (_isClienteMode() && !['appearance', 'security', 'about'].includes(tab)) {
+    tab = 'appearance';
+    state._settingsTab = tab;
+  }
+  // Tabs restritas a admin: DJEN, MNI, Acessos. Advogado comum cai pra appearance.
+  if (!isAdmin && ['djen', 'mni', 'acessos'].includes(tab)) {
     tab = 'appearance';
     state._settingsTab = tab;
   }
@@ -16253,12 +16259,12 @@ async function renderSettings() {
     <div class="tabs">
       <button class="tab ${tab === 'appearance' ? 'active' : ''}" onclick="setSettingsTab('appearance')">Aparência</button>
       ${_isClienteMode() ? '' : `<button class="tab ${tab === 'equipe' ? 'active' : ''}" onclick="setSettingsTab('equipe')">Equipe</button>`}
-      ${_isClienteMode() ? '' : `<button class="tab ${tab === 'djen' ? 'active' : ''}" onclick="setSettingsTab('djen')">DJEN</button>`}
-      ${_isClienteMode() ? '' : `<button class="tab ${tab === 'mni' ? 'active' : ''}" onclick="setSettingsTab('mni')">MNI</button>`}
+      ${(!_isClienteMode() && isAdmin) ? `<button class="tab ${tab === 'djen' ? 'active' : ''}" onclick="setSettingsTab('djen')">DJEN</button>` : ''}
+      ${(!_isClienteMode() && isAdmin) ? `<button class="tab ${tab === 'mni' ? 'active' : ''}" onclick="setSettingsTab('mni')">MNI</button>` : ''}
       ${_isClienteMode() ? '' : `<button class="tab ${tab === 'prompts' ? 'active' : ''}" onclick="setSettingsTab('prompts')">Prompts</button>`}
       ${_isClienteMode() ? '' : `<button class="tab ${tab === 'backup' ? 'active' : ''}" onclick="setSettingsTab('backup')">Backup</button>`}
       ${_isClienteMode() ? '' : `<button class="tab ${tab === 'sync' ? 'active' : ''}" onclick="setSettingsTab('sync')">Sincronização</button>`}
-      ${(window.UC_Auth?.getUser?.()?.role === 'admin') ? `<button class="tab ${tab === 'acessos' ? 'active' : ''}" onclick="setSettingsTab('acessos')">🔐 Acessos</button>` : ''}
+      ${isAdmin ? `<button class="tab ${tab === 'acessos' ? 'active' : ''}" onclick="setSettingsTab('acessos')">🔐 Acessos</button>` : ''}
       ${_isClienteMode() ? '' : `<button class="tab ${tab === 'maintenance' ? 'active' : ''}" onclick="setSettingsTab('maintenance')">Manutenção</button>`}
       <button class="tab ${tab === 'security' ? 'active' : ''}" onclick="setSettingsTab('security')">Segurança</button>
       <button class="tab ${tab === 'about' ? 'active' : ''}" onclick="setSettingsTab('about')">Sobre</button>
@@ -16275,6 +16281,13 @@ function setSettingsTab(tab) {
 }
 
 function renderSettingsTab(tab, prompts, defaultPromptId) {
+  // Defesa em camadas: se alguém chamar diretamente com tab restrita
+  // (sem passar pelo renderSettings), bloqueia o render.
+  const isAdmin = window.UC_Auth?.getUser?.()?.role === 'admin';
+  if (!isAdmin && ['djen', 'mni', 'acessos'].includes(tab)) {
+    return '<p class="help-text" style="padding: 24px;">Esta seção é restrita aos administradores do escritório.</p>';
+  }
+
   if (tab === 'appearance') {
     const efetivo = _resolverTema(state.settings.theme);
     return `
@@ -20654,22 +20667,33 @@ function _djenMostrarBannerAutoCheck(novas, orfas) {
 }
 
 async function djenRunSearch() {
+  const isAdmin = window.UC_Auth?.getUser?.()?.role === 'admin';
   // Load config
   const allOabs = await DB.getSetting('djenOabs', DJEN_DEFAULT_OABS);
   if (!allOabs || allOabs.length === 0) {
-    toast('Cadastre OABs primeiro', 'Vá em Configurações → DJEN', 'error');
-    state._settingsTab = 'djen';
-    navigate('settings');
+    if (isAdmin) {
+      toast('Cadastre OABs primeiro', 'Vá em Configurações → DJEN', 'error');
+      state._settingsTab = 'djen';
+      navigate('settings');
+    } else {
+      toast('DJEN não configurado', 'Peça ao administrador do escritório para cadastrar as OABs em Configurações → DJEN.', 'error');
+    }
     return;
   }
   // Filter only enabled OABs (default true if field absent)
   const oabs = allOabs.filter(o => o.enabled !== false);
   if (oabs.length === 0) {
-    toast('Nenhuma OAB selecionada',
-      `Você tem ${allOabs.length} OAB(s) cadastrada(s) mas todas estão desmarcadas. Vá em Configurações → DJEN para marcar pelo menos uma.`,
-      'error');
-    state._settingsTab = 'djen';
-    navigate('settings');
+    if (isAdmin) {
+      toast('Nenhuma OAB selecionada',
+        `Você tem ${allOabs.length} OAB(s) cadastrada(s) mas todas estão desmarcadas. Vá em Configurações → DJEN para marcar pelo menos uma.`,
+        'error');
+      state._settingsTab = 'djen';
+      navigate('settings');
+    } else {
+      toast('Nenhuma OAB ativa',
+        `Há ${allOabs.length} OAB(s) cadastrada(s) mas todas estão desmarcadas. Peça ao administrador para reativar.`,
+        'error');
+    }
     return;
   }
   const lookbackDays = await DB.getSetting('djenLookbackDays', 7);
@@ -20721,6 +20745,7 @@ async function djenRunSearch() {
 }
 
 function djenShowError(err) {
+  const isAdmin = window.UC_Auth?.getUser?.()?.role === 'admin';
   const isCors = /CORS|Failed to fetch|NetworkError|access-control/i.test(err.message);
   const modal = document.createElement('div');
   modal.className = 'modal-backdrop';
@@ -20732,9 +20757,11 @@ function djenShowError(err) {
         <div class="callout warn" style="background: var(--uc-amber-soft); border: 1px solid var(--uc-amber); border-left: 4px solid var(--uc-amber); padding: 12px; border-radius: 4px; margin: 12px 0;">
           <strong>Diagnóstico:</strong> a API do CNJ provavelmente bloqueou a chamada direta do navegador (CORS).
           <br><br>
-          <strong>Solução em 5 min:</strong> publicar uma <em>Cloudflare Worker</em> (gratuita) que repassa as chamadas. Veja instruções em Configurações → DJEN.
+          ${isAdmin
+            ? `<strong>Solução em 5 min:</strong> publicar uma <em>Cloudflare Worker</em> (gratuita) que repassa as chamadas. Veja instruções em Configurações → DJEN.`
+            : `<strong>Peça ao administrador</strong> do escritório para verificar a configuração do Worker DJEN.`}
         </div>
-        <button class="btn btn-primary" id="_djenGoSettings" style="width:100%; margin-bottom:8px;">Ir para Configurações → DJEN</button>
+        ${isAdmin ? `<button class="btn btn-primary" id="_djenGoSettings" style="width:100%; margin-bottom:8px;">Ir para Configurações → DJEN</button>` : ''}
       ` : ''}
       <button class="btn btn-outline" id="_djenErrClose" style="width:100%;">Fechar</button>
     </div>`;

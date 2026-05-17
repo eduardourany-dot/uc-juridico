@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.64.7 (rodapé lê versão dinamicamente do SW via postMessage)
-const CACHE_NAME = 'uc-juridico-v6-64-7';
+// Service Worker — UC Jurídico v6.64.8 (Configurações: tabs DJEN/MNI/Acessos restritas a admins)
+const CACHE_NAME = 'uc-juridico-v6-64-8';
 const APP_SHELL = [
   './',
   './index.html',
