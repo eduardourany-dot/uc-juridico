@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.64.15 (P5 refactor: Custas vira CRUD de cadastro, sem cálculo automático)
-const CACHE_NAME = 'uc-juridico-v6-64-15';
+// Service Worker — UC Jurídico v6.64.16 (cadastro de cliente PJ auto-preenche via CNPJ na BrasilAPI)
+const CACHE_NAME = 'uc-juridico-v6-64-16';
 const APP_SHELL = [
   './',
   './index.html',
