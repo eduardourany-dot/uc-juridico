@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.64.4 (fix p.partes objeto/array no Relatório Auditoria + textos Gemini)
-const CACHE_NAME = 'uc-juridico-v6-64-4';
+// Service Worker — UC Jurídico v6.64.5 (remove botão 'Tentar via DJEN' do card de partes vazias)
+const CACHE_NAME = 'uc-juridico-v6-64-5';
 const APP_SHELL = [
   './',
   './index.html',

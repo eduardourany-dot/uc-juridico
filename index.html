@@ -4475,11 +4475,10 @@ function renderProcessOverview(p, events, deadlines, notes, jurisprudence) {
     <div class="card mb-4" style="background: var(--uc-cream); border: 1px dashed var(--uc-line);">
       <div style="display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap;">
         <div style="font-size: 13px; color: var(--uc-graphite); flex: 1; min-width: 240px;">
-          <strong>Partes e advogados ainda não cadastrados.</strong> Busque direto no tribunal via MNI (mais completo) ou aguarde extração automática quando uma publicação DJEN deste processo for importada.
+          <strong>Partes e advogados ainda não cadastrados.</strong> Busque direto no tribunal via MNI (mais completo).
         </div>
         <div class="flex gap-2 flex-wrap">
           <button class="btn btn-primary btn-sm" onclick="mniBuscarProcessoFlow('${p.id}')" style="white-space: nowrap;">🔍 Buscar via MNI</button>
-          <button class="btn btn-outline btn-sm" onclick="djenReExtractParties('${p.id}')" style="white-space: nowrap;">🔄 Tentar via DJEN</button>
         </div>
       </div>
     </div>
