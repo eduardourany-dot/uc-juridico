@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.64.16 (cadastro de cliente PJ auto-preenche via CNPJ na BrasilAPI)
-const CACHE_NAME = 'uc-juridico-v6-64-16';
+// Service Worker — UC Jurídico v6.64.17 (Identificação mostra Fase e Status — dados do MNI visíveis)
+const CACHE_NAME = 'uc-juridico-v6-64-17';
 const APP_SHELL = [
   './',
   './index.html',
