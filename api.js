@@ -392,7 +392,12 @@ async function callAppsScript(action, params, body) {
   const resp = await fetch(url.toString(), opts);
   if (!resp.ok) throw new Error('http_' + resp.status);
   const data = await resp.json();
-  if (data.error) throw new Error(data.error);
+  if (data.error) {
+    // Propaga mensagem detalhada (ex: erro da API Gemini/Claude com 429, 500, etc)
+    // mantendo o código de erro como prefixo pra debug.
+    const detail = data.message ? ': ' + data.message.slice(0, 300) : '';
+    throw new Error(data.error + detail);
+  }
   return data;
 }
 
@@ -541,11 +546,10 @@ const RemoteDB = {
   async deletePeticao(id) { return await softDelete_('peticoes', id); },
 
   // ====== Geração IA (peças + relatórios) ======
-  // Default agora: gemini-2.5-pro (ecossistema Google Workspace).
-  // O Apps Script backend deve rotear pra Google AI Studio quando
-  // modeloApi.startsWith('gemini'), ou Anthropic Claude se preferir manter
-  // como fallback. Pré-requisito Apps Script: configurar GEMINI_API_KEY
-  // nas Script Properties.
+  // Default: gemini-2.5-flash (free tier do Google AI Studio, ~1500 reqs/dia).
+  // Pra usar gemini-2.5-pro (qualidade superior, ~$0.05-0.10/peça), é preciso
+  // ativar billing no projeto Google Cloud (https://console.cloud.google.com/billing).
+  // Quando billing estiver ativo, mudar 'gemini-2.5-flash' → 'gemini-2.5-pro' aqui.
   //
   // briefing: string (requerimento do advogado)
   // contextoSnapshot: { processo, cliente, eventos[], prazos[], jurisprudencia[] }
@@ -556,7 +560,7 @@ const RemoteDB = {
       contextoSnapshot,
       modeloPromptSistema: opts.modeloPromptSistema || '',
       tipo: opts.tipo || 'outro',
-      modeloApi: opts.modeloApi || 'gemini-2.5-pro'
+      modeloApi: opts.modeloApi || 'gemini-2.5-flash'
     });
   },
 

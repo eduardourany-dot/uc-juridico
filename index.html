@@ -4154,7 +4154,7 @@ async function _gerarRelatorioAuditoriaComIA({ briefing, p, cliente, modo, nProc
     resp = await DB.gerarPeticaoIA(briefing, { processo: p || null, cliente: cliente || null }, {
       modeloPromptSistema: _PROMPT_SISTEMA_AUDITORIA,
       tipo: 'relatorio_auditoria',
-      modeloApi: 'gemini-2.5-pro'
+      modeloApi: 'gemini-2.5-flash'
     });
   } catch (e) {
     loading.remove();
@@ -14895,7 +14895,7 @@ async function gerarPeticaoIAFlow() {
     resp = await DB.gerarPeticaoIA(briefing, contextoSnapshot, {
       modeloPromptSistema: modeloEscolhido?.promptSistema || '',
       tipo: tipo || 'outro',
-      modeloApi: 'gemini-2.5-pro'
+      modeloApi: 'gemini-2.5-flash'
     });
   } catch (e) {
     loading.remove();

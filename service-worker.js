@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.64.2 (Apps Script aceita lista de OAUTH_CLIENT_IDS prod+staging)
-const CACHE_NAME = 'uc-juridico-v6-64-2';
+// Service Worker — UC Jurídico v6.64.3 (toast de erro IA mostra mensagem detalhada do Gemini/Claude)
+const CACHE_NAME = 'uc-juridico-v6-64-3';
 const APP_SHELL = [
   './',
   './index.html',
