@@ -758,6 +758,17 @@ function requireAdmin_() {
   }
 }
 
+/**
+ * Valida que o user atual pode gerenciar acessos de clientes
+ * (admin ou role='user' do escritório). Funções restritas a esse
+ * grupo gerenciam APENAS docs com role='cliente'.
+ */
+function requireCanWrite_() {
+  if (!currentUserDoc || !['admin', 'user'].includes(currentUserDoc.role)) {
+    throw new Error('insufficient_role: precisa ser admin ou user pra gerenciar acesso de clientes');
+  }
+}
+
 window.UC_admin = {
   async addUser(email, nome, role = 'user', clienteId = null) {
     requireAdmin_();
@@ -782,6 +793,42 @@ window.UC_admin = {
     requireAdmin_();
     const e = String(email || '').toLowerCase().trim();
     await updateDoc(doc(db, 'users', e), { clienteId: clienteId ? String(clienteId) : null });
+    return e;
+  },
+
+  /**
+   * Cria/atualiza/desativa o acesso de um CLIENTE ao sistema.
+   * Aceita non-admin (user role='user' pode chamar) — mais restrito que
+   * addUser. Validações:
+   *   - role hardcoded como 'cliente' (não dá pra promover)
+   *   - email obrigatório
+   *   - clienteId obrigatório quando ativando
+   *
+   * Uso típico: chamado pelo editClienteFlow quando flag `temAcessoSistema`
+   * muda. Pode ativar (criar/reativar) ou desativar (preserva histórico).
+   */
+  async toggleClienteAccess(email, ativo, nome, clienteId) {
+    requireCanWrite_();
+    const e = String(email || '').toLowerCase().trim();
+    if (!e) throw new Error('email_required');
+    if (ativo) {
+      if (!clienteId) throw new Error('clienteId_required');
+      // setDoc com merge: cria se não existe, atualiza se já existe.
+      // role='cliente' hardcoded — rules bloqueiam mudança.
+      const payload = {
+        email: e,
+        nome: nome || '',
+        role: 'cliente',
+        ativo: true,
+        escritorioId: (currentUserDoc && currentUserDoc.escritorioId) || 'UC',
+        clienteId: String(clienteId),
+        criadoEm: Date.now()
+      };
+      await setDoc(doc(db, 'users', e), payload, { merge: true });
+    } else {
+      // Desativar: apenas marca ativo=false. Preserva histórico.
+      await updateDoc(doc(db, 'users', e), { ativo: false });
+    }
     return e;
   },
   async backfillEscritorioId(escritorioId = 'UC') {

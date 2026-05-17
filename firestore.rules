@@ -107,18 +107,35 @@ service cloud.firestore {
     // users (allowlist)
     // ============================================================
     // Read aberto pra signedIn — precisa pra checar o próprio role.
-    // Write só admin, exceto bootstrap inicial do dono do escritório.
+    //
+    // Write:
+    //   - admin: gerencia qualquer doc (incluindo outros admins/users/viewers)
+    //   - user:  gerencia APENAS docs com role='cliente' (libera acesso pra
+    //            clientes do escritório) — não pode criar admins/users nem
+    //            promover/rebaixar; não pode auto-criar
+    //   - cliente/viewer: nada
+    //
+    // Bootstrap: o dono do escritório pode se criar como admin se ainda
+    // não existir nenhum doc dele.
     match /users/{email} {
       allow read: if isSignedIn();
-      allow create: if isAdmin() || (
-        isSignedIn()
-        && email == userEmail()
-        && userEmail() == 'eduardourany@uranydecastro.com.br'
-        && request.resource.data.role == 'admin'
-        && request.resource.data.ativo == true
-        && !exists(/databases/$(database)/documents/users/$(userEmail()))
-      );
-      allow update, delete: if isAdmin();
+      allow create: if isAdmin()
+        || (canWrite()
+            && request.resource.data.role == 'cliente'
+            && email != userEmail())
+        || (isSignedIn()
+            && email == userEmail()
+            && userEmail() == 'eduardourany@uranydecastro.com.br'
+            && request.resource.data.role == 'admin'
+            && request.resource.data.ativo == true
+            && !exists(/databases/$(database)/documents/users/$(userEmail())));
+      // Update: admin tudo, user só docs onde tanto o doc atual quanto o
+      // novo continuam role='cliente' (impede promoção via update).
+      allow update: if isAdmin()
+        || (canWrite()
+            && resource.data.role == 'cliente'
+            && request.resource.data.role == 'cliente');
+      allow delete: if isAdmin();
     }
 
     // ============================================================
