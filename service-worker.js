@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.64.13 (limpeza dead code: djenReExtract, wipeAllData, actionDebugToken + textos Claude→Gemini)
-const CACHE_NAME = 'uc-juridico-v6-64-13';
+// Service Worker — UC Jurídico v6.64.14 (P5: Custas processuais MVP Federal + Trabalhista)
+const CACHE_NAME = 'uc-juridico-v6-64-14';
 const APP_SHELL = [
   './',
   './index.html',

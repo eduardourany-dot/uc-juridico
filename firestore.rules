@@ -220,6 +220,7 @@ service cloud.firestore {
     match /peticao_modelos/{id}     { allow read: if isInternal(); allow create, update, delete: if canWrite(); }
     match /peticoes/{id}            { allow read: if isInternal(); allow create, update, delete: if canWrite(); }
     match /calculos/{id}            { allow read: if isInternal(); allow create, update, delete: if canWrite(); }
+    match /custas/{id}              { allow read: if isInternal(); allow create, update, delete: if canWrite(); }
 
     // ============================================================
     // MÓDULO FINANCEIRO (cliente bloqueado)
