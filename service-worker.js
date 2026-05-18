@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.64.24 (Worker MNI XML fix — schema MNI 2.2.2 correto)
-const CACHE_NAME = 'uc-juridico-v6-64-24';
+// Service Worker — UC Jurídico v6.64.25 (modal de protocolo expõe tipoDocumento + worker 0.10.3)
+const CACHE_NAME = 'uc-juridico-v6-64-25';
 const APP_SHELL = [
   './',
   './index.html',

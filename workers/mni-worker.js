@@ -1,4 +1,8 @@
 // UC Jurídico — MNI Worker genérico (multi-tribunal)
+// Versão: 0.10.3 · MNI.5 — remove <outroParametro> aninhado de <documento>
+//   - <outroParametro NomeArquivo> dentro de <documento> causava HTTP 500
+//     sem mensagem no Projudi TJGO. Removido — descricao do <documento>
+//     já carrega o nome.
 // Versão: 0.10.2 · MNI.5 — <parametros> usa atributos (nome="X" valor="Y")
 //   - Schema correto: <parametros nome="..." valor="..."/> self-closing
 //   - Antes (0.10.1) tinha sub-elementos <nome>/<valor> que o tribunal recusou
@@ -162,7 +166,7 @@ export default {
       const validados = codigos.filter(c => TRIBUNAIS_REGISTRY[c].validado);
       const naoSuportados = codigos.filter(c => TRIBUNAIS_REGISTRY[c].naoSuportado);
       return json({
-        worker: 'uc-mni', versao: '0.10.2',
+        worker: 'uc-mni', versao: '0.10.3',
         total: codigos.length,
         validados, naoSuportados,
         operacoes: ['consultarProcesso', 'entregarManifestacaoProcessual', 'health', 'listarTribunais', 'detectarPorCnj']
@@ -322,10 +326,13 @@ async function entregarManifestacao(conf, endpoint, { cnj, cpf, senha, tipoTrans
     // Documento principal = i===0, demais = anexos. Mas o WSDL aceita
     // múltiplos <documento> filhos sem hierarquia — o tribunal decide
     // qual é principal pela ordem (primeiro = principal).
+    //
+    // v0.10.3 (18/05/2026): removido <outroParametro NomeArquivo> aninhado
+    // dentro de <documento>. Causava HTTP 500 sem mensagem no TJGO Projudi.
+    // O nome do arquivo vai como atributo descricao do próprio <documento>.
     docsXml.push(`
       <documento idDocumento="${i+1}" tipoDocumento="${escapeXml(tipoDocumento)}" dataHora="${dataHora}" mimetype="${escapeXml(mimetype)}" nivelSigilo="${escapeXml(nivelSigilo)}" hash="${hash}" descricao="${escapeXml(descricaoDoc)}">
         <conteudo>${base64}</conteudo>
-        <outroParametro nome="NomeArquivo" valor="${escapeXml(nomeArquivo)}"/>
       </documento>`);
   }
 

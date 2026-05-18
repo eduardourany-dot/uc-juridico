@@ -18454,13 +18454,20 @@ async function mniProtocolarFlow(processId) {
     { label: 'Tipo de transmissão', name: 'tipo', type: 'select', default: '3', options: [
       { value: '3', label: '3 — Petição/Manifestação intercorrente (default)' }
     ], help: 'MVP suporta só manifestação intercorrente. Outros tipos (inicial, recurso, embargos) em versão futura.' },
+    { label: 'Tipo do documento (código CNJ)', name: 'tipoDocumento', type: 'select', default: '58', options: [
+      { value: '58', label: '58 — Petição (genérico, mais comum)' },
+      { value: '60', label: '60 — Outros documentos diversos' },
+      { value: '119', label: '119 — Manifestação' },
+      { value: '202', label: '202 — Procuração' },
+      { value: '1', label: '1 — Petição inicial' }
+    ], help: 'Código da Tabela CNJ. TJGO Projudi pode rejeitar códigos não esperados pro tipo de transmissão. Comece com 58.' },
     { label: 'Descrição da peça (complemento)', name: 'descricao', type: 'textarea', placeholder: 'Ex.: Manifestação sobre a contestação · Cumprimento de despacho de fls. 123', rows: 2 },
-    { label: 'Peça principal assinada (.pdf.p7s) — OBRIGATÓRIO', name: 'pdfPrincipal', type: 'file', accept: '.p7s,.pdf', help: 'PDF assinado digitalmente com certificado ICP-Brasil (CAdES/PKCS#7). Assine antes em SignerWeb, AC SAFEWEB, Acrobat (cert A1/A3) ou Assinador SERPRO. Máx ~3MB.' },
+    { label: 'Peça principal assinada (.pdf.p7s) — OBRIGATÓRIO', name: 'pdfPrincipal', type: 'file', accept: '.p7s,.pdf', help: 'PDF assinado digitalmente. Use o assinador oficial do Projudi (sai.jar) ou SignerWeb/SERPRO. Máx ~3MB.' },
     { label: 'Anexos assinados (.pdf.p7s, opcional, múltiplos)', name: 'pdfAnexos', type: 'file', accept: '.p7s,.pdf', multiple: true, help: 'Documentos comprobatórios — assinados se houver exigência. Total ≤ ~5MB.' }
   ], { confirmLabel: '📤 Protocolar' });
   if (!form) return;
 
-  const [, , tipoTransmissao, descricao, pdfPrincipalInput, pdfAnexosInput] = form;
+  const [, , tipoTransmissao, tipoDocumentoSel, descricao, pdfPrincipalInput, pdfAnexosInput] = form;
   // showModal retorna File pra type=file (ou FileList pra multiple)
   const pdfPrincipal = pdfPrincipalInput instanceof File ? pdfPrincipalInput
     : (pdfPrincipalInput && pdfPrincipalInput[0]) || null;
@@ -18503,14 +18510,17 @@ async function mniProtocolarFlow(processId) {
       nomeArquivo: pdfPrincipal.name,
       base64: await lerComoBase64(pdfPrincipal),
       mimetype: mimetypeDe(pdfPrincipal),
-      descricao: descricao || pdfPrincipal.name
+      descricao: descricao || pdfPrincipal.name,
+      tipoDocumento: tipoDocumentoSel || '58'
     }];
     for (const a of anexos) {
       documentos.push({
         nomeArquivo: a.name,
         base64: await lerComoBase64(a),
         mimetype: mimetypeDe(a),
-        descricao: a.name
+        descricao: a.name,
+        // Anexos sempre como '60' (Outros) — diferenciado da peça principal
+        tipoDocumento: '60'
       });
     }
   } catch (e) {
