@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.64.22 (modal de protocolo recusado expõe raw SOAP pra debug)
-const CACHE_NAME = 'uc-juridico-v6-64-22';
+// Service Worker — UC Jurídico v6.64.23 (protocolo MNI: aceita .pdf.p7s assinado + mimetype CAdES)
+const CACHE_NAME = 'uc-juridico-v6-64-23';
 const APP_SHELL = [
   './',
   './index.html',
