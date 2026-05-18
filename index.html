@@ -18442,6 +18442,12 @@ async function mniProtocolarFlow(processId) {
   }
 
   // 6. Modal de seleção da peça + descrição + arquivos
+  //
+  // TJGO Projudi (e maioria dos PJe) exige PDF ASSINADO DIGITALMENTE
+  // (PKCS#7/CAdES) — extensão final '.pdf.p7s'. Tentar enviar PDF puro
+  // resulta em HTTP 500 sem mensagem útil. App aceita .pdf.p7s direto;
+  // user assina externamente (SignerWeb, AC SAFEWEB, Acrobat com cert
+  // ICP-Brasil, Assinador SERPRO).
   const form = await showModal(`📤 Protocolar no ${codigo}`, [
     { label: 'Advogado peticionante', type: 'text', default: usedAdvogado, readOnly: true, help: 'Usa as credenciais do advogado responsável pelo processo.' },
     { label: 'CNJ do processo', type: 'text', default: p.cnj, readOnly: true },
@@ -18449,8 +18455,8 @@ async function mniProtocolarFlow(processId) {
       { value: '3', label: '3 — Petição/Manifestação intercorrente (default)' }
     ], help: 'MVP suporta só manifestação intercorrente. Outros tipos (inicial, recurso, embargos) em versão futura.' },
     { label: 'Descrição da peça (complemento)', name: 'descricao', type: 'textarea', placeholder: 'Ex.: Manifestação sobre a contestação · Cumprimento de despacho de fls. 123', rows: 2 },
-    { label: 'PDF principal (obrigatório)', name: 'pdfPrincipal', type: 'file', accept: '.pdf', help: 'A petição em si. Máx ~3MB recomendado.' },
-    { label: 'Anexos (opcional, múltiplos)', name: 'pdfAnexos', type: 'file', accept: '.pdf', multiple: true, help: 'Documentos comprobatórios. Total da consulta ≤ ~5MB.' }
+    { label: 'Peça principal assinada (.pdf.p7s) — OBRIGATÓRIO', name: 'pdfPrincipal', type: 'file', accept: '.p7s,.pdf', help: 'PDF assinado digitalmente com certificado ICP-Brasil (CAdES/PKCS#7). Assine antes em SignerWeb, AC SAFEWEB, Acrobat (cert A1/A3) ou Assinador SERPRO. Máx ~3MB.' },
+    { label: 'Anexos assinados (.pdf.p7s, opcional, múltiplos)', name: 'pdfAnexos', type: 'file', accept: '.p7s,.pdf', multiple: true, help: 'Documentos comprobatórios — assinados se houver exigência. Total ≤ ~5MB.' }
   ], { confirmLabel: '📤 Protocolar' });
   if (!form) return;
 
@@ -18458,8 +18464,21 @@ async function mniProtocolarFlow(processId) {
   // showModal retorna File pra type=file (ou FileList pra multiple)
   const pdfPrincipal = pdfPrincipalInput instanceof File ? pdfPrincipalInput
     : (pdfPrincipalInput && pdfPrincipalInput[0]) || null;
-  if (!pdfPrincipal) { toast('PDF principal obrigatório', '', 'error'); return; }
+  if (!pdfPrincipal) { toast('Peça principal obrigatória', '', 'error'); return; }
   const anexos = pdfAnexosInput && pdfAnexosInput.length ? Array.from(pdfAnexosInput) : [];
+
+  // Validação: aviso quando .pdf puro (provavelmente sem assinatura)
+  const isAssinado = (f) => /\.p7s$/i.test(f.name);
+  const arquivosNaoAssinados = [pdfPrincipal, ...anexos].filter(f => !isAssinado(f));
+  if (arquivosNaoAssinados.length > 0) {
+    const lista = arquivosNaoAssinados.map(f => '• ' + f.name).join('\n');
+    const proceed = await confirmDialog(
+      'Arquivos sem assinatura digital',
+      `Os arquivos abaixo NÃO têm extensão .p7s — provavelmente não estão assinados:\n\n${lista}\n\nA maioria dos tribunais (TJGO Projudi inclusive) RECUSA protocolo sem assinatura digital ICP-Brasil. Continuar mesmo assim?`,
+      true
+    );
+    if (!proceed) return;
+  }
 
   // 7. Lê arquivos como base64
   const lerComoBase64 = file => new Promise((resolve, reject) => {
@@ -18473,19 +18492,24 @@ async function mniProtocolarFlow(processId) {
     r.readAsDataURL(file);
   });
 
+  // Detecta mimetype apropriado:
+  //   .pdf.p7s ou .p7s → application/pkcs7-mime (CAdES embarcado)
+  //   .pdf             → application/pdf
+  const mimetypeDe = (f) => /\.p7s$/i.test(f.name) ? 'application/pkcs7-mime' : 'application/pdf';
+
   let documentos;
   try {
     documentos = [{
       nomeArquivo: pdfPrincipal.name,
       base64: await lerComoBase64(pdfPrincipal),
-      mimetype: 'application/pdf',
+      mimetype: mimetypeDe(pdfPrincipal),
       descricao: descricao || pdfPrincipal.name
     }];
     for (const a of anexos) {
       documentos.push({
         nomeArquivo: a.name,
         base64: await lerComoBase64(a),
-        mimetype: a.type || 'application/pdf',
+        mimetype: mimetypeDe(a),
         descricao: a.name
       });
     }
