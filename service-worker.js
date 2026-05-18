@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.64.25 (modal de protocolo expõe tipoDocumento + worker 0.10.3)
-const CACHE_NAME = 'uc-juridico-v6-64-25';
+// Service Worker — UC Jurídico v6.64.26 (modal de protocolo: campo Movimentação TPU CNJ + worker 0.10.4)
+const CACHE_NAME = 'uc-juridico-v6-64-26';
 const APP_SHELL = [
   './',
   './index.html',

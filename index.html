@@ -18453,21 +18453,22 @@ async function mniProtocolarFlow(processId) {
     { label: 'CNJ do processo', type: 'text', default: p.cnj, readOnly: true },
     { label: 'Tipo de transmissão', name: 'tipo', type: 'select', default: '3', options: [
       { value: '3', label: '3 — Petição/Manifestação intercorrente (default)' }
-    ], help: 'MVP suporta só manifestação intercorrente. Outros tipos (inicial, recurso, embargos) em versão futura.' },
-    { label: 'Tipo do documento (código CNJ)', name: 'tipoDocumento', type: 'select', default: '58', options: [
+    ], help: 'MVP suporta só manifestação intercorrente.' },
+    { label: 'Código da Movimentação (TPU CNJ) — OBRIGATÓRIO', name: 'codigoMovimento', type: 'text', default: '11383', placeholder: 'Ex.: 11383', help: 'Código da Tabela Processual Unificada do CNJ. Equivale ao campo "Tipo Movimentação" da tela web do Projudi. Defaults comuns: 11383 (Juntada de Petição) · 60 (Petição) · 11378 (Cumprimento de Despacho) · 985 (Manifestação). Confira no Projudi web qual código é usado pra esse tipo de peça.' },
+    { label: 'Tipo do documento / arquivo (código CNJ)', name: 'tipoDocumento', type: 'select', default: '58', options: [
       { value: '58', label: '58 — Petição (genérico, mais comum)' },
       { value: '60', label: '60 — Outros documentos diversos' },
       { value: '119', label: '119 — Manifestação' },
       { value: '202', label: '202 — Procuração' },
       { value: '1', label: '1 — Petição inicial' }
-    ], help: 'Código da Tabela CNJ. TJGO Projudi pode rejeitar códigos não esperados pro tipo de transmissão. Comece com 58.' },
+    ], help: 'Equivale ao campo "Tipo de Arquivo" da tela web do Projudi.' },
     { label: 'Descrição da peça (complemento)', name: 'descricao', type: 'textarea', placeholder: 'Ex.: Manifestação sobre a contestação · Cumprimento de despacho de fls. 123', rows: 2 },
     { label: 'Peça principal assinada (.pdf.p7s) — OBRIGATÓRIO', name: 'pdfPrincipal', type: 'file', accept: '.p7s,.pdf', help: 'PDF assinado digitalmente. Use o assinador oficial do Projudi (sai.jar) ou SignerWeb/SERPRO. Máx ~3MB.' },
     { label: 'Anexos assinados (.pdf.p7s, opcional, múltiplos)', name: 'pdfAnexos', type: 'file', accept: '.p7s,.pdf', multiple: true, help: 'Documentos comprobatórios — assinados se houver exigência. Total ≤ ~5MB.' }
   ], { confirmLabel: '📤 Protocolar' });
   if (!form) return;
 
-  const [, , tipoTransmissao, tipoDocumentoSel, descricao, pdfPrincipalInput, pdfAnexosInput] = form;
+  const [, , tipoTransmissao, codigoMovimento, tipoDocumentoSel, descricao, pdfPrincipalInput, pdfAnexosInput] = form;
   // showModal retorna File pra type=file (ou FileList pra multiple)
   const pdfPrincipal = pdfPrincipalInput instanceof File ? pdfPrincipalInput
     : (pdfPrincipalInput && pdfPrincipalInput[0]) || null;
@@ -18554,6 +18555,7 @@ async function mniProtocolarFlow(processId) {
         cpf: cred.cpf,
         senha,
         tipoTransmissao: Number(tipoTransmissao || 3),
+        codigoMovimento: codigoMovimento || '',  // TPU CNJ (obrigatório no Projudi)
         descricao: descricao || '',
         documentos
       })

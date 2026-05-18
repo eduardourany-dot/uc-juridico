@@ -1,4 +1,9 @@
 // UC Jurídico — MNI Worker genérico (multi-tribunal)
+// Versão: 0.10.4 · MNI.5 — adiciona codigoMovimento (TPU CNJ) como parametros
+//   - Campo 'Tipo Movimentação' obrigatório na tela web do Projudi —
+//     equivale ao código TPU CNJ. Sem ele, Projudi crashava HTTP 500
+//     sem mensagem (não chega a SOAP Fault).
+//   - Frontend agora coleta + envia via <parametros nome="codigoMovimento"/>
 // Versão: 0.10.3 · MNI.5 — remove <outroParametro> aninhado de <documento>
 //   - <outroParametro NomeArquivo> dentro de <documento> causava HTTP 500
 //     sem mensagem no Projudi TJGO. Removido — descricao do <documento>
@@ -166,7 +171,7 @@ export default {
       const validados = codigos.filter(c => TRIBUNAIS_REGISTRY[c].validado);
       const naoSuportados = codigos.filter(c => TRIBUNAIS_REGISTRY[c].naoSuportado);
       return json({
-        worker: 'uc-mni', versao: '0.10.3',
+        worker: 'uc-mni', versao: '0.10.4',
         total: codigos.length,
         validados, naoSuportados,
         operacoes: ['consultarProcesso', 'entregarManifestacaoProcessual', 'health', 'listarTribunais', 'detectarPorCnj']
@@ -237,9 +242,10 @@ export default {
         const documentos = Array.isArray(body.documentos) ? body.documentos : [];
         if (documentos.length === 0) return json({ error: 'documentos_obrigatorios' }, 400, corsHeaders);
         const tipoTransmissao = Number(body.tipoTransmissao || 3);  // 3 = Petição/Manifestação intercorrente
+        const codigoMovimento = String(body.codigoMovimento || '').trim();  // TPU CNJ (obrigatório no Projudi)
         const descricao = String(body.descricao || '').slice(0, 500);
         const result = await entregarManifestacao(conf, endpoint, {
-          cnj, cpf, senha, tipoTransmissao, descricao, documentos, debug
+          cnj, cpf, senha, tipoTransmissao, codigoMovimento, descricao, documentos, debug
         });
         result.tribunal = codigo;
         result.grau = grau;
@@ -306,7 +312,7 @@ async function healthCheck(conf) {
 //   - tipoDocumento default: 60 (Outros — Tabela CNJ — funciona pra petição)
 //   - nivelSigilo default: 0 (público)
 //   - hash SHA-256 do conteúdo é computado e enviado (alguns tribunais validam)
-async function entregarManifestacao(conf, endpoint, { cnj, cpf, senha, tipoTransmissao, descricao, documentos, debug }) {
+async function entregarManifestacao(conf, endpoint, { cnj, cpf, senha, tipoTransmissao, codigoMovimento, descricao, documentos, debug }) {
   // Pre-processa: computa hash de cada documento + monta XML
   const docsXml = [];
   for (let i = 0; i < documentos.length; i++) {
@@ -354,9 +360,16 @@ async function entregarManifestacao(conf, endpoint, { cnj, cpf, senha, tipoTrans
   // IMPORTANTE: <parametros> usa ATRIBUTOS XML (nome="X" valor="Y"),
   // NÃO sub-elementos. Validado em 18/05/2026 via erro SOAP do TJGO:
   // "elemento inesperado <nome> dentro de <parametros>".
+  //
+  // codigoMovimento (TPU CNJ) é OBRIGATÓRIO no Projudi — equivale ao
+  // campo 'Tipo Movimentação' da interface web. Sem ele, Projudi
+  // crasha com HTTP 500 sem mensagem estruturada.
   const parametros = [
     `<parametros nome="idTipoTransmissao" valor="${tipoTransmissao}"/>`
   ];
+  if (codigoMovimento) {
+    parametros.push(`<parametros nome="codigoMovimento" valor="${escapeXml(codigoMovimento)}"/>`);
+  }
   if (descricao) {
     parametros.push(`<parametros nome="Complemento" valor="${escapeXml(descricao)}"/>`);
   }
