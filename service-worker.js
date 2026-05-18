@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.64.23 (protocolo MNI: aceita .pdf.p7s assinado + mimetype CAdES)
-const CACHE_NAME = 'uc-juridico-v6-64-23';
+// Service Worker — UC Jurídico v6.64.24 (Worker MNI XML fix — schema MNI 2.2.2 correto)
+const CACHE_NAME = 'uc-juridico-v6-64-24';
 const APP_SHELL = [
   './',
   './index.html',
