@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.64.21 (Sincronização MNI em massa — bulk sync da carteira)
-const CACHE_NAME = 'uc-juridico-v6-64-21';
+// Service Worker — UC Jurídico v6.64.22 (modal de protocolo recusado expõe raw SOAP pra debug)
+const CACHE_NAME = 'uc-juridico-v6-64-22';
 const APP_SHELL = [
   './',
   './index.html',
