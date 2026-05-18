@@ -1,8 +1,11 @@
 // UC Jurídico — MNI Worker genérico (multi-tribunal)
+// Versão: 0.10.2 · MNI.5 — <parametros> usa atributos (nome="X" valor="Y")
+//   - Schema correto: <parametros nome="..." valor="..."/> self-closing
+//   - Antes (0.10.1) tinha sub-elementos <nome>/<valor> que o tribunal recusou
 // Versão: 0.10.1 · MNI.5 — XML fixed pro schema MNI 2.2.2 real
 //   - Removido <idTipoTransmissao> elemento direto (não existe no WSDL)
 //   - Removido <petição> wrapper (documentos vão direto)
-//   - idTipoTransmissao agora vai em <parametros><nome>/<valor></parametros>
+//   - idTipoTransmissao agora vai em <parametros>
 //   - Complemento idem (era outroParametro dentro de <petição>)
 //   - Ordem dos elementos respeitada: idManifestante, senhaManifestante,
 //     numeroProcesso, documento[], dataEnvio, parametros[]
@@ -159,7 +162,7 @@ export default {
       const validados = codigos.filter(c => TRIBUNAIS_REGISTRY[c].validado);
       const naoSuportados = codigos.filter(c => TRIBUNAIS_REGISTRY[c].naoSuportado);
       return json({
-        worker: 'uc-mni', versao: '0.10.1',
+        worker: 'uc-mni', versao: '0.10.2',
         total: codigos.length,
         validados, naoSuportados,
         operacoes: ['consultarProcesso', 'entregarManifestacaoProcessual', 'health', 'listarTribunais', 'detectarPorCnj']
@@ -340,11 +343,15 @@ async function entregarManifestacao(conf, endpoint, { cnj, cpf, senha, tipoTrans
   //
   // idTipoTransmissao NÃO é elemento direto — é parâmetro nome/valor.
   // <petição> wrapper NÃO existe — documentos vão diretos.
+  //
+  // IMPORTANTE: <parametros> usa ATRIBUTOS XML (nome="X" valor="Y"),
+  // NÃO sub-elementos. Validado em 18/05/2026 via erro SOAP do TJGO:
+  // "elemento inesperado <nome> dentro de <parametros>".
   const parametros = [
-    `<parametros><nome>idTipoTransmissao</nome><valor>${tipoTransmissao}</valor></parametros>`
+    `<parametros nome="idTipoTransmissao" valor="${tipoTransmissao}"/>`
   ];
   if (descricao) {
-    parametros.push(`<parametros><nome>Complemento</nome><valor>${escapeXml(descricao)}</valor></parametros>`);
+    parametros.push(`<parametros nome="Complemento" valor="${escapeXml(descricao)}"/>`);
   }
   const envelope = buildEnvelope(conf.namespace, 'entregarManifestacaoProcessual', `
     <idManifestante>${escapeXml(cpf)}</idManifestante>
