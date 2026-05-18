@@ -1,10 +1,16 @@
 // UC Jurídico — MNI Worker genérico (multi-tribunal)
+// Versão: 0.10.1 · MNI.5 — XML fixed pro schema MNI 2.2.2 real
+//   - Removido <idTipoTransmissao> elemento direto (não existe no WSDL)
+//   - Removido <petição> wrapper (documentos vão direto)
+//   - idTipoTransmissao agora vai em <parametros><nome>/<valor></parametros>
+//   - Complemento idem (era outroParametro dentro de <petição>)
+//   - Ordem dos elementos respeitada: idManifestante, senhaManifestante,
+//     numeroProcesso, documento[], dataEnvio, parametros[]
 // Versão: 0.10.0 · MNI.5 — entregarManifestacaoProcessual (MVP TJGO)
 //   - Nova operação: protocolar petição via SOAP MNI 2.2.2
 //   - SHA-256 do conteúdo de cada documento (alguns tribunais validam)
-//   - Default idTipoTransmissao=3 (manifestação intercorrente)
 //   - PDFs em base64 inline (sem MTOM por enquanto — funciona até ~5MB total)
-//   - Sem assinatura digital ICP — CPF+senha do advogado basta no Projudi
+//   - Assinatura digital ICP-Brasil obrigatória (.pdf.p7s) pra Projudi TJGO
 // Versão: 0.9.3 · timeout (45s sem docs, 90s com) + timing detalhado
 //   - signal: AbortSignal.timeout() pra falhar rápido quando Projudi engasga
 //   - tempoSoapMs / tempoParseMs / elapsedMs no JSON pra diagnóstico
@@ -320,16 +326,33 @@ async function entregarManifestacao(conf, endpoint, { cnj, cpf, senha, tipoTrans
       </documento>`);
   }
 
+  // Schema MNI 2.2.2 (tribunal listou explicitamente os elementos aceitos
+  // num erro SOAP em 18/05/2026): a operação entregarManifestacaoProcessual
+  // espera filhos diretos NESTA ordem do tipos-servico-intercomunicacao-2.2.2:
+  //
+  //   1. idManifestante      (string)
+  //   2. senhaManifestante   (string)
+  //   3. numeroProcesso      (string)
+  //   4. dadosBasicos        (opcional — não usado pra manifestação intercorrente)
+  //   5. documento[]         (1+ documentos, SEM wrapper <petição>)
+  //   6. dataEnvio           (yyyyMMddHHmmss)
+  //   7. parametros[]        (chave/valor — onde vai idTipoTransmissao e Complemento)
+  //
+  // idTipoTransmissao NÃO é elemento direto — é parâmetro nome/valor.
+  // <petição> wrapper NÃO existe — documentos vão diretos.
+  const parametros = [
+    `<parametros><nome>idTipoTransmissao</nome><valor>${tipoTransmissao}</valor></parametros>`
+  ];
+  if (descricao) {
+    parametros.push(`<parametros><nome>Complemento</nome><valor>${escapeXml(descricao)}</valor></parametros>`);
+  }
   const envelope = buildEnvelope(conf.namespace, 'entregarManifestacaoProcessual', `
     <idManifestante>${escapeXml(cpf)}</idManifestante>
     <senhaManifestante>${escapeXml(senha)}</senhaManifestante>
-    <idTipoTransmissao>${tipoTransmissao}</idTipoTransmissao>
     <numeroProcesso>${escapeXml(cnj)}</numeroProcesso>
+    ${docsXml.join('\n')}
     <dataEnvio>${mniDataHora(new Date())}</dataEnvio>
-    <petição>
-      ${descricao ? `<outroParametro nome="Complemento" valor="${escapeXml(descricao)}"/>` : ''}
-      ${docsXml.join('\n')}
-    </petição>
+    ${parametros.join('\n    ')}
   `);
 
   const t0 = Date.now();
