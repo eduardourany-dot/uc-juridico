@@ -18541,7 +18541,11 @@ async function mniProtocolarFlow(processId) {
       { label: 'Erro', type: 'text', default: data.erro || 'desconhecido', readOnly: true },
       { label: 'Mensagem do tribunal', type: 'textarea', default: data.mensagem || '(sem mensagem)', readOnly: true, rows: 4 },
       ...(data.httpStatus ? [{ label: 'HTTP', type: 'text', default: String(data.httpStatus), readOnly: true }] : []),
-      { label: 'Tempo', type: 'text', default: (elapsed/1000).toFixed(1) + 's', readOnly: true }
+      { label: 'Tempo', type: 'text', default: (elapsed/1000).toFixed(1) + 's', readOnly: true },
+      // Resposta crua do SOAP — útil pra diagnosticar quando o tribunal retorna
+      // 500 sem mensagem estruturada (Projudi TJGO faz isso quando rejeita
+      // por permissão, sigilo, formato, etc).
+      ...(data.raw ? [{ label: 'Resposta crua do tribunal (debug)', type: 'textarea', default: String(data.raw).slice(0, 3000), readOnly: true, rows: 8 }] : [])
     ], { confirmLabel: 'Entendi', cancelLabel: '' });
     return;
   }
