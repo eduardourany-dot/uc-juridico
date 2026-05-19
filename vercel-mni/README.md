@@ -104,10 +104,29 @@ Se Vercel `gru1` IPs também forem bloqueados pelo TRT18, próximas opções:
 ```
 vercel-mni/
 ├── api/
-│   └── mni.js          ← Adaptador Vercel Edge Function
+│   └── mni.js          ← Adaptador Vercel Edge Function (importa lib/mni-worker.js)
+├── lib/
+│   └── mni-worker.js   ← Cópia LOCAL de ../workers/mni-worker.js (sync manual)
+├── public/
+│   └── index.html      ← Landing page placeholder (Vercel exige)
 ├── vercel.json         ← Config (region: gru1)
+├── sync.bat            ← Script sync workers/mni-worker.js → lib/mni-worker.js
 ├── package.json
 └── README.md
 ```
 
-O código real do worker fica em `../workers/mni-worker.js` (compartilhado com Cloudflare). Vercel bundla automaticamente ao deploy.
+## Sincronizando o código
+
+Vercel Edge Functions **não pode importar arquivos de fora do diretório do projeto**, então temos uma CÓPIA de `workers/mni-worker.js` em `vercel-mni/lib/mni-worker.js`.
+
+**Quando atualizar `workers/mni-worker.js`:**
+
+```powershell
+cd vercel-mni
+.\sync.bat
+vercel deploy
+```
+
+(ou copia manualmente o arquivo de `../workers/mni-worker.js` pra `lib/mni-worker.js`)
+
+O Cloudflare Worker (`workers/mni-worker.js`) continua sendo a fonte canônica — deploy manual via dashboard.

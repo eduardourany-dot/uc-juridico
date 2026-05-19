@@ -12,7 +12,11 @@
 //
 // Mais detalhes: ./README.md
 
-import { handleMniRequest } from '../../workers/mni-worker.js';
+// IMPORTANTE: cópia local de workers/mni-worker.js (Vercel Edge Functions
+// não pode importar de fora do diretório do projeto). Manter sincronizado:
+// quando atualizar workers/mni-worker.js, rodar o sync.bat (ou copiar manual)
+// pra refletir aqui. Detalhe no README.md → seção "Sincronizando o código".
+import { handleMniRequest } from '../lib/mni-worker.js';
 
 export const config = {
   runtime: 'edge',

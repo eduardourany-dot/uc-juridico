@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <title>UC Jurídico — Worker MNI (Vercel)</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 600px; margin: 60px auto; padding: 0 24px; color: #333; }
+    h1 { color: #b87f1c; }
+    code { background: #f5f0e0; padding: 2px 6px; border-radius: 3px; font-size: 13px; }
+    .badge { display: inline-block; background: #b87f1c; color: white; padding: 4px 10px; border-radius: 4px; font-size: 12px; font-weight: 600; }
+  </style>
+</head>
+<body>
+  <h1>UC Jurídico — Worker MNI</h1>
+  <p><span class="badge">Vercel Edge · região gru1 (São Paulo)</span></p>
+  <p>Proxy SOAP/MNI multi-tribunal pro app UC Jurídico.</p>
+  <p>Endpoint:</p>
+  <ul>
+    <li><code>POST /api/mni</code> — body JSON com operacao + tribunal + auth</li>
+    <li><code>GET /api/mni?info</code> — info do worker e tribunais suportados</li>
+  </ul>
+  <p style="font-size: 12px; color: #888; margin-top: 40px;">
+    Acesso restrito ao escritório Urany de Castro Advocacia.<br>
+    Validação por OAuth Google + credenciais cifradas no cofre MNI.
+  </p>
+</body>
+</html>
