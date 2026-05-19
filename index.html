@@ -3306,14 +3306,22 @@ async function newProcessFlow() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ tribunal: codigo, operacao: 'consultarProcesso', cnj, cpf: cred.cpf, senha })
         });
-        const data = await resp.json();
+        let data = await resp.json();
         senha = null;
+        let viaDataJud = false;
 
         if (!resp.ok || data.sucesso === false) {
-          statusEl.innerHTML = `<span style="color:var(--uc-red);">✗ ${escapeHtml(data.erro || 'falhou')}${data.mensagem ? ' · ' + escapeHtml(data.mensagem.slice(0, 120)) : ''}</span>`;
-          // Mesmo com erro, preenche tribunal
-          document.getElementById('newProcessTribunal').value = codigo;
-          return;
+          // Fallback automático pra DataJud (consulta pública CNJ)
+          statusEl.innerHTML = `MNI falhou (${escapeHtml(data.erro || 'HTTP ' + resp.status)}) · tentando DataJud…`;
+          const djResult = await _chamarDataJudWorker(codigo, cnj, cfg);
+          if (djResult.sucesso) {
+            data = djResult.data;
+            viaDataJud = true;
+          } else {
+            statusEl.innerHTML = `<span style="color:var(--uc-red);">✗ MNI: ${escapeHtml(data.erro || 'falhou')} · DataJud: ${escapeHtml(djResult.erro || 'falhou')}</span>`;
+            document.getElementById('newProcessTribunal').value = codigo;
+            return;
+          }
         }
 
         // Sucesso — preenche campos do form
@@ -3386,7 +3394,8 @@ async function newProcessFlow() {
         // Painel "Detalhes detectados pelo MNI"
         _mniRenderDetalhesPanel(data);
 
-        statusEl.innerHTML = `<span style="color:var(--uc-green);">✓ ${data.partes?.length || 0} parte(s) · ${data.movimentos?.length || 0} movimento(s) · ${data.elapsedMs}ms. Campos preenchidos · veja detalhes abaixo.</span>`;
+        const fonte = viaDataJud ? ' via DataJud (CNJ público)' : '';
+        statusEl.innerHTML = `<span style="color:var(--uc-green);">✓${fonte} ${data.partes?.length || 0} parte(s) · ${data.movimentos?.length || 0} movimento(s) · ${data.elapsedMs}ms. Campos preenchidos · veja detalhes abaixo.</span>`;
       } catch (e) {
         senha = null;
         statusEl.innerHTML = `<span style="color:var(--uc-red);">✗ ${escapeHtml(e.message || e)}</span>`;
@@ -5923,10 +5932,20 @@ async function editProcessFlow() {
           body: JSON.stringify({ tribunal: codigo, operacao: 'consultarProcesso', cnj: cnjAtual, cpf: cred.cpf, senha })
         });
         senha = null;
-        const data = await resp.json();
-        const elapsed = Date.now() - t0;
+        let data = await resp.json();
+        let elapsed = Date.now() - t0;
+        let viaDataJud = false;
         if (!resp.ok || data.sucesso === false || data.erro) {
-          throw new Error(data.erro || data.mensagem || `HTTP ${resp.status}`);
+          // Fallback automático pra DataJud (consulta pública CNJ)
+          if (mniStatus) mniStatus.innerHTML = `MNI falhou (${escapeHtml(data.erro || 'HTTP ' + resp.status)}) · tentando DataJud…`;
+          const djResult = await _chamarDataJudWorker(codigo, cnjAtual, config);
+          if (djResult.sucesso) {
+            data = djResult.data;
+            viaDataJud = true;
+            elapsed = Date.now() - t0;
+          } else {
+            throw new Error(`MNI: ${data.erro || 'HTTP ' + resp.status}. DataJud: ${djResult.erro || 'falhou'}`);
+          }
         }
 
         // 6. Aplica dados aos campos. Só sobrescreve campo vazio (não derruba
@@ -5986,7 +6005,11 @@ async function editProcessFlow() {
           if (sistemaMatch) _setByName('sistema', sistemaMatch);
         }
 
-        if (mniStatus) mniStatus.innerHTML = `<span style="color: var(--uc-green);">✓ Preenchido via ${escapeHtml(codigo)} · ${data.partes?.length || 0} parte(s) · ${data.movimentos?.length || 0} movimento(s) · ${elapsed}ms · adv. ${escapeHtml(usedAdvogado || '?')}</span>`;
+        if (mniStatus) {
+          const fonte = viaDataJud ? `${escapeHtml(codigo)} via DataJud (CNJ público)` : `${escapeHtml(codigo)}`;
+          const advInfo = viaDataJud ? '' : ` · adv. ${escapeHtml(usedAdvogado || '?')}`;
+          mniStatus.innerHTML = `<span style="color: var(--uc-green);">✓ Preenchido via ${fonte} · ${data.partes?.length || 0} parte(s) · ${data.movimentos?.length || 0} movimento(s) · ${elapsed}ms${advInfo}</span>`;
+        }
       } catch (e) {
         console.warn('[edit MNI] falhou', e);
         if (mniStatus) mniStatus.innerHTML = `<span style="color: var(--uc-red);">✗ ${escapeHtml(e.message || String(e))}</span>`;
@@ -17905,6 +17928,37 @@ function _mniConvertPartes(dataPartes) {
 
 async function _mniGetConfig() {
   return (await DB.getSetting('mniConfig', null)) || {};
+}
+
+/**
+ * Chama o Worker pra consulta pública via DataJud do CNJ.
+ * Não exige credencial (API pública, APIKey embarcada no Worker).
+ *
+ * Retorna {data, sucesso} se OK, ou {erro, mensagem} se falhar.
+ * Usado como fallback automático quando MNI falha (TRTs bloqueados,
+ * sem credencial, tribunal naoSuportado, etc).
+ */
+async function _chamarDataJudWorker(codigo, cnj, config) {
+  if (!config?.workerUrl) return { erro: 'worker_nao_configurado' };
+  if (!cnj) return { erro: 'cnj_obrigatorio' };
+  try {
+    const resp = await fetch(config.workerUrl.replace(/\/$/, ''), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        tribunal: codigo,
+        operacao: 'consultarProcessoDataJud',
+        cnj
+      })
+    });
+    const data = await resp.json();
+    if (resp.ok && data.sucesso !== false) {
+      return { data, sucesso: true };
+    }
+    return { erro: data.erro || data.error || `HTTP ${resp.status}`, mensagem: data.mensagem };
+  } catch (e) {
+    return { erro: 'rede', mensagem: String(e?.message || e) };
+  }
 }
 
 async function _mniGetRegistry() {

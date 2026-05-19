@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.64.35 (DataJud fallback automático quando MNI falha — TRTs, sem credencial, 403)
-const CACHE_NAME = 'uc-juridico-v6-64-35';
+// Service Worker — UC Jurídico v6.64.36 (DataJud fallback também nos botões "Buscar MNI" dos modais Novo/Editar processo)
+const CACHE_NAME = 'uc-juridico-v6-64-36';
 const APP_SHELL = [
   './',
   './index.html',
