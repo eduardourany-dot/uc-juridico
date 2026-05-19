@@ -18454,7 +18454,7 @@ async function mniProtocolarFlow(processId) {
     { label: 'Tipo de transmissão', name: 'tipo', type: 'select', default: '3', options: [
       { value: '3', label: '3 — Petição/Manifestação intercorrente (default)' }
     ], help: 'MVP suporta só manifestação intercorrente.' },
-    { label: 'Código da Movimentação (TPU CNJ) — OBRIGATÓRIO', name: 'codigoMovimento', type: 'text', default: '11383', placeholder: 'Ex.: 11383', help: 'Código da Tabela Processual Unificada do CNJ. Equivale ao campo "Tipo Movimentação" da tela web do Projudi. Defaults comuns: 11383 (Juntada de Petição) · 60 (Petição) · 11378 (Cumprimento de Despacho) · 985 (Manifestação). Confira no Projudi web qual código é usado pra esse tipo de peça.' },
+    { label: 'Tipo de Movimentação (id Projudi TJGO) — OBRIGATÓRIO', name: 'codigoMovimento', type: 'text', default: '260', placeholder: 'Ex.: 260', help: 'Id interno do Projudi TJGO (não TPU CNJ universal). Equivale ao campo "Tipo Movimentação" da tela web. Comuns: 260 (Petição genérica) · 65 (Contestação) · 139 (Embargos à Execução) · 1003 (Embargos de declaração) · 1008 (Exceção de pré-executividade) · 86 (Impugnação) · 142 (Impugnação Valor da Causa) · 996 (Apelação) · 990 (Agravo de Petição) · 998 (Contrarrazões) · 999 (Contraminuta) · 235 (Cumprimento de Sentença) · 10007 (Petição Inicial) · 10019 (Memoriais) · 10045 (Réplica). Todos mapeiam pro CNJ:85. Consulte lista completa em Peticionamento → Busca de MovimentacaoTipo no Projudi.' },
     { label: 'Tipo do documento / arquivo (código CNJ)', name: 'tipoDocumento', type: 'select', default: '58', options: [
       { value: '58', label: '58 — Petição (genérico, mais comum)' },
       { value: '60', label: '60 — Outros documentos diversos' },

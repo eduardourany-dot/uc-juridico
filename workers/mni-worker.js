@@ -1,4 +1,12 @@
 // UC Jurídico — MNI Worker genérico (multi-tribunal)
+// Versão: 0.10.5 · MNI.5 — múltiplos nomes de parâmetro pra movimento Projudi
+//   - TJGO Projudi tem tabela interna (id 260, 1003, etc), todos
+//     mapeados pro CNJ:85 (Juntada → Petição)
+//   - Envia 3 variantes do nome do parâmetro pro mesmo valor:
+//     idTipoMovimentacao, codigoMovimento, movimentoLocal
+//   - Plus: codigoNacional=85 sempre (universal pra peticionamento TJGO)
+//   - Projudi pega o que reconhece, ignora o resto (não há erro de
+//     parâmetro desconhecido)
 // Versão: 0.10.4 · MNI.5 — adiciona codigoMovimento (TPU CNJ) como parametros
 //   - Campo 'Tipo Movimentação' obrigatório na tela web do Projudi —
 //     equivale ao código TPU CNJ. Sem ele, Projudi crashava HTTP 500
@@ -171,7 +179,7 @@ export default {
       const validados = codigos.filter(c => TRIBUNAIS_REGISTRY[c].validado);
       const naoSuportados = codigos.filter(c => TRIBUNAIS_REGISTRY[c].naoSuportado);
       return json({
-        worker: 'uc-mni', versao: '0.10.4',
+        worker: 'uc-mni', versao: '0.10.5',
         total: codigos.length,
         validados, naoSuportados,
         operacoes: ['consultarProcesso', 'entregarManifestacaoProcessual', 'health', 'listarTribunais', 'detectarPorCnj']
@@ -361,14 +369,25 @@ async function entregarManifestacao(conf, endpoint, { cnj, cpf, senha, tipoTrans
   // NÃO sub-elementos. Validado em 18/05/2026 via erro SOAP do TJGO:
   // "elemento inesperado <nome> dentro de <parametros>".
   //
-  // codigoMovimento (TPU CNJ) é OBRIGATÓRIO no Projudi — equivale ao
-  // campo 'Tipo Movimentação' da interface web. Sem ele, Projudi
-  // crasha com HTTP 500 sem mensagem estruturada.
+  // codigoMovimento é o ID INTERNO do Projudi TJGO (não TPU CNJ).
+  // Validado em 18/05/2026: TJGO Projudi tem tabela própria (id 260 =
+  // Petição genérica, 1003 = Embargos de declaração, etc) — todos
+  // mapeados pro CNJ:85 (Juntada de Petição).
+  //
+  // Enviamos múltiplos nomes de parâmetro pra cobrir diferenças de
+  // implementação entre tribunais. Projudi pega o que reconhece, ignora
+  // o resto (não dá erro de parâmetro desconhecido).
   const parametros = [
     `<parametros nome="idTipoTransmissao" valor="${tipoTransmissao}"/>`
   ];
   if (codigoMovimento) {
+    // Id interno do Projudi (260, 1003, etc) — nome do parâmetro pode
+    // variar por tribunal. Mandamos as 3 variantes mais comuns.
+    parametros.push(`<parametros nome="idTipoMovimentacao" valor="${escapeXml(codigoMovimento)}"/>`);
     parametros.push(`<parametros nome="codigoMovimento" valor="${escapeXml(codigoMovimento)}"/>`);
+    parametros.push(`<parametros nome="movimentoLocal" valor="${escapeXml(codigoMovimento)}"/>`);
+    // Código nacional CNJ — 85 (Juntada → Petição) é universal pra TJGO
+    parametros.push(`<parametros nome="codigoNacional" valor="85"/>`);
   }
   if (descricao) {
     parametros.push(`<parametros nome="Complemento" valor="${escapeXml(descricao)}"/>`);

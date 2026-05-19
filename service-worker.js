@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.64.26 (modal de protocolo: campo Movimentação TPU CNJ + worker 0.10.4)
-const CACHE_NAME = 'uc-juridico-v6-64-26';
+// Service Worker — UC Jurídico v6.64.27 (modal de protocolo: id Projudi TJGO + worker 0.10.5 múltiplos params)
+const CACHE_NAME = 'uc-juridico-v6-64-27';
 const APP_SHELL = [
   './',
   './index.html',
