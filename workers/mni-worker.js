@@ -1,4 +1,12 @@
 // UC Jurídico — MNI Worker genérico (multi-tribunal)
+// Versão: 0.10.9 · MNI.5 — testa <conteudoBase64> em vez de <conteudo>
+//   - Debug confirmou: base64 chega no Worker (343856 chars) e vai pro XML
+//     (envelope 344KB), mas Projudi reportava 'Arquivo sem conteúdo'.
+//   - Conclusão: nome do elemento <conteudo> está errado no schema do
+//     Projudi TJGO. Testando alternativa <conteudoBase64> (camelCase
+//     comum em sistemas Java).
+//   - Se Projudi rejeitar com Unmarshalling Error, ele vai listar o
+//     nome correto na mensagem — replicar pra 0.10.10.
 // Versão: 0.10.8 · MNI.5 — debugInfo no response (envelope size, base64 size, hash)
 //   - Diagnóstico: quando tribunal retorna 'Arquivo sem conteúdo' precisamos
 //     ver se o base64 chegou ao Worker E se o XML montado tem o conteúdo.
@@ -198,7 +206,7 @@ export default {
       const validados = codigos.filter(c => TRIBUNAIS_REGISTRY[c].validado);
       const naoSuportados = codigos.filter(c => TRIBUNAIS_REGISTRY[c].naoSuportado);
       return json({
-        worker: 'uc-mni', versao: '0.10.8',
+        worker: 'uc-mni', versao: '0.10.9',
         total: codigos.length,
         validados, naoSuportados,
         operacoes: ['consultarProcesso', 'entregarManifestacaoProcessual', 'health', 'listarTribunais', 'detectarPorCnj']
@@ -362,12 +370,14 @@ async function entregarManifestacao(conf, endpoint, { cnj, cpf, senha, tipoTrans
     // múltiplos <documento> filhos sem hierarquia — o tribunal decide
     // qual é principal pela ordem (primeiro = principal).
     //
-    // v0.10.3 (18/05/2026): removido <outroParametro NomeArquivo> aninhado
-    // dentro de <documento>. Causava HTTP 500 sem mensagem no TJGO Projudi.
-    // O nome do arquivo vai como atributo descricao do próprio <documento>.
+    // v0.10.9 (18/05/2026): tentando <conteudoBase64> em vez de <conteudo>.
+    // Validado em 18/05: <conteudo> com 343856 chars de base64 chegou no
+    // tribunal mas Projudi reportou 'Arquivo sem conteúdo' — significa que
+    // o nome do elemento está errado. Padrão Java/Projudi usa camelCase
+    // tipo 'conteudoBase64'.
     docsXml.push(`
       <documento idDocumento="${i+1}" tipoDocumento="${escapeXml(tipoDocumento)}" dataHora="${dataHora}" mimetype="${escapeXml(mimetype)}" nivelSigilo="${escapeXml(nivelSigilo)}" hash="${hash}" descricao="${escapeXml(descricaoDoc)}">
-        <conteudo>${base64}</conteudo>
+        <conteudoBase64>${base64}</conteudoBase64>
       </documento>`);
   }
 
