@@ -1,4 +1,9 @@
 // UC Jurídico — MNI Worker genérico (multi-tribunal)
+// Versão: 0.10.8 · MNI.5 — debugInfo no response (envelope size, base64 size, hash)
+//   - Diagnóstico: quando tribunal retorna 'Arquivo sem conteúdo' precisamos
+//     ver se o base64 chegou ao Worker E se o XML montado tem o conteúdo.
+//   - Não precisa flag — sempre inclui debugInfo no result (overhead mínimo).
+//   - debug=true ainda adiciona rawXml (resposta) + rawRequest (primeiros 8KB do envelope).
 // Versão: 0.10.7 · MNI.5 — parametros nome="ID_MOVIMENTACAO_TIPO" (UPPER)
 //   - Erro estruturado do Projudi confirmou nome exato do parâmetro:
 //     "O parâmetro ID_MOVIMENTACAO_TIPO não foi informado."
@@ -193,7 +198,7 @@ export default {
       const validados = codigos.filter(c => TRIBUNAIS_REGISTRY[c].validado);
       const naoSuportados = codigos.filter(c => TRIBUNAIS_REGISTRY[c].naoSuportado);
       return json({
-        worker: 'uc-mni', versao: '0.10.7',
+        worker: 'uc-mni', versao: '0.10.8',
         total: codigos.length,
         validados, naoSuportados,
         operacoes: ['consultarProcesso', 'entregarManifestacaoProcessual', 'health', 'listarTribunais', 'detectarPorCnj']
@@ -446,12 +451,25 @@ async function entregarManifestacao(conf, endpoint, { cnj, cpf, senha, tipoTrans
   const text = await resp.text();
   const tempoSoapMs = Date.now() - t0;
 
+  // Info de debug do REQUEST enviado — útil pra diagnosticar quando
+  // tribunal responde 'conteúdo vazio' ou similar. Inclui no objeto de
+  // diagnóstico independente de sucesso/falha.
+  const debugInfo = {
+    envelopeSize: envelope.length,
+    docsCount: documentos.length,
+    doc0_base64Size: documentos[0]?.base64?.length || 0,
+    doc0_hash: documentos[0] ? await sha256Hex(documentos[0].base64) : null,
+    doc0_mimetype: documentos[0]?.mimetype,
+    doc0_nomeArquivo: documentos[0]?.nomeArquivo,
+    parametros: parametros.join(' · ')
+  };
+
   if (!resp.ok) {
-    return { sucesso: false, erro: 'http_' + resp.status, httpStatus: resp.status, elapsedMs: tempoSoapMs, raw: text.slice(0, 4000) };
+    return { sucesso: false, erro: 'http_' + resp.status, httpStatus: resp.status, elapsedMs: tempoSoapMs, raw: text.slice(0, 4000), debugInfo };
   }
   const fault = extractFault(text);
   if (fault) {
-    return { sucesso: false, erro: 'soap_fault', mensagem: fault, elapsedMs: tempoSoapMs, raw: text.slice(0, 4000) };
+    return { sucesso: false, erro: 'soap_fault', mensagem: fault, elapsedMs: tempoSoapMs, raw: text.slice(0, 4000), debugInfo };
   }
 
   const parsed = parseEntregaManifestacao(text);
@@ -460,9 +478,13 @@ async function entregarManifestacao(conf, endpoint, { cnj, cpf, senha, tipoTrans
     elapsedMs: tempoSoapMs,
     tempoSoapMs,
     rawSize: text.length,
+    debugInfo,
     ...parsed
   };
-  if (debug) result.rawXml = text;
+  if (debug) {
+    result.rawXml = text;
+    result.rawRequest = envelope.slice(0, 8000);  // primeiros 8KB do request
+  }
   return result;
 }
 

@@ -18582,6 +18582,17 @@ async function mniProtocolarFlow(processId) {
 
   // 9. Trata resposta
   if (!data.sucesso) {
+    // Constrói resumo do debugInfo se disponível
+    const debugLines = data.debugInfo ? [
+      'Envelope: ' + (data.debugInfo.envelopeSize || 0) + ' bytes',
+      'Documentos: ' + (data.debugInfo.docsCount || 0),
+      'Base64 doc[0]: ' + (data.debugInfo.doc0_base64Size || 0) + ' chars',
+      'Hash SHA-256: ' + (data.debugInfo.doc0_hash || '?'),
+      'Mimetype: ' + (data.debugInfo.doc0_mimetype || '?'),
+      'Nome: ' + (data.debugInfo.doc0_nomeArquivo || '?'),
+      'Parâmetros: ' + (data.debugInfo.parametros || '?')
+    ].join('\n') : '';
+
     await showModal('Protocolo recusado', [
       { label: 'Erro', type: 'text', default: data.erro || 'desconhecido', readOnly: true },
       { label: 'Mensagem do tribunal', type: 'textarea', default: data.mensagem || '(sem mensagem)', readOnly: true, rows: 4 },
@@ -18590,7 +18601,9 @@ async function mniProtocolarFlow(processId) {
       // Resposta crua do SOAP — útil pra diagnosticar quando o tribunal retorna
       // 500 sem mensagem estruturada (Projudi TJGO faz isso quando rejeita
       // por permissão, sigilo, formato, etc).
-      ...(data.raw ? [{ label: 'Resposta crua do tribunal (debug)', type: 'textarea', default: String(data.raw).slice(0, 3000), readOnly: true, rows: 8 }] : [])
+      ...(data.raw ? [{ label: 'Resposta crua do tribunal (debug)', type: 'textarea', default: String(data.raw).slice(0, 3000), readOnly: true, rows: 8 }] : []),
+      // Info do request enviado — pra confirmar que XML/base64 não estão vazios
+      ...(debugLines ? [{ label: 'Request enviado (debug)', type: 'textarea', default: debugLines, readOnly: true, rows: 7 }] : [])
     ], { confirmLabel: 'Entendi', cancelLabel: '' });
     return;
   }
