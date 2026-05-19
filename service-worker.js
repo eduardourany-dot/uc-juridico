@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.64.27 (modal de protocolo: id Projudi TJGO + worker 0.10.5 múltiplos params)
-const CACHE_NAME = 'uc-juridico-v6-64-27';
+// Service Worker — UC Jurídico v6.64.28 (tipoDocumento usa id Projudi TJGO em vez de TPU CNJ)
+const CACHE_NAME = 'uc-juridico-v6-64-28';
 const APP_SHELL = [
   './',
   './index.html',

@@ -1,4 +1,11 @@
 // UC Jurídico — MNI Worker genérico (multi-tribunal)
+// Versão: 0.10.6 · MNI.5 — tipoDocumento default = id Projudi (não TPU CNJ)
+//   - Projudi TJGO valida tipoDocumento contra tabela 'arquivoTipo'
+//     interna, NÃO contra TPU CNJ universal
+//   - Tabela Projudi: 16=Petição, 6=Petição Inicial, 23=Contestação,
+//     108=Alegações Finais, 8=Procuração, 17=Substabelecimento, 1=Outros
+//   - Default mudou de '60' (CNJ Outros) pra '1' (Projudi Outros)
+//   - Frontend agora envia id Projudi explícito no payload
 // Versão: 0.10.5 · MNI.5 — múltiplos nomes de parâmetro pra movimento Projudi
 //   - TJGO Projudi tem tabela interna (id 260, 1003, etc), todos
 //     mapeados pro CNJ:85 (Juntada → Petição)
@@ -179,7 +186,7 @@ export default {
       const validados = codigos.filter(c => TRIBUNAIS_REGISTRY[c].validado);
       const naoSuportados = codigos.filter(c => TRIBUNAIS_REGISTRY[c].naoSuportado);
       return json({
-        worker: 'uc-mni', versao: '0.10.5',
+        worker: 'uc-mni', versao: '0.10.6',
         total: codigos.length,
         validados, naoSuportados,
         operacoes: ['consultarProcesso', 'entregarManifestacaoProcessual', 'health', 'listarTribunais', 'detectarPorCnj']
@@ -331,7 +338,9 @@ async function entregarManifestacao(conf, endpoint, { cnj, cpf, senha, tipoTrans
     }
     const nomeArquivo = String(d.nomeArquivo || `doc-${i+1}.pdf`).slice(0, 200);
     const mimetype = String(d.mimetype || 'application/pdf');
-    const tipoDocumento = String(d.tipoDocumento || '60');  // 60 = Outros (genérico)
+    // v0.10.6: default = '1' (Outros, id Projudi TJGO) em vez de '60' (TPU CNJ).
+    // Projudi TJGO valida contra tabela 'arquivoTipo' interna (não tabela CNJ).
+    const tipoDocumento = String(d.tipoDocumento || '1');
     const nivelSigilo = String(d.nivelSigilo != null ? d.nivelSigilo : 0);
     const descricaoDoc = String(d.descricao || nomeArquivo).slice(0, 200);
     const hash = await sha256Hex(base64);

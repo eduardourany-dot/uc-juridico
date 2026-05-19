@@ -18455,13 +18455,15 @@ async function mniProtocolarFlow(processId) {
       { value: '3', label: '3 — Petição/Manifestação intercorrente (default)' }
     ], help: 'MVP suporta só manifestação intercorrente.' },
     { label: 'Tipo de Movimentação (id Projudi TJGO) — OBRIGATÓRIO', name: 'codigoMovimento', type: 'text', default: '260', placeholder: 'Ex.: 260', help: 'Id interno do Projudi TJGO (não TPU CNJ universal). Equivale ao campo "Tipo Movimentação" da tela web. Comuns: 260 (Petição genérica) · 65 (Contestação) · 139 (Embargos à Execução) · 1003 (Embargos de declaração) · 1008 (Exceção de pré-executividade) · 86 (Impugnação) · 142 (Impugnação Valor da Causa) · 996 (Apelação) · 990 (Agravo de Petição) · 998 (Contrarrazões) · 999 (Contraminuta) · 235 (Cumprimento de Sentença) · 10007 (Petição Inicial) · 10019 (Memoriais) · 10045 (Réplica). Todos mapeiam pro CNJ:85. Consulte lista completa em Peticionamento → Busca de MovimentacaoTipo no Projudi.' },
-    { label: 'Tipo do documento / arquivo (código CNJ)', name: 'tipoDocumento', type: 'select', default: '58', options: [
-      { value: '58', label: '58 — Petição (genérico, mais comum)' },
-      { value: '60', label: '60 — Outros documentos diversos' },
-      { value: '119', label: '119 — Manifestação' },
-      { value: '202', label: '202 — Procuração' },
-      { value: '1', label: '1 — Petição inicial' }
-    ], help: 'Equivale ao campo "Tipo de Arquivo" da tela web do Projudi.' },
+    { label: 'Tipo do arquivo (id Projudi TJGO)', name: 'tipoDocumento', type: 'select', default: '16', options: [
+      { value: '16', label: '16 — Petição (default)' },
+      { value: '6',  label: '6 — Petição Inicial' },
+      { value: '23', label: '23 — Contestação' },
+      { value: '108', label: '108 — Alegações Finais' },
+      { value: '8',  label: '8 — Procuração' },
+      { value: '17', label: '17 — Substabelecimento' },
+      { value: '1',  label: '1 — Outros' }
+    ], help: 'Id Projudi TJGO (tabela arquivoTipo, não TPU CNJ). Equivale ao campo "Tipo de Arquivo" da tela web. Anexos comuns: 27 (CPF) · 28 (CI) · 29 (Comprovante de Endereço).' },
     { label: 'Descrição da peça (complemento)', name: 'descricao', type: 'textarea', placeholder: 'Ex.: Manifestação sobre a contestação · Cumprimento de despacho de fls. 123', rows: 2 },
     { label: 'Peça principal assinada (.pdf.p7s) — OBRIGATÓRIO', name: 'pdfPrincipal', type: 'file', accept: '.p7s,.pdf', help: 'PDF assinado digitalmente. Use o assinador oficial do Projudi (sai.jar) ou SignerWeb/SERPRO. Máx ~3MB.' },
     { label: 'Anexos assinados (.pdf.p7s, opcional, múltiplos)', name: 'pdfAnexos', type: 'file', accept: '.p7s,.pdf', multiple: true, help: 'Documentos comprobatórios — assinados se houver exigência. Total ≤ ~5MB.' }
@@ -18520,8 +18522,8 @@ async function mniProtocolarFlow(processId) {
         base64: await lerComoBase64(a),
         mimetype: mimetypeDe(a),
         descricao: a.name,
-        // Anexos sempre como '60' (Outros) — diferenciado da peça principal
-        tipoDocumento: '60'
+        // Anexos como id Projudi 1 (Outros) — id genérico da tabela arquivoTipo
+        tipoDocumento: '1'
       });
     }
   } catch (e) {
