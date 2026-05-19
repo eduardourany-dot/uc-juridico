@@ -1,4 +1,10 @@
 // UC Jurídico — MNI Worker genérico (multi-tribunal)
+// Versão: 0.12.1 · DataJud fix — não exige cpf/senha (API pública CNJ)
+//   - Bug 0.12.0: validação 'cpf_senha_obrigatorios' bloqueava DataJud
+//     antes de chegar no handler da operação (HTTP 400 imediato)
+//   - Fix: validação movida pra dentro de consultarProcesso e
+//     entregarManifestacaoProcessual (que realmente precisam de credencial)
+//   - DataJud usa APIKey embarcada do CNJ, sem credencial de tribunal
 // Versão: 0.12.0 · DataJud fallback — consulta REST pública do CNJ
 //   - Nova operação 'consultarProcessoDataJud': API pública oficial do CNJ
 //   - Cobre tribunais bloqueados pelo MNI (TRTs com WAF, IPs cloud filtrados)
@@ -234,7 +240,7 @@ export async function handleMniRequest(request, env) {
       const validados = codigos.filter(c => TRIBUNAIS_REGISTRY[c].validado);
       const naoSuportados = codigos.filter(c => TRIBUNAIS_REGISTRY[c].naoSuportado);
       return json({
-        worker: 'uc-mni', versao: '0.12.0',
+        worker: 'uc-mni', versao: '0.12.1',
         total: codigos.length,
         validados, naoSuportados,
         operacoes: ['consultarProcesso', 'entregarManifestacaoProcessual', 'consultarProcessoDataJud', 'health', 'listarTribunais', 'detectarPorCnj']
@@ -290,11 +296,14 @@ export async function handleMniRequest(request, env) {
     const debug = !!body.debug;
     const incluirDocumentos = body.incluirDocumentos === true;
 
-    if (!cpf || !senha) return json({ error: 'cpf_senha_obrigatorios' }, 400, corsHeaders);
+    // NOTA v0.12.1: validação cpf/senha movida pra dentro de cada operação
+    // que realmente precisa (MNI clássico). DataJud é API pública do CNJ
+    // (auth = APIKey embarcada no Worker), não precisa de credencial.
 
     try {
       if (operacao === 'consultarProcesso') {
         if (!cnj) return json({ error: 'cnj_obrigatorio' }, 400, corsHeaders);
+        if (!cpf || !senha) return json({ error: 'cpf_senha_obrigatorios' }, 400, corsHeaders);
         const result = await consultarProcesso(conf, endpoint, { cnj, cpf, senha, debug, incluirDocumentos });
         result.tribunal = codigo;
         result.grau = grau;
@@ -302,6 +311,7 @@ export async function handleMniRequest(request, env) {
       }
       if (operacao === 'entregarManifestacaoProcessual') {
         if (!cnj) return json({ error: 'cnj_obrigatorio' }, 400, corsHeaders);
+        if (!cpf || !senha) return json({ error: 'cpf_senha_obrigatorios' }, 400, corsHeaders);
         const documentos = Array.isArray(body.documentos) ? body.documentos : [];
         if (documentos.length === 0) return json({ error: 'documentos_obrigatorios' }, 400, corsHeaders);
         const tipoTransmissao = Number(body.tipoTransmissao || 3);  // 3 = Petição/Manifestação intercorrente
