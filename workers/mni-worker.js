@@ -1,4 +1,11 @@
 // UC Jurídico — MNI Worker genérico (multi-tribunal)
+// Versão: 0.10.10 · MNI.5 — volta <conteudo> + normaliza base64 (whitespace)
+//   - Teste anterior com <conteudoBase64> confirmou que Projudi NÃO
+//     reconhece esse nome (HTTP 500 em 1.1s, sem mensagem).
+//   - <conteudo> é o nome correto (parser reconhece, mas valor vinha vazio).
+//   - Suspeita: base64 com whitespace (RFC 2045 quebra a cada 76 chars)
+//     pode estar invalidando o parser do Projudi. Agora removemos
+//     todo \s+ do base64 antes de incluir no XML.
 // Versão: 0.10.9 · MNI.5 — testa <conteudoBase64> em vez de <conteudo>
 //   - Debug confirmou: base64 chega no Worker (343856 chars) e vai pro XML
 //     (envelope 344KB), mas Projudi reportava 'Arquivo sem conteúdo'.
@@ -206,7 +213,7 @@ export default {
       const validados = codigos.filter(c => TRIBUNAIS_REGISTRY[c].validado);
       const naoSuportados = codigos.filter(c => TRIBUNAIS_REGISTRY[c].naoSuportado);
       return json({
-        worker: 'uc-mni', versao: '0.10.9',
+        worker: 'uc-mni', versao: '0.10.10',
         total: codigos.length,
         validados, naoSuportados,
         operacoes: ['consultarProcesso', 'entregarManifestacaoProcessual', 'health', 'listarTribunais', 'detectarPorCnj']
@@ -352,7 +359,11 @@ async function entregarManifestacao(conf, endpoint, { cnj, cpf, senha, tipoTrans
   const docsXml = [];
   for (let i = 0; i < documentos.length; i++) {
     const d = documentos[i];
-    const base64 = String(d.base64 || '');
+    // Normaliza base64: remove TODO whitespace (espaços, \r, \n, tabs).
+    // O FileReader.readAsDataURL pode retornar base64 com quebras de linha
+    // conforme RFC 2045. Parsers SOAP estritos (Projudi) podem rejeitar
+    // base64 com whitespace embebido como "conteúdo inválido".
+    const base64 = String(d.base64 || '').replace(/\s+/g, '');
     if (!base64) {
       return { sucesso: false, erro: 'documento_vazio', mensagem: `Documento ${i+1} sem conteúdo base64` };
     }
@@ -370,14 +381,17 @@ async function entregarManifestacao(conf, endpoint, { cnj, cpf, senha, tipoTrans
     // múltiplos <documento> filhos sem hierarquia — o tribunal decide
     // qual é principal pela ordem (primeiro = principal).
     //
-    // v0.10.9 (18/05/2026): tentando <conteudoBase64> em vez de <conteudo>.
-    // Validado em 18/05: <conteudo> com 343856 chars de base64 chegou no
-    // tribunal mas Projudi reportou 'Arquivo sem conteúdo' — significa que
-    // o nome do elemento está errado. Padrão Java/Projudi usa camelCase
-    // tipo 'conteudoBase64'.
+    // v0.10.10 (18/05/2026): VOLTANDO pra <conteudo> (era o nome correto).
+    // Teste anterior com <conteudoBase64> deu HTTP 500 sem mensagem em
+    // 1.1s — parser do Projudi NÃO conhece esse nome. <conteudo> é
+    // reconhecido (1.4s + erro estruturado).
+    //
+    // Mantendo o nome correto mas:
+    //   - Normalizamos base64 removendo whitespace (acima)
+    //   - Mantemos sem CDATA (base64 não tem chars XML especiais)
     docsXml.push(`
       <documento idDocumento="${i+1}" tipoDocumento="${escapeXml(tipoDocumento)}" dataHora="${dataHora}" mimetype="${escapeXml(mimetype)}" nivelSigilo="${escapeXml(nivelSigilo)}" hash="${hash}" descricao="${escapeXml(descricaoDoc)}">
-        <conteudoBase64>${base64}</conteudoBase64>
+        <conteudo>${base64}</conteudo>
       </documento>`);
   }
 
