@@ -18502,10 +18502,17 @@ async function mniProtocolarFlow(processId) {
     r.readAsDataURL(file);
   });
 
-  // Detecta mimetype apropriado:
-  //   .pdf.p7s ou .p7s → application/pkcs7-mime (CAdES embarcado)
-  //   .pdf             → application/pdf
-  const mimetypeDe = (f) => /\.p7s$/i.test(f.name) ? 'application/pkcs7-mime' : 'application/pdf';
+  // Mimetype: sempre 'application/pdf' (mesmo pra .p7s).
+  //
+  // Raciocínio: o .pdf.p7s do Projudi é um PDF com assinatura CAdES
+  // EMBARCADA dentro do próprio PDF (não destacada). Semanticamente,
+  // o conteúdo continua sendo um PDF. Projudi extrai a assinatura
+  // lendo o binário.
+  //
+  // Validado em 18/05/2026: enviar 'application/pkcs7-mime' fazia o
+  // Projudi tratar como "assinatura destacada" e procurar o PDF anexo
+  // que não existe — erro: "Arquivo sem conteúdo".
+  const mimetypeDe = (f) => 'application/pdf';
 
   let documentos;
   try {

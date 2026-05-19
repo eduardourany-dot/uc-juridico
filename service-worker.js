@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.64.29 (worker 0.10.7 — parametros nome=ID_MOVIMENTACAO_TIPO)
-const CACHE_NAME = 'uc-juridico-v6-64-29';
+// Service Worker — UC Jurídico v6.64.30 (mimetype sempre application/pdf — Projudi não aceita pkcs7-mime)
+const CACHE_NAME = 'uc-juridico-v6-64-30';
 const APP_SHELL = [
   './',
   './index.html',
