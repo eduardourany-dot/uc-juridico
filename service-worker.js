@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.64.33 (UC_admin.addUser sincroniza Firestore + Apps Script Sheets)
-const CACHE_NAME = 'uc-juridico-v6-64-33';
+// Service Worker — UC Jurídico v6.64.34 (variante Vercel Edge Function pro Worker MNI — região gru1 SP)
+const CACHE_NAME = 'uc-juridico-v6-64-34';
 const APP_SHELL = [
   './',
   './index.html',

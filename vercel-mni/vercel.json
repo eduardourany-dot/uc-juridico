@@ -1,0 +1,6 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "buildCommand": "echo 'No build needed — Edge Functions deployed directly'",
+  "regions": ["gru1"],
+  "framework": null
+}

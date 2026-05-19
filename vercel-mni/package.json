@@ -1,0 +1,7 @@
+{
+  "name": "uc-juridico-mni-vercel",
+  "version": "0.1.0",
+  "description": "Vercel Edge Function variant do worker MNI — pra usar IP brasileiro (gru1) e contornar bloqueios de WAF/Cloudflare nos tribunais",
+  "private": true,
+  "type": "module"
+}

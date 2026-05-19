@@ -204,9 +204,13 @@ function detectarTribunalPorCnj(numeroProcesso) {
 // Handler HTTP
 // ============================================================
 
-export default {
-  async fetch(request, env) {
-    const allowed = (env.ALLOWED_ORIGINS || 'http://localhost:8000').split(',').map(s => s.trim());
+// Função handler nomeada — exportada também separadamente pra ser
+// reutilizada em outros runtimes (Vercel Edge Functions, Deno Deploy, etc).
+// Mantém o `export default { fetch }` pra continuar funcionando como
+// Cloudflare Worker.
+export async function handleMniRequest(request, env) {
+  if (!env) env = {};
+  const allowed = (env.ALLOWED_ORIGINS || 'http://localhost:8000').split(',').map(s => s.trim());
     const origin = request.headers.get('Origin') || '';
     const corsOk = allowed.includes(origin) || allowed.includes('*');
     const corsHeaders = corsOk ? {
@@ -308,7 +312,11 @@ export default {
       console.error('[MNI] erro:', e?.stack || e);
       return json({ error: 'soap_error', message: String(e?.message || e), tribunal: codigo }, 502, corsHeaders);
     }
-  }
+}
+
+// Compat Cloudflare Workers: mantém o formato esperado `export default { fetch }`.
+export default {
+  fetch: handleMniRequest
 };
 
 // ============================================================

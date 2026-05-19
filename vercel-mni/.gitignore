@@ -1,0 +1,6 @@
+# Vercel local cache
+.vercel/
+
+# Node
+node_modules/
+*.log
