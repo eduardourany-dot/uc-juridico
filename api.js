@@ -783,6 +783,32 @@ function requireCanWrite_() {
   }
 }
 
+/**
+ * Sincroniza um usuário INTERNO (admin/user/viewer) na allowlist do
+ * Apps Script (Sheets `Usuarios`) — necessária pra acessar a API IA
+ * (gerarPeticaoIA + outras actions).
+ *
+ * Clientes (role='cliente') NÃO precisam — eles só acessam o app no
+ * frontend (Firestore /users), nunca chamam o Apps Script.
+ *
+ * Não falha o fluxo principal — se a sync der erro (ex: Apps Script
+ * fora do ar, ou user atual não é admin no Sheets), loga warn e retorna.
+ * Frontend mostra toast amarelo opcional.
+ */
+async function syncUserAppsScript_(email, nome, role) {
+  // Clientes não vão pra Sheets — só interno
+  if (role === 'cliente') return { skipped: true, reason: 'role cliente não usa API IA' };
+  try {
+    const resp = await callAppsScript('addUsuario', null, {
+      email, nome: nome || '', role: role || 'user'
+    });
+    return { ok: true, response: resp };
+  } catch (err) {
+    console.warn('[syncUserAppsScript_] falha:', err?.message || err);
+    return { ok: false, error: err?.message || String(err) };
+  }
+}
+
 window.UC_admin = {
   async addUser(email, nome, role = 'user', clienteId = null) {
     requireAdmin_();
@@ -801,6 +827,13 @@ window.UC_admin = {
     // só os processos que tem clienteIds incluindo esse clienteId.
     if (clienteId) payload.clienteId = String(clienteId);
     await setDoc(doc(db, 'users', e), payload, { merge: true });
+    // Sync com Apps Script Sheets pra users INTERNOS (não clientes).
+    // Garante que o user também consegue chamar a API IA, não só ler
+    // dados no frontend. Não bloqueia se falhar.
+    const syncResult = await syncUserAppsScript_(e, nome, role);
+    if (!syncResult.ok && !syncResult.skipped) {
+      console.warn('[UC_admin.addUser] Firestore OK, Sheets sync falhou:', syncResult.error);
+    }
     return e;
   },
   async setClienteId(email, clienteId) {
@@ -808,6 +841,27 @@ window.UC_admin = {
     const e = String(email || '').toLowerCase().trim();
     await updateDoc(doc(db, 'users', e), { clienteId: clienteId ? String(clienteId) : null });
     return e;
+  },
+
+  /**
+   * Força sync de um user existente no Firestore com a allowlist do
+   * Apps Script (Sheets). Útil quando user já tá no Firestore mas
+   * Apps Script reporta forbidden — ou quando se reverte uma
+   * desativação manual da planilha.
+   *
+   * Uso típico no console:
+   *   await UC_admin.syncToAppsScript('eduardourany@uranydecastro.com.br')
+   */
+  async syncToAppsScript(email) {
+    requireAdmin_();
+    const e = String(email || '').toLowerCase().trim();
+    if (!e) throw new Error('email_required');
+    // Lê os dados atuais do Firestore
+    const snap = await getDoc(doc(db, 'users', e));
+    if (!snap.exists()) throw new Error('user_not_in_firestore: ' + e);
+    const u = snap.data();
+    if (u.role === 'cliente') return { skipped: true, reason: 'clientes não usam Apps Script' };
+    return await syncUserAppsScript_(e, u.nome, u.role);
   },
 
   /**

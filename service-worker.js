@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.64.32 (default IA: gemini-3-flash-preview, qualidade superior no free tier)
-const CACHE_NAME = 'uc-juridico-v6-64-32';
+// Service Worker — UC Jurídico v6.64.33 (UC_admin.addUser sincroniza Firestore + Apps Script Sheets)
+const CACHE_NAME = 'uc-juridico-v6-64-33';
 const APP_SHELL = [
   './',
   './index.html',
