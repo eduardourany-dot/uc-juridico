@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.64.31 (modal de erro mostra debugInfo do request — base64 size, hash, etc)
-const CACHE_NAME = 'uc-juridico-v6-64-31';
+// Service Worker — UC Jurídico v6.64.32 (default IA: gemini-3-flash-preview, qualidade superior no free tier)
+const CACHE_NAME = 'uc-juridico-v6-64-32';
 const APP_SHELL = [
   './',
   './index.html',

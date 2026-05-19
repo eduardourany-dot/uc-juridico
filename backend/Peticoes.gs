@@ -238,10 +238,13 @@ function _callClaudeApi(apiKey, modelo, systemPrompt, userMessage) {
  * mudarem preços (jan/2026):
  *
  * Gemini (Google AI Studio):
- *   2.5 Pro       $1.25/M in (< 200K), $2.50/M in (>= 200K)
- *                 $10/M out (< 200K), $15/M out (>= 200K)
- *   2.5 Flash     $0.30/M in, $2.50/M out
- *   2.5 Flash-Lite $0.10/M in, $0.40/M out
+ *   3.1 Pro Preview $2.00/M in (< 200K), $4.00/M in (>= 200K)
+ *                   $12/M out (< 200K), $18/M out (>= 200K)
+ *   3 Flash Preview $0.50/M in, $3.00/M out (free tier reduzido)
+ *   2.5 Pro         $1.25/M in (< 200K), $2.50/M in (>= 200K)
+ *                   $10/M out (< 200K), $15/M out (>= 200K)
+ *   2.5 Flash       $0.30/M in, $2.50/M out
+ *   2.5 Flash-Lite  $0.10/M in, $0.40/M out
  *
  * Claude (Anthropic):
  *   Opus 4.7      $15/M in, $75/M out
@@ -254,7 +257,13 @@ function _estimarCustoUSD(modelo, tokensInput, tokensOutput) {
   const tierLargo = tokensInput >= 200000;
 
   let preco;
-  if (m.indexOf('gemini-2.5-pro') === 0) {
+  // Gemini 3 (preview, lançado fev/2026)
+  if (m.indexOf('gemini-3') === 0 && m.indexOf('flash') >= 0) {
+    preco = { input: 0.50, output: 3.00 };
+  } else if (m.indexOf('gemini-3') === 0 && (m.indexOf('pro') >= 0 || !m.match(/flash/))) {
+    preco = tierLargo ? { input: 4.00, output: 18.0 } : { input: 2.00, output: 12.0 };
+  // Gemini 2.5
+  } else if (m.indexOf('gemini-2.5-pro') === 0) {
     preco = tierLargo ? { input: 2.50, output: 15.0 } : { input: 1.25, output: 10.0 };
   } else if (m.indexOf('gemini-2.5-flash-lite') === 0) {
     preco = { input: 0.10, output: 0.40 };

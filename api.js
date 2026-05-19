@@ -614,10 +614,14 @@ const RemoteDB = {
   async deletePeticao(id) { return await softDelete_('peticoes', id); },
 
   // ====== Geração IA (peças + relatórios) ======
-  // Default: gemini-2.5-flash (free tier do Google AI Studio, ~1500 reqs/dia).
-  // Pra usar gemini-2.5-pro (qualidade superior, ~$0.05-0.10/peça), é preciso
-  // ativar billing no projeto Google Cloud (https://console.cloud.google.com/billing).
-  // Quando billing estiver ativo, mudar 'gemini-2.5-flash' → 'gemini-2.5-pro' aqui.
+  // Default: gemini-3-flash-preview (free tier reduzido do Google AI Studio).
+  //
+  // Migrado de 2.5-flash → 3-flash-preview em 18/05/2026 (v6.64.32). Qualidade
+  // superior em raciocínio jurídico e multimodal, ainda dentro do free tier.
+  // Custo paid tier: $0.50/M input + $3.00/M output (~$0.012/peça).
+  //
+  // Pra qualidade máxima (gemini-3-pro-preview, ~$0.046/peça), ativar billing
+  // no Google Cloud (https://console.cloud.google.com/billing) e mudar aqui.
   //
   // briefing: string (requerimento do advogado)
   // contextoSnapshot: { processo, cliente, eventos[], prazos[], jurisprudencia[] }
@@ -628,7 +632,7 @@ const RemoteDB = {
       contextoSnapshot,
       modeloPromptSistema: opts.modeloPromptSistema || '',
       tipo: opts.tipo || 'outro',
-      modeloApi: opts.modeloApi || 'gemini-2.5-flash'
+      modeloApi: opts.modeloApi || 'gemini-3-flash-preview'
     });
   },
 
