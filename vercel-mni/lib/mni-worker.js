@@ -1,4 +1,11 @@
 // UC Jurídico — MNI Worker genérico (multi-tribunal)
+// Versão: 0.12.0 · DataJud fallback — consulta REST pública do CNJ
+//   - Nova operação 'consultarProcessoDataJud': API pública oficial do CNJ
+//   - Cobre tribunais bloqueados pelo MNI (TRTs com WAF, IPs cloud filtrados)
+//   - Sem credencial, gratuita, ~24h de defasagem
+//   - Limitação: não retorna partes/advogados/documentos (proteção privacidade)
+//   - Endpoint: api-publica.datajud.cnj.jus.br/api_publica_{codigo}/_search
+//   - APIKey rotaciona ocasionalmente — checar wiki se 401
 // Versão: 0.11.0 · MNI — headers de browser pra contornar WAF da PJe-JT
 //   - Cloudflare WAF da Justiça do Trabalho (PJe) bloqueia User-Agent
 //     minimalista 'UC-Juridico-MNI/0.5' com HTTP 403.
@@ -227,10 +234,10 @@ export async function handleMniRequest(request, env) {
       const validados = codigos.filter(c => TRIBUNAIS_REGISTRY[c].validado);
       const naoSuportados = codigos.filter(c => TRIBUNAIS_REGISTRY[c].naoSuportado);
       return json({
-        worker: 'uc-mni', versao: '0.11.0',
+        worker: 'uc-mni', versao: '0.12.0',
         total: codigos.length,
         validados, naoSuportados,
-        operacoes: ['consultarProcesso', 'entregarManifestacaoProcessual', 'health', 'listarTribunais', 'detectarPorCnj']
+        operacoes: ['consultarProcesso', 'entregarManifestacaoProcessual', 'consultarProcessoDataJud', 'health', 'listarTribunais', 'detectarPorCnj']
       }, 200, corsHeaders);
     }
 
@@ -305,6 +312,17 @@ export async function handleMniRequest(request, env) {
         });
         result.tribunal = codigo;
         result.grau = grau;
+        return json(result, 200, corsHeaders);
+      }
+      // DataJud — consulta pública oficial do CNJ (sem credencial, sem auth).
+      // Útil como fallback quando MNI falha (TRTs com WAF, tribunais sem suporte).
+      // Não traz partes/advogados (proteção de privacidade do CNJ) nem documentos,
+      // mas traz movimentos + classe + assuntos + dataAjuizamento.
+      if (operacao === 'consultarProcessoDataJud') {
+        if (!cnj) return json({ error: 'cnj_obrigatorio' }, 400, corsHeaders);
+        const result = await consultarProcessoDataJud(codigo, cnj);
+        result.tribunal = codigo;
+        result.fonte = 'datajud';
         return json(result, 200, corsHeaders);
       }
       return json({ error: 'operacao_nao_suportada', operacao }, 400, corsHeaders);
@@ -560,6 +578,127 @@ function _soapHeaders(conf, operacao) {
     } catch (_) {}
   }
   return base;
+}
+
+// ============================================================
+// DataJud — API REST pública oficial do CNJ
+// ============================================================
+//
+// Fallback pra consulta de processos quando MNI falha (TRTs com WAF,
+// tribunais sem credencial, etc). API REST pública gratuita do CNJ
+// que indexa todos os processos públicos via Elasticsearch.
+//
+// Endpoint: https://api-publica.datajud.cnj.jus.br/api_publica_{codigo}/_search
+// Auth: APIKey pública compartilhada (rotaciona ocasionalmente — checar
+// https://datajud-wiki.cnj.jus.br/api-publica/acesso/ se falhar).
+//
+// Limitações vs MNI:
+//   - SEM partes/advogados (proteção privacidade CNJ)
+//   - SEM documentos binários
+//   - Atualização ~24h (não tempo real)
+//   - SÓ processos públicos (não acessa sigilo)
+//
+// Vantagens:
+//   - Cobre praticamente TODOS os tribunais (incluindo TRTs bloqueados)
+//   - Sem credencial necessária
+//   - Custo zero
+const DATAJUD_API_KEY = 'cDZHYzlZa0JadVREZDJCendQbXY6SkJlTzNjLV9TRENyQk1RdnFKZGRQdw==';
+const DATAJUD_BASE = 'https://api-publica.datajud.cnj.jus.br';
+
+async function consultarProcessoDataJud(codigoTribunal, cnj) {
+  // Normaliza CNJ removendo pontos e traços: '0000832-35.2018.4.01.3202' → '00008323520184013202'
+  const cnjNorm = String(cnj || '').replace(/\D/g, '');
+  if (cnjNorm.length < 18) {
+    return { sucesso: false, erro: 'cnj_invalido', mensagem: `CNJ precisa ter 20 dígitos (${cnjNorm.length} encontrados)` };
+  }
+  // Endpoint usa código do tribunal em lowercase, padrão `api_publica_{codigo}`
+  const alias = String(codigoTribunal || '').toLowerCase();
+  const url = `${DATAJUD_BASE}/api_publica_${alias}/_search`;
+
+  const t0 = Date.now();
+  let resp;
+  try {
+    resp = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Authorization': 'APIKey ' + DATAJUD_API_KEY,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        query: {
+          match: { numeroProcesso: cnjNorm }
+        }
+      }),
+      signal: AbortSignal.timeout(15000)
+    });
+  } catch (e) {
+    return { sucesso: false, erro: 'rede', mensagem: String(e?.message || e), elapsedMs: Date.now() - t0 };
+  }
+  const elapsedMs = Date.now() - t0;
+
+  if (!resp.ok) {
+    let raw = '';
+    try { raw = (await resp.text()).slice(0, 1000); } catch (_) {}
+    return { sucesso: false, erro: 'http_' + resp.status, httpStatus: resp.status, elapsedMs, raw };
+  }
+
+  let data;
+  try { data = await resp.json(); }
+  catch (e) { return { sucesso: false, erro: 'parse_json', mensagem: String(e?.message || e), elapsedMs }; }
+
+  const hits = data?.hits?.hits || [];
+  if (hits.length === 0) {
+    return { sucesso: false, erro: 'nao_encontrado', mensagem: `Processo ${cnj} não encontrado no DataJud do CNJ pra tribunal ${codigoTribunal}.`, elapsedMs };
+  }
+
+  // Pega o primeiro hit (deveria ser único por CNJ)
+  const fonte = hits[0]?._source || {};
+  return _parseDataJudResponse(fonte, elapsedMs);
+}
+
+function _parseDataJudResponse(src, elapsedMs) {
+  // Mapeia formato DataJud → schema interno (similar ao MNI consultarProcesso).
+  const movimentos = (src.movimentos || []).map((m, idx) => {
+    const dataIso = m.dataHora ? String(m.dataHora).slice(0, 10) : '';
+    return {
+      identificador: 'datajud:' + (m.codigo || idx) + ':' + (m.dataHora || ''),
+      codigoNacional: m.codigo || m.codigoLocal || '',
+      codigoLocal: m.codigoLocal || m.codigo || '',
+      descricao: m.nome || m.descricao || '',
+      complemento: (m.complementosTabelados || []).map(c => c.nome || c.descricao).filter(Boolean).join(' · '),
+      dataHora: m.dataHora || '',
+      dataIso
+    };
+  });
+
+  return {
+    sucesso: true,
+    elapsedMs,
+    // Campos básicos no mesmo formato que parseConsultarProcesso retorna
+    classe: src.classe?.nome || '',
+    classeCodigo: src.classe?.codigo || '',
+    assunto: (src.assuntos || [])[0] ? {
+      codigo: src.assuntos[0].codigo || '',
+      descricao: src.assuntos[0].nome || ''
+    } : null,
+    assuntos: (src.assuntos || []).map(a => a.nome || a.descricao).filter(Boolean),
+    orgaoJulgador: src.orgaoJulgador?.nome || '',
+    serventia: src.orgaoJulgador?.nome || '',
+    dataAjuizamento: src.dataAjuizamento ? String(src.dataAjuizamento).slice(0, 10) : '',
+    valorCausa: null,  // DataJud não tem valor da causa
+    processoFase: '',
+    processoStatus: src.formato?.nome || '',
+    grau: src.grau || '',
+    nivelSigilo: src.nivelSigilo || 0,
+    // Limitação DataJud: sem partes/advogados
+    partes: [],
+    advogados: [],
+    movimentos,
+    movimentosTotal: movimentos.length,
+    // Marcador da fonte
+    fonte: 'datajud',
+    fonteAviso: 'Dados via DataJud (CNJ — consulta pública). Sem partes/advogados/documentos.'
+  };
 }
 
 // SHA-256 do conteúdo binário (decodificado do base64), retorno em hex

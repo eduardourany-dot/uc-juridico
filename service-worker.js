@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.64.34 (variante Vercel Edge Function pro Worker MNI — região gru1 SP)
-const CACHE_NAME = 'uc-juridico-v6-64-34';
+// Service Worker — UC Jurídico v6.64.35 (DataJud fallback automático quando MNI falha — TRTs, sem credencial, 403)
+const CACHE_NAME = 'uc-juridico-v6-64-35';
 const APP_SHELL = [
   './',
   './index.html',

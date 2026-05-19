@@ -17968,10 +17968,6 @@ async function mniBuscarProcessoFlow(processId) {
     return;
   }
   const { codigo, conf } = detect;
-  if (conf?.naoSuportado) {
-    toast(`${codigo} não suporta MNI`, conf.motivo || 'Tribunal sem MNI público.', 'error');
-    return;
-  }
 
   // 2. Worker URL
   const config = await _mniGetConfig();
@@ -17980,11 +17976,19 @@ async function mniBuscarProcessoFlow(processId) {
     return;
   }
 
+  // 2.5. Tribunal não suporta MNI → vai direto pro DataJud (fallback público).
+  // Não bloqueia mais com 'tribunal não suporta' — antes era erro fatal.
+  if (conf?.naoSuportado) {
+    toast(`${codigo} sem MNI`, 'Buscando via DataJud do CNJ (consulta pública)…', 'info');
+    return await _consultarViaDataJud(p, codigo, config, conf?.motivo || 'Tribunal sem MNI público');
+  }
+
   // 3. Destrava cofre se necessário
   if (!window.MniCrypto.isUnlocked()) {
     if (!config.salt || !config.canary) {
-      toast('Cofre MNI não configurado', 'Configure em Configurações → MNI antes.', 'error');
-      return;
+      // Sem cofre → ainda assim tenta DataJud (não precisa credencial)
+      toast('Cofre MNI não configurado', 'Tentando DataJud do CNJ (consulta pública)…', 'info');
+      return await _consultarViaDataJud(p, codigo, config, 'cofre não configurado');
     }
     // Prompt inline pra destravar
     const r = await showModal(`Destravar cofre pra consultar ${codigo}`, [
@@ -18006,10 +18010,9 @@ async function mniBuscarProcessoFlow(processId) {
     if (cred) { usedAdvogado = adv; break; }
   }
   if (!cred) {
-    toast('Sem credencial cadastrada',
-      `Nenhum advogado (${candidatos.join(', ') || 'definido'}) tem credencial pro ${codigo}. Cadastre em Configurações → MNI.`,
-      'error');
-    return;
+    // Sem credencial pro tribunal → fallback DataJud automático
+    toast(`Sem credencial pro ${codigo}`, 'Buscando via DataJud do CNJ (consulta pública)…', 'info');
+    return await _consultarViaDataJud(p, codigo, config, `sem credencial pro ${codigo}`);
   }
 
   // 5. Decifra senha
@@ -18042,15 +18045,79 @@ async function mniBuscarProcessoFlow(processId) {
     data = await resp.json();
   } catch (e) {
     loadingModal.remove();
-    toast('Falha de rede', String(e.message || e), 'error');
-    return;
+    // Falha de rede → tenta DataJud
+    toast('MNI fora do ar', 'Tentando DataJud do CNJ…', 'info');
+    return await _consultarViaDataJud(p, codigo, config, 'MNI rede: ' + (e.message || e));
   } finally {
     senha = null; // limpa senha da memória ASAP
   }
   loadingModal.remove();
 
+  // 6.5. MNI retornou erro (HTTP 403, soap_error, etc) → fallback DataJud
+  // Detecta erros típicos: WAF (403), tribunal bloqueado, SOAP fault não-recuperável
+  const mniFalhou = data && (
+    data.error ||
+    data.sucesso === false ||
+    data.erro === 'http_403' ||
+    data.httpStatus === 403
+  );
+  if (mniFalhou) {
+    const motivoMni = data.erro || data.error || `HTTP ${data.httpStatus || '?'}`;
+    toast(`MNI falhou (${motivoMni})`, 'Tentando DataJud do CNJ…', 'info');
+    return await _consultarViaDataJud(p, codigo, config, 'MNI: ' + motivoMni);
+  }
+
   // 7. Exibe modal de resultado (chunk 1 = preview cru; chunk 2 = diff/merge)
   _mniShowResultModal(p, codigo, usedAdvogado, data, Date.now() - t0);
+}
+
+/**
+ * Consulta processo via DataJud do CNJ (API REST pública).
+ * Fallback automático quando MNI falha — não requer credencial.
+ *
+ * Limitações conhecidas (registradas como aviso no modal):
+ *  - Sem partes/advogados (proteção privacidade CNJ)
+ *  - Sem documentos
+ *  - Atualização ~24h (não tempo real)
+ *
+ * Chamada via mesmo Worker MNI (operacao: 'consultarProcessoDataJud').
+ */
+async function _consultarViaDataJud(p, codigo, config, motivoFallback) {
+  const loadingModal = _mniMakeLoadingModal(codigo + ' · DataJud', p.cnj);
+  $('modalContainer').appendChild(loadingModal);
+
+  const t0 = Date.now();
+  let data;
+  try {
+    const resp = await fetch(config.workerUrl.replace(/\/$/, ''), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        tribunal: codigo,
+        operacao: 'consultarProcessoDataJud',
+        cnj: p.cnj
+      })
+    });
+    data = await resp.json();
+  } catch (e) {
+    loadingModal.remove();
+    toast('Falha total', `MNI e DataJud falharam: ${e.message || e}. Consulte manualmente no portal.`, 'error');
+    return;
+  }
+  loadingModal.remove();
+
+  if (!data?.sucesso) {
+    toast('DataJud falhou',
+      `MNI: ${motivoFallback}. DataJud: ${data?.erro || data?.mensagem || 'desconhecido'}. Consulte manualmente no portal.`,
+      'error');
+    return;
+  }
+
+  // Marca origem como datajud + motivo do fallback (pra debug)
+  data._fontePrincipal = 'datajud';
+  data._motivoFallback = motivoFallback;
+
+  _mniShowResultModal(p, codigo, '(DataJud público)', data, Date.now() - t0);
 }
 
 // ====================================================================
@@ -18717,9 +18784,20 @@ function _mniShowResultModal(p, codigo, advogadoUsado, data, elapsedTotal) {
       return `<tr><td><small>${escapeHtml(dt)}</small></td><td><strong>${escapeHtml(m.descricao || '—')}</strong>${m.complemento ? `<div style="font-size:11px;color:var(--uc-warm-gray);">${escapeHtml(m.complemento.slice(0, 200))}${m.complemento.length > 200 ? '…' : ''}</div>` : ''}</td></tr>`;
     }).join('');
 
+    // Detecta se veio do fallback DataJud — adiciona aviso destacado
+    const ehDataJud = data.fonte === 'datajud' || data._fontePrincipal === 'datajud';
+    const avisoDataJud = ehDataJud ? `
+      <div style="background:#fff4d6;border-left:3px solid var(--uc-amber);padding:10px 14px;margin-bottom:12px;font-size:12px;color:var(--uc-graphite);border-radius:4px;">
+        <strong>ℹ Dados via DataJud (CNJ — consulta pública)</strong><br>
+        Sem partes/advogados (proteção privacidade) · Sem documentos · Atualização ~24h
+        ${data._motivoFallback ? `<br><small style="color:var(--uc-warm-gray);">Fallback porque: ${escapeHtml(data._motivoFallback)}</small>` : ''}
+      </div>
+    ` : '';
+
     body = `
+      ${avisoDataJud}
       <div class="status ok" style="background:#d4e8d4;color:#2a5a2a;border-left:3px solid var(--uc-green);padding:12px;border-radius:6px;margin-bottom:12px;">
-        <strong>✓ Dados recebidos do ${escapeHtml(codigo)}</strong><br>
+        <strong>✓ Dados recebidos do ${escapeHtml(codigo)}${ehDataJud ? ' via DataJud' : ''}</strong><br>
         <small>${data.partes?.length || 0} parte(s) · ${data.movimentos?.length || 0} movimento(s)${data.movimentosTotal > (data.movimentos?.length||0) ? ` de ${data.movimentosTotal}` : ''} · Worker ${data.elapsedMs}ms · total ${elapsedTotal}ms</small>
       </div>
 
