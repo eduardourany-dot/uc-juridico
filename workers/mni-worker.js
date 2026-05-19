@@ -1,4 +1,11 @@
 // UC Jurídico — MNI Worker genérico (multi-tribunal)
+// Versão: 0.10.7 · MNI.5 — parametros nome="ID_MOVIMENTACAO_TIPO" (UPPER)
+//   - Erro estruturado do Projudi confirmou nome exato do parâmetro:
+//     "O parâmetro ID_MOVIMENTACAO_TIPO não foi informado."
+//   - SCREAMING_SNAKE_CASE — padrão constantes Java do Projudi/TJGO
+//   - Removidas 3 variantes anteriores (idTipoMovimentacao,
+//     codigoMovimento, movimentoLocal) + codigoNacional — só envia
+//     o nome correto agora
 // Versão: 0.10.6 · MNI.5 — tipoDocumento default = id Projudi (não TPU CNJ)
 //   - Projudi TJGO valida tipoDocumento contra tabela 'arquivoTipo'
 //     interna, NÃO contra TPU CNJ universal
@@ -186,7 +193,7 @@ export default {
       const validados = codigos.filter(c => TRIBUNAIS_REGISTRY[c].validado);
       const naoSuportados = codigos.filter(c => TRIBUNAIS_REGISTRY[c].naoSuportado);
       return json({
-        worker: 'uc-mni', versao: '0.10.6',
+        worker: 'uc-mni', versao: '0.10.7',
         total: codigos.length,
         validados, naoSuportados,
         operacoes: ['consultarProcesso', 'entregarManifestacaoProcessual', 'health', 'listarTribunais', 'detectarPorCnj']
@@ -390,13 +397,11 @@ async function entregarManifestacao(conf, endpoint, { cnj, cpf, senha, tipoTrans
     `<parametros nome="idTipoTransmissao" valor="${tipoTransmissao}"/>`
   ];
   if (codigoMovimento) {
-    // Id interno do Projudi (260, 1003, etc) — nome do parâmetro pode
-    // variar por tribunal. Mandamos as 3 variantes mais comuns.
-    parametros.push(`<parametros nome="idTipoMovimentacao" valor="${escapeXml(codigoMovimento)}"/>`);
-    parametros.push(`<parametros nome="codigoMovimento" valor="${escapeXml(codigoMovimento)}"/>`);
-    parametros.push(`<parametros nome="movimentoLocal" valor="${escapeXml(codigoMovimento)}"/>`);
-    // Código nacional CNJ — 85 (Juntada → Petição) é universal pra TJGO
-    parametros.push(`<parametros nome="codigoNacional" valor="85"/>`);
+    // Confirmado em 18/05/2026 via erro estruturado do Projudi TJGO:
+    //   "O parâmetro ID_MOVIMENTACAO_TIPO não foi informado."
+    // Nome do parâmetro em SCREAMING_SNAKE_CASE — padrão constantes Java
+    // típico do Projudi/TJGO.
+    parametros.push(`<parametros nome="ID_MOVIMENTACAO_TIPO" valor="${escapeXml(codigoMovimento)}"/>`);
   }
   if (descricao) {
     parametros.push(`<parametros nome="Complemento" valor="${escapeXml(descricao)}"/>`);
