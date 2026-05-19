@@ -1,4 +1,14 @@
 // UC Jurídico — MNI Worker genérico (multi-tribunal)
+// Versão: 0.11.0 · MNI — headers de browser pra contornar WAF da PJe-JT
+//   - Cloudflare WAF da Justiça do Trabalho (PJe) bloqueia User-Agent
+//     minimalista 'UC-Juridico-MNI/0.5' com HTTP 403.
+//   - Helper _soapHeaders(conf, operacao) injeta headers de browser
+//     realista quando conf.statusHealth='bloqueio_cloudflare' OU
+//     conf.sistema='pje' OU codigo começa com 'TRT'.
+//   - Headers extras: User-Agent Chrome, Accept, Accept-Language,
+//     Referer, Origin (todos comuns em tráfego de browser).
+//   - TJGO Projudi e outros tribunais NÃO-WAF mantêm headers mínimos
+//     (não quebra o que já funciona).
 // Versão: 0.10.10 · MNI.5 — volta <conteudo> + normaliza base64 (whitespace)
 //   - Teste anterior com <conteudoBase64> confirmou que Projudi NÃO
 //     reconhece esse nome (HTTP 500 em 1.1s, sem mensagem).
@@ -213,7 +223,7 @@ export default {
       const validados = codigos.filter(c => TRIBUNAIS_REGISTRY[c].validado);
       const naoSuportados = codigos.filter(c => TRIBUNAIS_REGISTRY[c].naoSuportado);
       return json({
-        worker: 'uc-mni', versao: '0.10.10',
+        worker: 'uc-mni', versao: '0.11.0',
         total: codigos.length,
         validados, naoSuportados,
         operacoes: ['consultarProcesso', 'entregarManifestacaoProcessual', 'health', 'listarTribunais', 'detectarPorCnj']
@@ -450,13 +460,7 @@ async function entregarManifestacao(conf, endpoint, { cnj, cpf, senha, tipoTrans
   try {
     resp = await fetch(endpoint, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'text/xml; charset=utf-8',
-        'SOAPAction': conf.soapAction === '' || conf.soapAction == null
-          ? '""'
-          : `"${conf.soapAction}"`,
-        'User-Agent': 'UC-Juridico-MNI/0.9-protocolo'
-      },
+      headers: _soapHeaders(conf, 'protocolo'),
       body: envelope,
       signal: AbortSignal.timeout(timeoutMs)
     });
@@ -510,6 +514,44 @@ async function entregarManifestacao(conf, endpoint, { cnj, cpf, senha, tipoTrans
     result.rawRequest = envelope.slice(0, 8000);  // primeiros 8KB do request
   }
   return result;
+}
+
+// ============================================================
+// Headers SOAP — masquerade pra contornar WAF da PJe-JT
+// ============================================================
+//
+// Cloudflare WAF da Justiça do Trabalho bloqueia requests com User-Agent
+// minimalista tipo 'UC-Juridico-MNI/0.5' (HTTP 403). Pra tribunais
+// marcados com statusHealth='bloqueio_cloudflare' ou sistema='pje', enviamos
+// headers de browser realista (Chrome desktop) pra parecer tráfego legítimo.
+// Pra outros tribunais (TJGO Projudi etc), mantém os headers atuais.
+function _soapHeaders(conf, operacao) {
+  const base = {
+    'Content-Type': 'text/xml; charset=utf-8',
+    'SOAPAction': conf.soapAction === '' || conf.soapAction == null
+      ? '""' : `"${conf.soapAction}"`,
+    'User-Agent': 'UC-Juridico-MNI/0.5-' + (operacao || 'op')
+  };
+  // Tribunais com WAF anti-bot conhecido (PJe da Justiça do Trabalho, etc):
+  // adiciona headers de browser realista.
+  const precisaMasquerade = conf.statusHealth === 'bloqueio_cloudflare'
+    || conf.sistema === 'pje'
+    || /^trt/i.test(conf.codigo || '');
+  if (precisaMasquerade) {
+    base['User-Agent'] = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+    base['Accept'] = 'text/xml, application/xml, application/soap+xml, text/html, */*';
+    base['Accept-Language'] = 'pt-BR,pt;q=0.9,en;q=0.8';
+    base['Accept-Encoding'] = 'gzip, deflate, br';
+    base['Cache-Control'] = 'no-cache';
+    base['Pragma'] = 'no-cache';
+    // Referer apontando pra raiz do host evita WAFs que validam origem
+    try {
+      const u = new URL(conf.endpoint);
+      base['Referer'] = u.origin + '/';
+      base['Origin'] = u.origin;
+    } catch (_) {}
+  }
+  return base;
 }
 
 // SHA-256 do conteúdo binário (decodificado do base64), retorno em hex
@@ -585,13 +627,7 @@ async function consultarProcesso(conf, endpoint, { cnj, cpf, senha, debug, inclu
   try {
     resp = await fetch(endpoint, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'text/xml; charset=utf-8',
-        'SOAPAction': conf.soapAction === '' || conf.soapAction == null
-          ? '""'
-          : `"${conf.soapAction}"`,
-        'User-Agent': 'UC-Juridico-MNI/0.5'
-      },
+      headers: _soapHeaders(conf, 'consultar'),
       body: envelope,
       signal: AbortSignal.timeout(timeoutMs)
     });
