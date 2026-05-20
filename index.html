@@ -5919,6 +5919,19 @@ async function editProcessFlow() {
           cred = await _mniBuscarCredencial(adv, codigo);
           if (cred) { usedAdvogado = adv; break; }
         }
+        // Fallback: qualquer credencial do escritório pro tribunal serve
+        // pra CONSULTA (read-only). Cobre caso "advogado do processo difere
+        // do que tem credencial cadastrada".
+        if (!cred) {
+          const all = (await DB.getSetting('mniCredentials', [])) || [];
+          const trib = String(codigo || '').toUpperCase().trim();
+          const generico = all.find(c => String(c.tribunal || '').toUpperCase().trim() === trib);
+          if (generico) {
+            cred = generico;
+            usedAdvogado = generico.advogado;
+            console.log('[MNI edit] usando credencial genérica do tribunal:', { trib, advogado: generico.advogado, candidatosTentados: candidatos });
+          }
+        }
         if (!cred) throw new Error(`Nenhum advogado cadastrado tem credencial pro ${codigo}. Configure em Configurações → MNI.`);
 
         // 5. Decifra senha + chama Worker
@@ -18004,9 +18017,36 @@ async function _mniDetectarTribunal(p) {
   return null;
 }
 
+// Normaliza nome de advogado pra lookup tolerante: remove acentos
+// (NFD), baixa caixa, colapsa whitespace. Necessário porque os nomes
+// nos processos (p.advogadoResponsavel) podem ter casing/acentuação
+// diferente do que está no dropdown ADVOGADOS usado pra cadastrar
+// credencial (ex: "EDUARDO URANY DE CASTRO" vs "Eduardo Urany de Castro").
+function _mniNormNome(s) {
+  return String(s || '')
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 async function _mniBuscarCredencial(advogadoNome, tribunalCodigo) {
   const credentials = (await DB.getSetting('mniCredentials', [])) || [];
-  return credentials.find(c => c.advogado === advogadoNome && c.tribunal === tribunalCodigo) || null;
+  const advNorm = _mniNormNome(advogadoNome);
+  const tribNorm = String(tribunalCodigo || '').toUpperCase().trim();
+  const found = credentials.find(c =>
+    _mniNormNome(c.advogado) === advNorm &&
+    String(c.tribunal || '').toUpperCase().trim() === tribNorm
+  ) || null;
+  if (!found && credentials.length > 0) {
+    // Log diagnóstico só quando há credenciais cadastradas (sem ruído
+    // pro caso "cofre vazio" que é legítimo).
+    console.log('[MNI cred lookup miss]', {
+      pedido: { advogado: advogadoNome, advogadoNorm: advNorm, tribunal: tribunalCodigo, tribunalNorm: tribNorm },
+      cofre: credentials.map(c => ({ advogado: c.advogado, advogadoNorm: _mniNormNome(c.advogado), tribunal: c.tribunal }))
+    });
+  }
+  return found;
 }
 
 async function mniBuscarProcessoFlow(processId) {
@@ -18062,6 +18102,20 @@ async function mniBuscarProcessoFlow(processId) {
   for (const adv of candidatos) {
     cred = await _mniBuscarCredencial(adv, codigo);
     if (cred) { usedAdvogado = adv; break; }
+  }
+  // Fallback final: se nenhum candidato bateu mas existe alguma credencial
+  // do escritório pro tribunal, usa essa pra consulta (read-only, qualquer
+  // advogado serve). Atende caso "credencial cadastrada pra Eduardo mas o
+  // processo está com responsável outro advogado".
+  if (!cred) {
+    const all = (await DB.getSetting('mniCredentials', [])) || [];
+    const trib = String(codigo || '').toUpperCase().trim();
+    const generico = all.find(c => String(c.tribunal || '').toUpperCase().trim() === trib);
+    if (generico) {
+      cred = generico;
+      usedAdvogado = generico.advogado;
+      console.log('[MNI] usando credencial genérica do tribunal:', { trib, advogado: generico.advogado, candidatosTentados: candidatos });
+    }
   }
   if (!cred) {
     // Sem credencial pro tribunal → fallback DataJud automático

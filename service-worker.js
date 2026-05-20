@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.65.1 (revert DJE-PDPJ — feature inaplicável ao caso de uso, DJEN scraping segue como fonte única)
-const CACHE_NAME = 'uc-juridico-v6-65-1';
+// Service Worker — UC Jurídico v6.65.2 (MNI: lookup de credencial tolerante a casing/acento + fallback genérico de tribunal; DataJud fix TJDFT)
+const CACHE_NAME = 'uc-juridico-v6-65-2';
 const APP_SHELL = [
   './',
   './index.html',
