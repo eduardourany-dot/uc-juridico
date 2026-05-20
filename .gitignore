@@ -1,5 +1,38 @@
+# Ferramentas internas
 .claude/
+_inline_check.js
+
+# Logs e lixo de SO
 *.log
 .DS_Store
 Thumbs.db
-_inline_check.js
+
+# ─── Credenciais — NUNCA commitar ────────────────────────────────
+# Service accounts do Google (Firebase Admin, Cloud Functions, etc.)
+**/service-account*.json
+**/firebase-adminsdk-*.json
+**/google-credentials*.json
+
+# Certificados ICP-Brasil / TLS / chaves privadas
+*.p12
+*.pfx
+*.pem
+*.key
+*.crt
+*.csr
+
+# Variáveis de ambiente (podem conter API keys)
+.env
+.env.*
+!.env.example
+
+# Tokens diversos
+**/token*.json
+!**/manifest.json
+
+# ─── Build outputs / dependências ────────────────────────────────
+node_modules/
+.vercel/
+.next/
+dist/
+build/
