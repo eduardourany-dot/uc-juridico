@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.64.36 (DataJud fallback também nos botões "Buscar MNI" dos modais Novo/Editar processo)
-const CACHE_NAME = 'uc-juridico-v6-64-36';
+// Service Worker — UC Jurídico v6.65.1 (revert DJE-PDPJ — feature inaplicável ao caso de uso, DJEN scraping segue como fonte única)
+const CACHE_NAME = 'uc-juridico-v6-65-1';
 const APP_SHELL = [
   './',
   './index.html',
