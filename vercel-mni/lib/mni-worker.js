@@ -1,4 +1,11 @@
 // UC Jurídico — MNI Worker genérico (multi-tribunal)
+// Versão: 0.12.2 · DataJud fix — alias TJDF → tjdft (índice oficial CNJ)
+//   - Bug 0.12.1: consulta DataJud pro TJDF retornava HTTP 404 porque o
+//     Worker montava api_publica_tjdf, mas o índice oficial é
+//     api_publica_TJDFT (Tribunal de Justiça do DF e TERRITÓRIOS).
+//   - Fix: novo campo opcional `datajudAlias` no registry; quando
+//     presente, sobrescreve o lowercase do código. Só TJDF precisa
+//     hoje — demais (TJGO, TRF1, TRT1-24, eSAJ, etc.) batem com lowercase.
 // Versão: 0.12.1 · DataJud fix — não exige cpf/senha (API pública CNJ)
 //   - Bug 0.12.0: validação 'cpf_senha_obrigatorios' bloqueava DataJud
 //     antes de chegar no handler da operação (HTTP 400 imediato)
@@ -140,7 +147,7 @@ const TRIBUNAIS_REGISTRY = {
   TRF5: {"codigo":"TRF5","nome":"Tribunal Regional Federal da 5ª Região","sistema":"pje","esfera":"federal","cnjCode":"4.05","auth":"cpf_senha","mniVersion":"2.2.2","endpoint":"https://pje.trf5.jus.br/pje/intercomunicacao","namespace":"http://www.cnj.jus.br/servico-intercomunicacao-2.2.2/","soapAction":"","validado":true,"validadoEm":"2026-05-11","statusHealth":"ok"},
   TRF6: {"codigo":"TRF6","nome":"Tribunal Regional Federal da 6ª Região","sistema":"pje","esfera":"federal","cnjCode":"4.06","auth":"cpf_senha","mniVersion":"2.2.2","endpoint":"https://pje.trf6.jus.br/pje/intercomunicacao","namespace":"http://www.cnj.jus.br/servico-intercomunicacao-2.2.2/","soapAction":"","validado":false,"statusHealth":"bloqueio_cloudflare","observacoes":"HTTP 530 — tribunal novo (2021, MG)."},
   TJGO: {"codigo":"TJGO","nome":"Tribunal de Justiça de Goiás","sistema":"projudi","esfera":"estadual","cnjCode":"8.09","auth":"cpf_senha","mniVersion":"2.2.2","endpoint":"https://projudi.tjgo.jus.br/IntercomunicacaoService","namespace":"http://www.cnj.jus.br/servico-intercomunicacao-2.2.2/","soapAction":"","validado":true,"validadoEm":"2026-05-11","statusHealth":"ok","observacoes":"POC validada. Endpoint mudou do v4.3.0 (era /projudi/webservices/intercomunicacao)."},
-  TJDF: {"codigo":"TJDF","nome":"Tribunal de Justiça do Distrito Federal e Territórios","sistema":"pje","esfera":"estadual","cnjCode":"8.07","auth":"cpf_senha","mniVersion":"2.2.2","endpoint":"https://pje.tjdft.jus.br/pje/intercomunicacao","endpoint2g":"https://pje.tjdft.jus.br/pje2g/intercomunicacao","namespace":"http://www.cnj.jus.br/servico-intercomunicacao-2.2.2/","soapAction":"","validado":false,"statusHealth":"bloqueio_cloudflare","observacoes":"Prioritário (OAB/DF). HTTP 403 — WAF bloqueia Cloudflare. Testar via browser."},
+  TJDF: {"codigo":"TJDF","nome":"Tribunal de Justiça do Distrito Federal e Territórios","sistema":"pje","esfera":"estadual","cnjCode":"8.07","auth":"cpf_senha","mniVersion":"2.2.2","endpoint":"https://pje.tjdft.jus.br/pje/intercomunicacao","endpoint2g":"https://pje.tjdft.jus.br/pje2g/intercomunicacao","namespace":"http://www.cnj.jus.br/servico-intercomunicacao-2.2.2/","soapAction":"","validado":false,"statusHealth":"bloqueio_cloudflare","datajudAlias":"tjdft","observacoes":"Prioritário (OAB/DF). HTTP 403 — WAF bloqueia Cloudflare. Testar via browser. DataJud usa alias 'tjdft' (não 'tjdf') — DF e Territórios."},
   TJSP: {"codigo":"TJSP","nome":"Tribunal de Justiça de São Paulo","sistema":"esaj","esfera":"estadual","cnjCode":"8.26","auth":"cpf_senha","mniVersion":"2.2.2","endpoint":"http://esaj.tjsp.jus.br/mniws/servico-intercomunicacao-2.2.2/intercomunicacao","namespace":"http://www.cnj.jus.br/servico-intercomunicacao-2.2.2/","soapAction":"","validado":true,"validadoEm":"2026-05-11","statusHealth":"ok","atencao":"endpoint_http","observacoes":"Validado via Cloudflare (45ms). ATENÇÃO: HTTP não HTTPS. Parser pode precisar ajuste pro namespace eSAJ."},
   TJRJ: {"codigo":"TJRJ","nome":"Tribunal de Justiça do Rio de Janeiro","sistema":"pje","esfera":"estadual","cnjCode":"8.19","auth":"cpf_senha","mniVersion":"2.2.2","endpoint":"https://pje.tjrj.jus.br/pje/intercomunicacao","endpoint2g":"https://pje.tjrj.jus.br/pje2g/intercomunicacao","namespace":"http://www.cnj.jus.br/servico-intercomunicacao-2.2.2/","soapAction":"","validado":false,"statusHealth":"bloqueio_cloudflare","observacoes":"HTTP 530 — origin bloqueia Cloudflare."},
   TJMG: {"codigo":"TJMG","nome":"Tribunal de Justiça de Minas Gerais","sistema":"pje","esfera":"estadual","cnjCode":"8.13","auth":"icp_brasil","mniVersion":"2.2.2","endpoint":"https://pje.tjmg.jus.br/pje/intercomunicacao","endpoint2g":"https://pje.tjmg.jus.br/pje2g/intercomunicacao","namespace":"http://www.cnj.jus.br/servico-intercomunicacao-2.2.2/","soapAction":"","validado":false,"statusHealth":"path_errado","observacoes":"Exige ICP-Brasil. HTTP 200 mas retorna HTML (não WSDL). Path provavelmente errado."},
@@ -240,7 +247,7 @@ export async function handleMniRequest(request, env) {
       const validados = codigos.filter(c => TRIBUNAIS_REGISTRY[c].validado);
       const naoSuportados = codigos.filter(c => TRIBUNAIS_REGISTRY[c].naoSuportado);
       return json({
-        worker: 'uc-mni', versao: '0.12.1',
+        worker: 'uc-mni', versao: '0.12.2',
         total: codigos.length,
         validados, naoSuportados,
         operacoes: ['consultarProcesso', 'entregarManifestacaoProcessual', 'consultarProcessoDataJud', 'health', 'listarTribunais', 'detectarPorCnj']
@@ -621,8 +628,13 @@ async function consultarProcessoDataJud(codigoTribunal, cnj) {
   if (cnjNorm.length < 18) {
     return { sucesso: false, erro: 'cnj_invalido', mensagem: `CNJ precisa ter 20 dígitos (${cnjNorm.length} encontrados)` };
   }
-  // Endpoint usa código do tribunal em lowercase, padrão `api_publica_{codigo}`
-  const alias = String(codigoTribunal || '').toLowerCase();
+  // Alias do índice DataJud — padrão CNJ é lowercase do código, exceto
+  // quando o tribunal tem nome composto que diverge do código interno.
+  // Atualmente só TJDF (registry) ↔ tjdft (DataJud — DF e Territórios).
+  // Pra outros tribunais futuros com quirk similar, declarar `datajudAlias`
+  // no registry. Fallback seguro pro lowercase do código.
+  const conf = TRIBUNAIS_REGISTRY[codigoTribunal] || {};
+  const alias = conf.datajudAlias || String(codigoTribunal || '').toLowerCase();
   const url = `${DATAJUD_BASE}/api_publica_${alias}/_search`;
 
   const t0 = Date.now();
