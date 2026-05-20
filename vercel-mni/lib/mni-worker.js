@@ -1,4 +1,13 @@
 // UC Jurídico — MNI Worker genérico (multi-tribunal)
+// Versão: 0.13.0 · DJE-PDPJ (sandbox) — domicílio judicial eletrônico CNJ
+//   - Novas operações: djePdpjListarComunicacoes, djePdpjBuscarComunicacao
+//   - OAuth 2.0 client_credentials (token endpoint configurável via body)
+//   - Endpoint base + token URL configuráveis (DJE-PDPJ ainda em rollout,
+//     URLs variam por tribunal/etapa do projeto CNJ PDPJ-Br)
+//   - SEM remover/desabilitar DJEN (scraping atual segue funcionando paralelo)
+//   - Frontend chama só em ambiente staging (sandbox-only por enquanto)
+//   - Credenciais NUNCA são guardadas no Worker — cliente passa em cada
+//     request (cifradas at-rest no cofre MNI, em trânsito por HTTPS)
 // Versão: 0.12.1 · DataJud fix — não exige cpf/senha (API pública CNJ)
 //   - Bug 0.12.0: validação 'cpf_senha_obrigatorios' bloqueava DataJud
 //     antes de chegar no handler da operação (HTTP 400 imediato)
@@ -240,10 +249,10 @@ export async function handleMniRequest(request, env) {
       const validados = codigos.filter(c => TRIBUNAIS_REGISTRY[c].validado);
       const naoSuportados = codigos.filter(c => TRIBUNAIS_REGISTRY[c].naoSuportado);
       return json({
-        worker: 'uc-mni', versao: '0.12.1',
+        worker: 'uc-mni', versao: '0.13.0',
         total: codigos.length,
         validados, naoSuportados,
-        operacoes: ['consultarProcesso', 'entregarManifestacaoProcessual', 'consultarProcessoDataJud', 'health', 'listarTribunais', 'detectarPorCnj']
+        operacoes: ['consultarProcesso', 'entregarManifestacaoProcessual', 'consultarProcessoDataJud', 'djePdpjListarComunicacoes', 'djePdpjBuscarComunicacao', 'health', 'listarTribunais', 'detectarPorCnj']
       }, 200, corsHeaders);
     }
 
@@ -277,6 +286,26 @@ export async function handleMniRequest(request, env) {
       }
       const r = await healthCheck(conf);
       return json({ sucesso: true, codigo, ...r }, 200, corsHeaders);
+    }
+
+    // ----------------------------------------------------------
+    // DJE-PDPJ (Domicílio Judicial Eletrônico — PDPJ-Br / CNJ)
+    // ----------------------------------------------------------
+    // Operações não atreladas a um tribunal específico (CNJ-wide).
+    // Credenciais OAuth (client_id/client_secret) vêm no body — Worker
+    // NÃO persiste nada, só faz proxy. Endpoint e tokenUrl configuráveis
+    // porque PDPJ-Br ainda está em rollout e as URLs oficiais não estão
+    // 100% estáveis (ver docs.pje.jus.br/api/dje).
+    if (operacao === 'djePdpjListarComunicacoes' || operacao === 'djePdpjBuscarComunicacao') {
+      try {
+        const result = (operacao === 'djePdpjListarComunicacoes')
+          ? await djePdpjListarComunicacoes(body)
+          : await djePdpjBuscarComunicacao(body);
+        return json(result, 200, corsHeaders);
+      } catch (e) {
+        console.error('[DJE-PDPJ] erro:', e?.stack || e);
+        return json({ sucesso: false, erro: 'pdpj_error', mensagem: String(e?.message || e) }, 502, corsHeaders);
+      }
     }
 
     const codigo = String(body.tribunal || 'TJGO').toUpperCase();
@@ -1119,6 +1148,206 @@ function parseConsultarProcesso(xml) {
     // Snippet diagnóstico do XML quando docs vieram sem conteúdo — ajuda
     // refinar o parser sem precisar passar debug=true (resposta grande).
     xmlSnippetDocumentos
+  };
+}
+
+// ============================================================
+// DJE-PDPJ — Domicílio Judicial Eletrônico (PDPJ-Br / CNJ)
+// ============================================================
+//
+// Status: SANDBOX. Endpoints e schemas ainda em rollout do CNJ.
+// Eduardo precisa cadastrar client_id/client_secret no painel
+// https://domicilio-eletronico.pdpj.jus.br ANTES de testar.
+//
+// Não substitui o DJEN scraping atual — convive paralelo até validar
+// cobertura/qualidade. O DJEN segue como fonte primária; DJE-PDPJ
+// entra como suplemento (capta intimações trabalhistas/oficiais
+// não cobertas pelo scraping atual).
+//
+// Defaults configuráveis via body.djePdpj.{endpoint,tokenUrl}.
+// Documentação CNJ: https://docs.pje.jus.br
+const DJE_PDPJ_DEFAULTS = {
+  // Endpoint base do painel de mensagens (REST)
+  endpoint: 'https://comunicaapi.pje.jus.br',
+  // OAuth 2.0 client_credentials (Keycloak SSO do PDPJ-Br)
+  // Em produção CNJ: sso.cloud.pje.jus.br · em homolog: sso-hml…
+  tokenUrl: 'https://sso.cloud.pje.jus.br/auth/realms/pje/protocol/openid-connect/token',
+  // Caminho do recurso "comunicações" — padrão DJEN reaproveitado
+  // (CNJ está unificando os dois sob a PDPJ-Br, schemas convergem).
+  pathListar: '/api/v1/comunicacao',
+  pathBuscar: '/api/v1/comunicacao'  // GET /:id
+};
+
+// OAuth client_credentials — devolve { access_token, expires_in, ... }
+// Worker stateless, então cada batch faz seu próprio handshake.
+async function _djePdpjGetToken(opts) {
+  const tokenUrl = opts.tokenUrl || DJE_PDPJ_DEFAULTS.tokenUrl;
+  if (!opts.clientId || !opts.clientSecret) {
+    return { erro: 'credenciais_obrigatorias', mensagem: 'client_id e client_secret são obrigatórios pra DJE-PDPJ.' };
+  }
+  const form = new URLSearchParams();
+  form.set('grant_type', 'client_credentials');
+  form.set('client_id', String(opts.clientId));
+  form.set('client_secret', String(opts.clientSecret));
+  if (opts.scope) form.set('scope', String(opts.scope));
+
+  const t0 = Date.now();
+  let resp;
+  try {
+    resp = await fetch(tokenUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Accept': 'application/json'
+      },
+      body: form.toString(),
+      signal: AbortSignal.timeout(15000)
+    });
+  } catch (e) {
+    return { erro: 'rede', mensagem: String(e?.message || e), elapsedMs: Date.now() - t0 };
+  }
+  const elapsedMs = Date.now() - t0;
+  let raw = '';
+  try { raw = await resp.text(); } catch (_) {}
+
+  if (!resp.ok) {
+    return { erro: 'http_' + resp.status, httpStatus: resp.status, elapsedMs, raw: raw.slice(0, 1000) };
+  }
+  let data;
+  try { data = JSON.parse(raw); }
+  catch (e) { return { erro: 'parse_token_json', mensagem: String(e?.message || e), elapsedMs, raw: raw.slice(0, 500) }; }
+
+  if (!data.access_token) {
+    return { erro: 'sem_access_token', elapsedMs, payload: data };
+  }
+  return { sucesso: true, access_token: data.access_token, token_type: data.token_type || 'Bearer', expires_in: data.expires_in || 0, elapsedMs };
+}
+
+// GET helper com Bearer
+async function _djePdpjAuthedGet(url, accessToken, timeoutMs = 20000) {
+  const t0 = Date.now();
+  let resp;
+  try {
+    resp = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'Authorization': 'Bearer ' + accessToken,
+        'Accept': 'application/json'
+      },
+      signal: AbortSignal.timeout(timeoutMs)
+    });
+  } catch (e) {
+    return { erro: 'rede', mensagem: String(e?.message || e), elapsedMs: Date.now() - t0 };
+  }
+  const elapsedMs = Date.now() - t0;
+  const raw = await resp.text().catch(() => '');
+  if (!resp.ok) {
+    return { erro: 'http_' + resp.status, httpStatus: resp.status, elapsedMs, raw: raw.slice(0, 1000) };
+  }
+  try {
+    return { sucesso: true, elapsedMs, data: JSON.parse(raw) };
+  } catch (e) {
+    return { erro: 'parse_json', mensagem: String(e?.message || e), elapsedMs, raw: raw.slice(0, 500) };
+  }
+}
+
+// Operação: lista comunicações no intervalo. Schema preliminar
+// (alinhado com DJEN — CNJ está convergindo). Aceita filtros via
+// query string repassados raw pra DJE-PDPJ.
+//
+// body esperado:
+//   {
+//     operacao: 'djePdpjListarComunicacoes',
+//     djePdpj: {
+//       clientId, clientSecret,
+//       endpoint?, tokenUrl?, scope?,
+//       dataInicio: 'YYYY-MM-DD',
+//       dataFim:    'YYYY-MM-DD',
+//       pagina?: 1,
+//       itensPorPagina?: 100,
+//       numeroOab?, ufOab?, tribunal?  // filtros opcionais
+//     }
+//   }
+async function djePdpjListarComunicacoes(body) {
+  const opts = body.djePdpj || {};
+  if (!opts.clientId || !opts.clientSecret) {
+    return { sucesso: false, erro: 'credenciais_obrigatorias', mensagem: 'Cadastre client_id e client_secret no painel domicilio-eletronico.pdpj.jus.br e configure em Configurações → DJE-PDPJ.' };
+  }
+  if (!opts.dataInicio || !opts.dataFim) {
+    return { sucesso: false, erro: 'periodo_obrigatorio', mensagem: 'dataInicio e dataFim são obrigatórios (YYYY-MM-DD).' };
+  }
+
+  const tk = await _djePdpjGetToken(opts);
+  if (!tk.sucesso) {
+    return { sucesso: false, erro: 'oauth_falhou', detalhes: tk };
+  }
+
+  const endpoint = (opts.endpoint || DJE_PDPJ_DEFAULTS.endpoint).replace(/\/$/, '');
+  const path = opts.pathListar || DJE_PDPJ_DEFAULTS.pathListar;
+  const qs = new URLSearchParams();
+  qs.set('dataDisponibilizacaoInicio', opts.dataInicio);
+  qs.set('dataDisponibilizacaoFim', opts.dataFim);
+  qs.set('pagina', String(opts.pagina || 1));
+  qs.set('itensPorPagina', String(opts.itensPorPagina || 100));
+  if (opts.numeroOab) qs.set('numeroOab', String(opts.numeroOab));
+  if (opts.ufOab) qs.set('ufOab', String(opts.ufOab));
+  if (opts.tribunal) qs.set('siglaTribunal', String(opts.tribunal));
+  if (opts.numeroProcesso) qs.set('numeroProcesso', String(opts.numeroProcesso));
+
+  const url = `${endpoint}${path}?${qs.toString()}`;
+  const r = await _djePdpjAuthedGet(url, tk.access_token);
+  if (!r.sucesso) {
+    return { sucesso: false, erro: 'listar_falhou', detalhes: r, url };
+  }
+  // Repassa raw — schema DJE-PDPJ converge com DJEN, cliente reusa parser
+  return {
+    sucesso: true,
+    fonte: 'dje-pdpj',
+    items: r.data?.items || r.data?.comunicacoes || (Array.isArray(r.data) ? r.data : []),
+    total: r.data?.total || r.data?.count || (r.data?.items?.length || 0),
+    paginaAtual: r.data?.pagina || opts.pagina || 1,
+    raw: r.data,
+    elapsedTokenMs: tk.elapsedMs,
+    elapsedListarMs: r.elapsedMs
+  };
+}
+
+// Operação: detalhe de uma comunicação específica
+//
+// body esperado:
+//   {
+//     operacao: 'djePdpjBuscarComunicacao',
+//     djePdpj: {
+//       clientId, clientSecret, endpoint?, tokenUrl?, scope?,
+//       id: '<id_da_comunicacao>'  // OU hash, conforme PDPJ devolver
+//     }
+//   }
+async function djePdpjBuscarComunicacao(body) {
+  const opts = body.djePdpj || {};
+  if (!opts.clientId || !opts.clientSecret) {
+    return { sucesso: false, erro: 'credenciais_obrigatorias' };
+  }
+  if (!opts.id && !opts.hash) {
+    return { sucesso: false, erro: 'id_obrigatorio' };
+  }
+  const tk = await _djePdpjGetToken(opts);
+  if (!tk.sucesso) {
+    return { sucesso: false, erro: 'oauth_falhou', detalhes: tk };
+  }
+  const endpoint = (opts.endpoint || DJE_PDPJ_DEFAULTS.endpoint).replace(/\/$/, '');
+  const path = opts.pathBuscar || DJE_PDPJ_DEFAULTS.pathBuscar;
+  const id = encodeURIComponent(opts.id || opts.hash);
+  const url = `${endpoint}${path}/${id}`;
+  const r = await _djePdpjAuthedGet(url, tk.access_token);
+  if (!r.sucesso) {
+    return { sucesso: false, erro: 'buscar_falhou', detalhes: r, url };
+  }
+  return {
+    sucesso: true,
+    fonte: 'dje-pdpj',
+    comunicacao: r.data,
+    elapsedTokenMs: tk.elapsedMs,
+    elapsedBuscarMs: r.elapsedMs
   };
 }
 

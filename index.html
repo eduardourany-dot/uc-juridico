@@ -16603,8 +16603,14 @@ async function renderSettings() {
     tab = 'appearance';
     state._settingsTab = tab;
   }
-  // Tabs restritas a admin: DJEN, MNI, Acessos, Manutenção. Advogado comum cai pra appearance.
-  if (!isAdmin && ['djen', 'mni', 'acessos', 'maintenance'].includes(tab)) {
+  // Tabs restritas a admin: DJEN, DJE-PDPJ, MNI, Acessos, Manutenção. Advogado comum cai pra appearance.
+  if (!isAdmin && ['djen', 'djepdpj', 'mni', 'acessos', 'maintenance'].includes(tab)) {
+    tab = 'appearance';
+    state._settingsTab = tab;
+  }
+  // DJE-PDPJ ainda é sandbox-only — em produção a tab vira appearance.
+  // Quando promover pra prod, remover esta verificação.
+  if (tab === 'djepdpj' && window.UC_CONFIG_ENV !== 'staging') {
     tab = 'appearance';
     state._settingsTab = tab;
   }
@@ -16621,6 +16627,7 @@ async function renderSettings() {
       <button class="tab ${tab === 'appearance' ? 'active' : ''}" onclick="setSettingsTab('appearance')">Aparência</button>
       ${_isClienteMode() ? '' : `<button class="tab ${tab === 'equipe' ? 'active' : ''}" onclick="setSettingsTab('equipe')">Equipe</button>`}
       ${(!_isClienteMode() && isAdmin) ? `<button class="tab ${tab === 'djen' ? 'active' : ''}" onclick="setSettingsTab('djen')">DJEN</button>` : ''}
+      ${(!_isClienteMode() && isAdmin && window.UC_CONFIG_ENV === 'staging') ? `<button class="tab ${tab === 'djepdpj' ? 'active' : ''}" onclick="setSettingsTab('djepdpj')" title="DJE-PDPJ (Domicílio Eletrônico CNJ) — sandbox-only">DJE-PDPJ <span style="font-size:9px;padding:1px 4px;border-radius:3px;background:var(--uc-amber);color:#000;margin-left:2px;">SANDBOX</span></button>` : ''}
       ${(!_isClienteMode() && isAdmin) ? `<button class="tab ${tab === 'mni' ? 'active' : ''}" onclick="setSettingsTab('mni')">MNI</button>` : ''}
       ${_isClienteMode() ? '' : `<button class="tab ${tab === 'prompts' ? 'active' : ''}" onclick="setSettingsTab('prompts')">Prompts</button>`}
       ${_isClienteMode() ? '' : `<button class="tab ${tab === 'backup' ? 'active' : ''}" onclick="setSettingsTab('backup')">Backup</button>`}
@@ -16645,8 +16652,11 @@ function renderSettingsTab(tab, prompts, defaultPromptId) {
   // Defesa em camadas: se alguém chamar diretamente com tab restrita
   // (sem passar pelo renderSettings), bloqueia o render.
   const isAdmin = window.UC_Auth?.getUser?.()?.role === 'admin';
-  if (!isAdmin && ['djen', 'mni', 'acessos', 'maintenance'].includes(tab)) {
+  if (!isAdmin && ['djen', 'djepdpj', 'mni', 'acessos', 'maintenance'].includes(tab)) {
     return '<p class="help-text" style="padding: 24px;">Esta seção é restrita aos administradores do escritório.</p>';
+  }
+  if (tab === 'djepdpj' && window.UC_CONFIG_ENV !== 'staging') {
+    return '<p class="help-text" style="padding: 24px;">DJE-PDPJ está em sandbox — disponível só no ambiente staging por enquanto.</p>';
   }
 
   if (tab === 'appearance') {
@@ -16862,6 +16872,112 @@ function renderSettingsTab(tab, prompts, defaultPromptId) {
           <button class="btn btn-secondary" onclick="djenRunSearch()">🔔 Pesquisar agora</button>
           <button class="btn btn-outline" onclick="djenViewHistory()">Ver histórico de publicações</button>
         </div>
+      </div>
+    `;
+  }
+  if (tab === 'djepdpj') {
+    const cache = state._djePdpjCache || {};
+    const clientId = cache.clientId || '';
+    const clientSecretMask = cache.hasSecret ? '••••••••••••' : '';
+    const endpoint = cache.endpoint || '';
+    const tokenUrl = cache.tokenUrl || '';
+    const scope = cache.scope || '';
+    const workerUrl = cache.workerUrl || '';
+    const lookback = cache.lookback || 7;
+    const lastFetch = cache.lastFetch || null;
+    return `
+      <div class="card mb-3" style="background: var(--uc-amber-soft, #fff7e6); border: 1px solid var(--uc-amber);">
+        <h3 class="font-serif text-lg font-semibold smallcaps mb-2" style="color: var(--uc-black);">⚠ DJE-PDPJ — Sandbox</h3>
+        <p style="font-size: 14px; color: var(--uc-graphite); margin-bottom: 8px;">
+          <strong>Domicílio Judicial Eletrônico</strong> do CNJ (PDPJ-Br). Ambiente <strong>sandbox-only</strong>:
+          os dados ficam só no Firestore staging, não afetam produção. Convive em paralelo com o
+          <strong>DJEN scraping atual</strong> — que continua funcionando normalmente em prod.
+        </p>
+        <p class="help-text" style="margin: 0;">
+          <strong>Pré-requisito:</strong> cadastrar <code>client_id</code>/<code>client_secret</code> no painel oficial CNJ
+          <a href="https://domicilio-eletronico.pdpj.jus.br" target="_blank" rel="noopener">domicilio-eletronico.pdpj.jus.br</a>
+          → seção <em>"Gerenciar credenciais API"</em>. Sem as credenciais, as buscas falham com <code>credenciais_obrigatorias</code>.
+        </p>
+      </div>
+
+      <div class="card mb-3">
+        <h4 class="font-serif font-semibold smallcaps mb-2" style="color: var(--uc-black);">Credenciais OAuth (client_credentials)</h4>
+        <p class="help-text mb-2">
+          As credenciais ficam cifradas no Firestore staging (mesma key do cofre MNI quando desbloqueado;
+          se não, em <code>djePdpjClient*</code> em plaintext do localStorage — temporário, fix antes de promover).
+        </p>
+        <div style="display:grid;gap:8px;max-width:560px;">
+          <div>
+            <label class="label" style="display:block;margin-bottom:3px;">client_id</label>
+            <input type="text" id="djePdpjClientIdInput" class="input" value="${escapeHtml(clientId)}" placeholder="Ex: uc-juridico-sandbox" autocomplete="off">
+          </div>
+          <div>
+            <label class="label" style="display:block;margin-bottom:3px;">client_secret</label>
+            <input type="password" id="djePdpjClientSecretInput" class="input" value="${escapeHtml(clientSecretMask)}" placeholder="${cache.hasSecret ? '(salvo · digite pra trocar)' : 'Cole o secret gerado no painel CNJ'}" autocomplete="off">
+            ${cache.hasSecret ? '<p class="help-text" style="font-size:11px;margin-top:3px;">✓ Secret salvo. Digite pra substituir.</p>' : ''}
+          </div>
+          <div>
+            <label class="label" style="display:block;margin-bottom:3px;">scope (opcional)</label>
+            <input type="text" id="djePdpjScopeInput" class="input" value="${escapeHtml(scope)}" placeholder="Ex: comunicacao.read (vazio = padrão do painel)" autocomplete="off">
+          </div>
+        </div>
+      </div>
+
+      <div class="card mb-3">
+        <h4 class="font-serif font-semibold smallcaps mb-2" style="color: var(--uc-black);">Endpoints (avançado)</h4>
+        <p class="help-text mb-2">
+          O DJE-PDPJ ainda está em rollout. Deixe vazio pros defaults do Worker. Sobrescreva
+          se o painel CNJ apontar URLs diferentes pro seu cadastro.
+        </p>
+        <div style="display:grid;gap:8px;max-width:680px;">
+          <div>
+            <label class="label" style="display:block;margin-bottom:3px;">Worker URL (Vercel/Cloudflare — proxy do app)</label>
+            <input type="url" id="djePdpjWorkerInput" class="input" value="${escapeHtml(workerUrl)}" placeholder="https://uc-mni-vercel.vercel.app/api/mni (padrão do escritório)">
+            <p class="help-text" style="font-size:11px;margin-top:3px;">Se vazio, reusa o workerUrl do MNI (mesmo Worker serve as duas APIs).</p>
+          </div>
+          <div>
+            <label class="label" style="display:block;margin-bottom:3px;">Endpoint base PDPJ (resource API)</label>
+            <input type="url" id="djePdpjEndpointInput" class="input" value="${escapeHtml(endpoint)}" placeholder="https://comunicaapi.pje.jus.br (default)">
+          </div>
+          <div>
+            <label class="label" style="display:block;margin-bottom:3px;">Token URL (OAuth)</label>
+            <input type="url" id="djePdpjTokenUrlInput" class="input" value="${escapeHtml(tokenUrl)}" placeholder="https://sso.cloud.pje.jus.br/auth/realms/pje/protocol/openid-connect/token (default)">
+          </div>
+        </div>
+      </div>
+
+      <div class="card mb-3">
+        <h4 class="font-serif font-semibold smallcaps mb-2" style="color: var(--uc-black);">Período padrão de busca</h4>
+        <div style="display:flex; align-items:center; gap:8px;">
+          <label class="label" style="margin:0;">Buscar comunicações dos últimos</label>
+          <input type="number" id="djePdpjLookbackInput" value="${lookback}" min="1" max="90" style="width: 70px; padding: 6px; border: 1px solid var(--uc-line); border-radius: 4px;">
+          <span style="font-size: 14px;">dia(s)</span>
+        </div>
+        <p class="help-text" style="margin-top: 6px;">
+          Sandbox: faça testes curtos (3-7 dias) até validar o schema PDPJ devolvido. Períodos longos
+          podem retornar muitos itens duplicados com o DJEN.
+        </p>
+      </div>
+
+      <div class="card mb-3">
+        <h4 class="font-serif font-semibold smallcaps mb-2" style="color: var(--uc-black);">Estado</h4>
+        <p class="help-text" style="margin-bottom: 8px;">
+          Última consulta: <strong>${lastFetch ? formatDateTime(lastFetch) : 'nunca'}</strong>
+        </p>
+        <button class="btn btn-outline btn-sm" id="djePdpjSaveSettings">Salvar configurações</button>
+      </div>
+
+      <div class="card">
+        <h4 class="font-serif font-semibold smallcaps mb-2" style="color: var(--uc-black);">Ações (sandbox)</h4>
+        <div class="flex gap-2 flex-wrap">
+          <button class="btn btn-secondary" onclick="djePdpjTestOAuth()" title="Testa só o handshake OAuth — não busca comunicações">🔑 Testar OAuth</button>
+          <button class="btn btn-primary" onclick="djePdpjRunSearch()">🔍 Consultar agora</button>
+          <button class="btn btn-ghost" onclick="djePdpjViewHistory()">Histórico</button>
+        </div>
+        <p class="help-text" style="margin-top: 8px; font-size:12px;">
+          Nesta fase os resultados são exibidos só pra revisão — <strong>não importam</strong> automaticamente
+          (evita poluir a base com schema ainda em validação).
+        </p>
       </div>
     `;
   }
@@ -17332,6 +17448,18 @@ function setupSettingsHandlers(tab) {
     if (saveBtn) saveBtn.onclick = mniSaveConfigFlow;
     const loadBtn = $('mniLoadTribunaisBtn');
     if (loadBtn) loadBtn.onclick = mniLoadTribunaisFlow;
+  }
+  if (tab === 'djepdpj') {
+    djePdpjLoadSettingsCache().then(() => {
+      if (!state._djePdpjRenderedFresh) {
+        state._djePdpjRenderedFresh = true;
+        renderSettings();
+      } else {
+        state._djePdpjRenderedFresh = false;
+      }
+    });
+    const saveBtn = $('djePdpjSaveSettings');
+    if (saveBtn) saveBtn.onclick = djePdpjSaveSettingsFlow;
   }
   if (tab === 'about') {
     if (state.installPrompt) {
@@ -21560,6 +21688,289 @@ function djenShowError(err) {
     state._settingsTab = 'djen';
     navigate('settings');
   };
+}
+
+// ====================================================================
+// === DJE-PDPJ MONITOR (sandbox-only) ================================
+// ====================================================================
+// Domicílio Judicial Eletrônico via PDPJ-Br (CNJ). OAuth 2.0
+// client_credentials, endpoint configurável. Convive PARALELO com o
+// DJEN scraping atual — em sandbox só. Quando validar cobertura/qualidade,
+// avalia se substitui DJEN ou se segue convivendo como segunda fonte.
+//
+// Storage keys (DB.setSetting/getSetting):
+//   djePdpjClientId    — string · público
+//   djePdpjClientSecret — string · privado (SANDBOX: plaintext; TODO antes de prod: passar pro cofre MniCrypto)
+//   djePdpjScope        — string · opcional
+//   djePdpjEndpoint     — string · override do default do Worker
+//   djePdpjTokenUrl     — string · override do default do Worker
+//   djePdpjWorkerUrl    — string · override do Worker (default = mniConfig.workerUrl)
+//   djePdpjLookbackDays — int  · default 7
+//   djePdpjLastFetch    — ms epoch
+//   djePdpjLastResult   — { fetchedAt, items: [], total } pra Histórico
+
+async function djePdpjLoadSettingsCache() {
+  const clientId = await DB.getSetting('djePdpjClientId', '') || '';
+  const clientSecret = await DB.getSetting('djePdpjClientSecret', '') || '';
+  const scope = await DB.getSetting('djePdpjScope', '') || '';
+  const endpoint = await DB.getSetting('djePdpjEndpoint', '') || '';
+  const tokenUrl = await DB.getSetting('djePdpjTokenUrl', '') || '';
+  const workerUrl = await DB.getSetting('djePdpjWorkerUrl', '') || '';
+  const lookback = await DB.getSetting('djePdpjLookbackDays', 7);
+  const lastFetch = await DB.getSetting('djePdpjLastFetch', null);
+  state._djePdpjCache = {
+    clientId,
+    hasSecret: !!clientSecret,
+    scope, endpoint, tokenUrl, workerUrl,
+    lookback, lastFetch
+  };
+}
+
+async function djePdpjSaveSettingsFlow() {
+  const clientId = ($('djePdpjClientIdInput')?.value || '').trim();
+  const secretField = ($('djePdpjClientSecretInput')?.value || '');
+  const scope = ($('djePdpjScopeInput')?.value || '').trim();
+  const endpoint = ($('djePdpjEndpointInput')?.value || '').trim();
+  const tokenUrl = ($('djePdpjTokenUrlInput')?.value || '').trim();
+  const workerUrl = ($('djePdpjWorkerInput')?.value || '').trim();
+  const lookback = Math.max(1, Math.min(90, parseInt($('djePdpjLookbackInput')?.value) || 7));
+
+  await DB.setSetting('djePdpjClientId', clientId);
+  // Só sobrescreve o secret se o user digitou um valor novo (não a máscara)
+  if (secretField && !/^•+$/.test(secretField)) {
+    await DB.setSetting('djePdpjClientSecret', secretField);
+  }
+  await DB.setSetting('djePdpjScope', scope);
+  await DB.setSetting('djePdpjEndpoint', endpoint);
+  await DB.setSetting('djePdpjTokenUrl', tokenUrl);
+  await DB.setSetting('djePdpjWorkerUrl', workerUrl);
+  await DB.setSetting('djePdpjLookbackDays', lookback);
+
+  await djePdpjLoadSettingsCache();
+  renderSettings();
+  toast('Configurações DJE-PDPJ salvas', 'Sandbox · staging apenas', 'success');
+}
+
+// Resolve o Worker URL: usa override DJE-PDPJ se preenchido, senão pega do MNI
+async function _djePdpjResolveWorkerUrl() {
+  const own = await DB.getSetting('djePdpjWorkerUrl', '');
+  if (own) return own;
+  const mni = await DB.getSetting('mniConfig', {});
+  return mni?.workerUrl || '';
+}
+
+// Carrega config bruta (client_id, client_secret, etc) pra mandar pro Worker
+async function _djePdpjLoadAuthConfig() {
+  return {
+    clientId: await DB.getSetting('djePdpjClientId', '') || '',
+    clientSecret: await DB.getSetting('djePdpjClientSecret', '') || '',
+    scope: await DB.getSetting('djePdpjScope', '') || '',
+    endpoint: await DB.getSetting('djePdpjEndpoint', '') || '',
+    tokenUrl: await DB.getSetting('djePdpjTokenUrl', '') || ''
+  };
+}
+
+// Chama o Worker proxy. operacao: 'djePdpjListarComunicacoes' | 'djePdpjBuscarComunicacao'
+async function djePdpjCallWorker(operacao, extras = {}) {
+  const workerUrl = await _djePdpjResolveWorkerUrl();
+  if (!workerUrl) {
+    return { sucesso: false, erro: 'worker_nao_configurado', mensagem: 'Configure o Worker URL em Configurações → DJE-PDPJ (ou MNI).' };
+  }
+  const auth = await _djePdpjLoadAuthConfig();
+  if (!auth.clientId || !auth.clientSecret) {
+    return { sucesso: false, erro: 'credenciais_obrigatorias', mensagem: 'Cadastre client_id e client_secret antes de buscar.' };
+  }
+  try {
+    const resp = await fetch(workerUrl.replace(/\/$/, ''), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        operacao,
+        djePdpj: { ...auth, ...extras }
+      })
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (resp.ok && data.sucesso !== false) return { ...data, sucesso: true };
+    return { sucesso: false, erro: data.erro || data.error || `HTTP ${resp.status}`, mensagem: data.mensagem, detalhes: data.detalhes };
+  } catch (e) {
+    return { sucesso: false, erro: 'rede', mensagem: String(e?.message || e) };
+  }
+}
+
+// "Testar OAuth" — manda um listar com período mínimo só pra disparar
+// o handshake e mostrar o resultado bruto. Útil pra Eduardo validar
+// que client_id/client_secret estão corretos sem espalhar dados.
+async function djePdpjTestOAuth() {
+  const today = new Date().toISOString().slice(0, 10);
+  const banner = toast('Testando OAuth…', 'Handshake com PDPJ-Br', 'info');
+  const r = await djePdpjCallWorker('djePdpjListarComunicacoes', {
+    dataInicio: today,
+    dataFim: today,
+    itensPorPagina: 1
+  });
+  const modal = document.createElement('div');
+  modal.className = 'modal-backdrop';
+  const ok = r.sucesso;
+  modal.innerHTML = `
+    <div class="modal scroll-thin" style="max-width: 720px;">
+      <h3 class="modal-title" style="color: ${ok ? 'var(--uc-green)' : 'var(--uc-red)'};">
+        ${ok ? '✓ OAuth funcionou' : '⚠ Falhou'}
+      </h3>
+      <p class="help-text" style="margin-bottom:12px;">
+        ${ok
+          ? `Token obtido. Listagem do dia retornou <strong>${r.total ?? r.items?.length ?? 0}</strong> item(ns) (apenas pra teste do handshake).`
+          : `Erro: <code>${escapeHtml(r.erro || 'desconhecido')}</code>${r.mensagem ? ' · ' + escapeHtml(r.mensagem) : ''}`}
+      </p>
+      <details style="margin-bottom:12px;">
+        <summary style="cursor:pointer;font-size:12px;">Resposta bruta do Worker</summary>
+        <pre style="background:var(--uc-cream);padding:10px;border-radius:4px;font-size:11px;white-space:pre-wrap;max-height:300px;overflow:auto;">${escapeHtml(JSON.stringify(r, null, 2))}</pre>
+      </details>
+      <button class="btn btn-outline" id="_djePdpjTestClose" style="width:100%;">Fechar</button>
+    </div>`;
+  $('modalContainer').appendChild(modal);
+  document.getElementById('_djePdpjTestClose').onclick = () => modal.remove();
+}
+
+// Pesquisa real — listar comunicações no período configurado.
+// Resultados NÃO são importados automaticamente (sandbox): só
+// mostrados em modal pra revisão. Importação será habilitada depois
+// que o schema PDPJ for validado contra produção.
+async function djePdpjRunSearch() {
+  if (window.UC_CONFIG_ENV !== 'staging') {
+    toast('Sandbox-only', 'DJE-PDPJ só funciona no ambiente staging por enquanto.', 'error');
+    return;
+  }
+  const lookback = await DB.getSetting('djePdpjLookbackDays', 7);
+  const today = new Date();
+  const fim = new Date(today); fim.setDate(today.getDate() - 1);
+  const inicio = new Date(today); inicio.setDate(today.getDate() - lookback);
+  const fmtDate = d => d.toISOString().slice(0, 10);
+
+  const modal = document.createElement('div');
+  modal.className = 'modal-backdrop';
+  modal.innerHTML = `
+    <div class="modal" style="max-width: 480px;">
+      <h3 class="modal-title">Consultando DJE-PDPJ…</h3>
+      <div class="flex items-center gap-3" style="margin-bottom: 12px;">
+        <div class="spinner"></div>
+        <p style="margin:0;">Buscando comunicações de ${fmtDate(inicio)} a ${fmtDate(fim)}…</p>
+      </div>
+    </div>`;
+  $('modalContainer').appendChild(modal);
+
+  const r = await djePdpjCallWorker('djePdpjListarComunicacoes', {
+    dataInicio: fmtDate(inicio),
+    dataFim: fmtDate(fim),
+    pagina: 1,
+    itensPorPagina: 100
+  });
+  modal.remove();
+
+  await DB.setSetting('djePdpjLastFetch', Date.now());
+  await DB.setSetting('djePdpjLastResult', {
+    fetchedAt: Date.now(),
+    items: r.items || [],
+    total: r.total || (r.items?.length || 0),
+    sucesso: !!r.sucesso,
+    erro: r.erro,
+    mensagem: r.mensagem
+  });
+
+  if (!r.sucesso) {
+    djePdpjShowError(r);
+    return;
+  }
+  djePdpjShowResultsModal(r, inicio, fim);
+}
+
+function djePdpjShowError(r) {
+  const modal = document.createElement('div');
+  modal.className = 'modal-backdrop';
+  modal.innerHTML = `
+    <div class="modal scroll-thin" style="max-width: 640px;">
+      <h3 class="modal-title" style="color: var(--uc-red);">⚠ Falha na consulta DJE-PDPJ</h3>
+      <p style="margin-bottom:8px;">Código: <code>${escapeHtml(r.erro || 'desconhecido')}</code></p>
+      ${r.mensagem ? `<p style="margin-bottom:8px;">${escapeHtml(r.mensagem)}</p>` : ''}
+      ${r.erro === 'credenciais_obrigatorias' ? `
+        <div class="callout warn" style="background:var(--uc-amber-soft);border-left:4px solid var(--uc-amber);padding:12px;border-radius:4px;margin:8px 0;">
+          Cadastre client_id e client_secret no painel <a href="https://domicilio-eletronico.pdpj.jus.br" target="_blank" rel="noopener">domicilio-eletronico.pdpj.jus.br</a>
+          e configure em <strong>Configurações → DJE-PDPJ</strong>.
+        </div>` : ''}
+      ${r.erro === 'oauth_falhou' ? `
+        <div class="callout warn" style="background:var(--uc-amber-soft);border-left:4px solid var(--uc-amber);padding:12px;border-radius:4px;margin:8px 0;">
+          Handshake OAuth falhou. Verifique credenciais e a <code>tokenUrl</code> em Configurações.
+          A URL padrão (<code>sso.cloud.pje.jus.br/auth/realms/pje/…</code>) pode estar errada conforme o
+          rollout do PDPJ-Br — peça a URL exata ao suporte CNJ ou ao painel.
+        </div>` : ''}
+      <details style="margin:12px 0;">
+        <summary style="cursor:pointer;font-size:12px;">Detalhes técnicos</summary>
+        <pre style="background:var(--uc-cream);padding:10px;border-radius:4px;font-size:11px;white-space:pre-wrap;max-height:300px;overflow:auto;">${escapeHtml(JSON.stringify(r.detalhes || r, null, 2))}</pre>
+      </details>
+      <button class="btn btn-outline" id="_djePdpjErrClose" style="width:100%;">Fechar</button>
+    </div>`;
+  $('modalContainer').appendChild(modal);
+  document.getElementById('_djePdpjErrClose').onclick = () => modal.remove();
+}
+
+function djePdpjShowResultsModal(r, dataInicio, dataFim) {
+  const items = r.items || [];
+  const modal = document.createElement('div');
+  modal.className = 'modal-backdrop';
+  // Schema PDPJ ainda em validação — exibe principais campos comuns + raw
+  // pra Eduardo entender o que voltou. Não importa automaticamente.
+  const rows = items.length === 0
+    ? '<p class="help-text" style="text-align:center;padding:20px;">Nenhuma comunicação no período.</p>'
+    : items.slice(0, 50).map((it, i) => {
+        const cnj = it.numero_processo || it.numeroProcesso || it.processo || '';
+        const tribunal = it.siglaTribunal || it.tribunal || '';
+        const dataDispo = it.data_disponibilizacao || it.dataDisponibilizacao || '';
+        const tipo = it.tipoComunicacao || it.tipo_comunicacao || it.tipo || '';
+        const texto = (it.texto || it.conteudo || '').slice(0, 300);
+        return `
+          <div class="card" style="margin-bottom:8px;padding:10px;">
+            <div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;">
+              <div>
+                <strong>${escapeHtml(cnj || '(sem CNJ)')}</strong>
+                ${tribunal ? `<span class="badge" style="margin-left:6px;">${escapeHtml(tribunal)}</span>` : ''}
+              </div>
+              <span style="font-size:12px;color:var(--uc-warm-gray);">${escapeHtml(dataDispo)}</span>
+            </div>
+            ${tipo ? `<div style="font-size:12px;color:var(--uc-graphite);margin-top:4px;">${escapeHtml(tipo)}</div>` : ''}
+            ${texto ? `<div style="font-size:12px;margin-top:4px;">${escapeHtml(texto)}${texto.length >= 300 ? '…' : ''}</div>` : ''}
+            <details style="margin-top:4px;">
+              <summary style="cursor:pointer;font-size:11px;color:var(--uc-warm-gray);">JSON bruto</summary>
+              <pre style="background:var(--uc-cream);padding:6px;border-radius:3px;font-size:10px;white-space:pre-wrap;max-height:200px;overflow:auto;">${escapeHtml(JSON.stringify(it, null, 2))}</pre>
+            </details>
+          </div>`;
+      }).join('');
+
+  modal.innerHTML = `
+    <div class="modal scroll-thin" style="max-width: 900px;">
+      <h3 class="modal-title">DJE-PDPJ · Resultado sandbox</h3>
+      <p class="help-text" style="margin-bottom: 12px;">
+        Período: ${dataInicio.toISOString().slice(0,10)} a ${dataFim.toISOString().slice(0,10)} ·
+        <strong>${r.total || items.length}</strong> comunicações${items.length > 50 ? ` (exibindo 50)` : ''} ·
+        <span class="badge" style="background:var(--uc-amber);color:#000;">SANDBOX — não importa</span>
+      </p>
+      <div style="max-height:60vh;overflow-y:auto;">${rows}</div>
+      <div style="display:flex;gap:8px;margin-top:12px;">
+        <button class="btn btn-outline" id="_djePdpjResClose" style="flex:1;">Fechar</button>
+      </div>
+    </div>`;
+  $('modalContainer').appendChild(modal);
+  document.getElementById('_djePdpjResClose').onclick = () => modal.remove();
+}
+
+function djePdpjViewHistory() {
+  DB.getSetting('djePdpjLastResult', null).then(last => {
+    if (!last) {
+      toast('Histórico vazio', 'Faça uma busca primeiro.', 'info');
+      return;
+    }
+    const fetchedAt = new Date(last.fetchedAt);
+    const dataInicio = new Date(fetchedAt); dataInicio.setDate(dataInicio.getDate() - 1);
+    djePdpjShowResultsModal(last, dataInicio, fetchedAt);
+  });
 }
 
 // ====================================================================
