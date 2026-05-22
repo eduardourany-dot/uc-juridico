@@ -160,26 +160,36 @@ function actionAtualizarEventoCalendar_(ctx) {
   var eventId = String(body.eventId || '').trim();
   if (!eventId) throw new Error('eventId_obrigatorio');
 
-  var event = _calMontarEvento_(body);
-
-  var options = { sendUpdates: 'all' };
-  // Patch não recria a conferência se ela já existir; só envia conferenceData
-  // quando explicitamente pedido criar Meet num evento que ainda não tem.
-  if (body.gerarMeet === true && !body.jaTemMeet) {
-    event.conferenceData = {
-      createRequest: {
-        requestId: Utilities.getUuid(),
-        conferenceSolutionKey: { type: 'hangoutsMeet' }
-      }
-    };
-    options.conferenceDataVersion = 1;
+  // Busca o evento atual: (1) confirma que existe; (2) preserva campos que
+  // não reenviamos (conferenceData/Meet, organizador, etc); (3) o update
+  // completo (PUT) dispara a notificação de alteração de forma mais
+  // confiável que o patch — que no Apps Script às vezes não reenvia e-mail.
+  var existing;
+  try {
+    existing = Calendar.Events.get(UC_CAL_ID, eventId);
+  } catch (err) {
+    if (_calIsNotFound_(err)) {
+      return { ok: false, erro: 'evento_nao_encontrado', limparVinculo: true };
+    }
+    throw err;
   }
+
+  // Aplica as mudanças sobre o evento existente (mantém conferenceData/Meet).
+  var novo = _calMontarEvento_(body);
+  existing.summary = novo.summary;
+  existing.start = novo.start;
+  existing.end = novo.end;
+  existing.reminders = novo.reminders;
+  existing.description = novo.description || '';
+  existing.location = novo.location || '';
+  existing.attendees = novo.attendees || [];
+
+  var options = { sendUpdates: 'all', conferenceDataVersion: 1 };
 
   var updated;
   try {
-    updated = Calendar.Events.patch(event, UC_CAL_ID, eventId, options);
+    updated = Calendar.Events.update(existing, UC_CAL_ID, eventId, options);
   } catch (err) {
-    // Evento sumiu (deletado manualmente no Google) → sinaliza pro cliente limpar
     if (_calIsNotFound_(err)) {
       return { ok: false, erro: 'evento_nao_encontrado', limparVinculo: true };
     }
@@ -191,7 +201,8 @@ function actionAtualizarEventoCalendar_(ctx) {
     eventId: updated.id,
     meetLink: updated.hangoutLink || _calExtrairMeetUri_(updated),
     htmlLink: updated.htmlLink,
-    status: updated.status
+    status: updated.status,
+    notificados: (updated.attendees || []).length
   };
 }
 
