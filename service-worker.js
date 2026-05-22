@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.66.0 (Agenda: criar reunião Google Meet + convite por e-mail + sync editar/cancelar via Apps Script Calendar)
-const CACHE_NAME = 'uc-juridico-v6-66-0';
+// Service Worker — UC Jurídico v6.66.1 (Agenda: editar reunião Meet no modal de edição — convidados + criar/cancelar reunião)
+const CACHE_NAME = 'uc-juridico-v6-66-1';
 const APP_SHELL = [
   './',
   './index.html',

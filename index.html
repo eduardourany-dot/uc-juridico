@@ -11715,11 +11715,20 @@ async function editarCompromisso(id) {
       options: [{ value: '', label: '— não atribuído —' }, ...ADVOGADOS.map(n => ({ value: n, label: n }))] },
     { label: 'Status', name: 'status', type: 'select', default: c.status || 'agendado',
       options: COMPROMISSO_STATUS.map(s => ({ value: s.value, label: s.label })) },
-    { label: 'Observações', name: 'observacoes', type: 'textarea', rows: 3, default: c.observacoes || '' }
+    { label: 'Observações', name: 'observacoes', type: 'textarea', rows: 3, default: c.observacoes || '' },
+    { label: c.googleEventId ? '📹 Manter reunião Google Meet' : '📹 Criar reunião Google Meet',
+      name: 'criarMeet', type: 'checkbox', default: !!c.googleEventId,
+      help: c.googleEventId
+        ? 'Já tem reunião vinculada. Desmarque pra cancelar a reunião (mantendo o compromisso). Editar convidados/horário re-notifica todos.'
+        : 'Gera link Meet, envia convite por e-mail e cria lembrete (1 dia + 30 min antes).' },
+    { label: 'Convidados (e-mails, separados por vírgula)', name: 'convidadosEmails', type: 'textarea', rows: 2,
+      default: (c.convidados || []).join(', '),
+      placeholder: 'advogado@escritorio.com, cliente@email.com' }
   ], { confirmLabel: 'Salvar' });
   if (!r) return;
-  const [tipo, titulo, dataHoraInicio, dataHoraFim, local, processoId, clienteId, responsavel, status, observacoes] = r;
+  const [tipo, titulo, dataHoraInicio, dataHoraFim, local, processoId, clienteId, responsavel, status, observacoes, criarMeet, convidadosEmails] = r;
   if (!titulo?.trim()) { toast('Título obrigatório', '', 'error'); return; }
+  const tinhaMeet = !!c.googleEventId;
   Object.assign(c, {
     tipo, titulo: titulo.trim(),
     dataHoraInicio: dataHoraInicio ? new Date(dataHoraInicio).toISOString() : c.dataHoraInicio,
@@ -11729,7 +11738,8 @@ async function editarCompromisso(id) {
     clienteId: clienteId || null,
     responsavel: responsavel || null,
     status: status || 'agendado',
-    observacoes: (observacoes || '').trim() || null
+    observacoes: (observacoes || '').trim() || null,
+    convidados: _parseEmails(convidadosEmails)
   });
   await DB.saveCompromisso(c);
   toast('Compromisso atualizado', '', 'success');
@@ -11737,12 +11747,19 @@ async function editarCompromisso(id) {
   else if (state.currentRoute === 'process') renderProcessTabContent();
   else if (state.currentRoute === 'clienteDetalhe') renderClienteDetalhe();
 
-  // Sync Google Meet (Fase 2): se este compromisso tem evento vinculado,
-  // reflete a mudança no Calendar e re-notifica convidados. Se virou
-  // 'cancelado', cancela o evento.
-  if (c.googleEventId) {
-    if (c.status === 'cancelado') await _cancelarMeetDoCompromisso(c);
-    else await _sincronizarMeetEdicao(c);
+  // Sync Google Meet (Fase 2) — 4 casos pela combinação tinha×quer + status:
+  if (tinhaMeet && status === 'cancelado') {
+    // Compromisso cancelado → cancela a reunião e notifica
+    await _cancelarMeetDoCompromisso(c);
+  } else if (tinhaMeet && !criarMeet) {
+    // Desmarcou "manter reunião" → cancela a reunião (mantém compromisso)
+    await _cancelarMeetDoCompromisso(c);
+  } else if (tinhaMeet && criarMeet) {
+    // Mantém reunião → re-sincroniza horário/convidados/dados
+    await _sincronizarMeetEdicao(c);
+  } else if (!tinhaMeet && criarMeet && status !== 'cancelado') {
+    // Não tinha e marcou agora → cria reunião nova
+    await _criarMeetParaCompromisso(c, c.convidados);
   }
 }
 
