@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.66.1 (Agenda: editar reunião Meet no modal de edição — convidados + criar/cancelar reunião)
-const CACHE_NAME = 'uc-juridico-v6-66-1';
+// Service Worker — UC Jurídico v6.67.0 (Relatório: exportar carteira de processos em Excel .xlsx via SheetJS lazy-load)
+const CACHE_NAME = 'uc-juridico-v6-67-0';
 const APP_SHELL = [
   './',
   './index.html',

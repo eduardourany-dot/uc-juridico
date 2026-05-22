@@ -14080,7 +14080,8 @@ async function renderRelatorio() {
         <button class="btn btn-ghost btn-sm" onclick="_navegarMesRelatorio(-1)" title="Mês anterior">‹</button>
         <input type="month" class="input" style="max-width: 160px;" value="${ano}-${String(mes+1).padStart(2,'0')}" onchange="_setMesRelatorio(this.value)">
         <button class="btn btn-ghost btn-sm" onclick="_navegarMesRelatorio(1)" title="Próximo mês">›</button>
-        <button class="btn btn-outline btn-sm" onclick="_exportarRelatorioCsv()" title="Exportar resumo em CSV">⬇ CSV</button>
+        <button class="btn btn-outline btn-sm" onclick="_exportarRelatorioCsv()" title="Exportar resumo do mês em CSV">⬇ CSV</button>
+        <button class="btn btn-secondary btn-sm" onclick="_exportarCarteiraExcel(this)" title="Exportar carteira de processos em Excel (.xlsx)">📊 Excel</button>
       </div>
     </div>
 
@@ -14279,6 +14280,137 @@ async function _exportarRelatorioCsv() {
 
   downloadBlob(new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' }), `relatorio_${ano}_${String(mes+1).padStart(2,'0')}.csv`);
   toast('Exportado', '', 'success');
+}
+
+// Carrega o SheetJS (xlsx) sob demanda via CDN — só na 1ª exportação.
+// Evita pesar o carregamento inicial do app com ~900KB de lib.
+let _sheetJsPromise = null;
+function _carregarSheetJS() {
+  if (window.XLSX) return Promise.resolve(window.XLSX);
+  if (_sheetJsPromise) return _sheetJsPromise;
+  _sheetJsPromise = new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+    s.onload = () => window.XLSX ? resolve(window.XLSX) : reject(new Error('XLSX não carregou'));
+    s.onerror = () => { _sheetJsPromise = null; reject(new Error('Falha ao baixar a biblioteca Excel (offline?)')); };
+    document.head.appendChild(s);
+  });
+  return _sheetJsPromise;
+}
+
+// Extrai nomes de um polo (ativo/passivo) tratando ambos os formatos
+// históricos: objeto {ativo:[],passivo:[]} (normalizado) ou array
+// [{polo:'AT'|'PA', nome}] (legacy).
+function _extrairPolo(p, polo) {
+  const alvo = polo === 'ativo' ? 'AT' : 'PA';
+  let lista = [];
+  if (p.partes && !Array.isArray(p.partes)) {
+    lista = p.partes[polo] || [];
+  } else if (Array.isArray(p.partes)) {
+    lista = p.partes.filter(x => x && (x.polo === alvo));
+  } else if (Array.isArray(p.clientes) && polo === 'ativo') {
+    lista = p.clientes;
+  }
+  return lista.map(x => (typeof x === 'string' ? x : (x?.nome || x?.razaoSocial || ''))).filter(Boolean).join('; ');
+}
+
+// Converte valor da causa pra número (aceita number ou "R$ 1.234,56").
+function _parseValorNum(v) {
+  if (typeof v === 'number') return v;
+  if (!v) return null;
+  const limpo = String(v).replace(/[^\d,.-]/g, '').replace(/\.(?=\d{3}(\D|$))/g, '').replace(',', '.');
+  const n = parseFloat(limpo);
+  return isNaN(n) ? null : n;
+}
+
+// Formata ISO → DD/MM/YYYY (vazio se inválido).
+function _xlsxData(iso) {
+  if (!iso) return '';
+  const d = new Date(String(iso).length <= 10 ? iso + 'T12:00:00' : iso);
+  if (isNaN(d.getTime())) return '';
+  return d.toLocaleDateString('pt-BR');
+}
+
+// Exporta a carteira de processos em .xlsx (aba "Processos"). Estrutura
+// multi-aba pronta pra crescer (Prazos, Financeiro, etc. no futuro).
+async function _exportarCarteiraExcel(btn) {
+  const origLabel = btn ? btn.innerHTML : null;
+  if (btn) { btn.disabled = true; btn.innerHTML = '⏳ Gerando…'; }
+  try {
+    const XLSX = await _carregarSheetJS();
+    const [processos, clientes, prazos] = await Promise.all([
+      DB.getAllProcesses(), DB.getAllClientes(), DB.getAllDeadlines()
+    ]);
+    const ativos = processos.filter(p => !p.deletedAt);
+    if (ativos.length === 0) { toast('Carteira vazia', 'Nenhum processo pra exportar.', 'info'); return; }
+
+    const cliById = {};
+    clientes.forEach(c => { cliById[c.id] = c; });
+
+    // Indexa prazos ativos por processo (não-cumprido/perdido/cancelado)
+    const prazosPorProc = {};
+    prazos.forEach(d => {
+      if (['cumprido', 'perdido', 'cancelado'].includes(d.status)) return;
+      if (!d.processId || !d.deadlineDate) return;
+      (prazosPorProc[d.processId] = prazosPorProc[d.processId] || []).push(d);
+    });
+
+    const header = [
+      'CNJ', 'Título', 'Cliente', 'Polo Ativo', 'Polo Passivo', 'Tribunal',
+      'Classe', 'Assunto', 'Status', 'Responsável', 'Suplente',
+      'Valor da Causa (R$)', 'Ajuizamento', 'Órgão Julgador',
+      'Próximo Prazo', 'Descrição do Prazo', 'Prazos Ativos'
+    ];
+    const aoa = [header];
+    ativos.sort((a, b) => (a.name || '').localeCompare(b.name || '', 'pt-BR'));
+    for (const p of ativos) {
+      const cli = p.clienteId ? cliById[p.clienteId] : null;
+      const meusPrazos = (prazosPorProc[p.id] || []).slice()
+        .sort((a, b) => new Date(a.deadlineDate) - new Date(b.deadlineDate));
+      const prox = meusPrazos[0];
+      aoa.push([
+        p.cnj || '',
+        p.name || '',
+        cli?.nome || '',
+        _extrairPolo(p, 'ativo'),
+        _extrairPolo(p, 'passivo'),
+        p.tribunal || '',
+        (p.classe?.nome || p.classe || ''),
+        (p.assunto?.descricao || p.assunto || ''),
+        p.status || '',
+        p.advogadoResponsavel || '',
+        p.advogadoSuplente || '',
+        _parseValorNum(p.valorCausa),
+        _xlsxData(p.dataAjuizamento),
+        p.orgaoJulgador || p.serventia || '',
+        prox ? _xlsxData(prox.deadlineDate) : '',
+        prox ? (prox.description || prox.type || '') : '',
+        meusPrazos.length
+      ]);
+    }
+
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    ws['!cols'] = [
+      { wch: 24 }, { wch: 36 }, { wch: 24 }, { wch: 28 }, { wch: 28 }, { wch: 8 },
+      { wch: 22 }, { wch: 22 }, { wch: 12 }, { wch: 20 }, { wch: 20 },
+      { wch: 16 }, { wch: 12 }, { wch: 30 }, { wch: 12 }, { wch: 32 }, { wch: 8 }
+    ];
+    ws['!autofilter'] = { ref: XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: aoa.length - 1, c: header.length - 1 } }) };
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Processos');
+
+    const buf = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
+    const hoje = new Date().toISOString().slice(0, 10);
+    downloadBlob(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }),
+      `carteira_processos_${hoje}.xlsx`);
+    toast('Excel exportado', `${ativos.length} processo(s) na aba "Processos"`, 'success');
+  } catch (e) {
+    console.error('[Excel] erro', e);
+    toast('Falha ao exportar Excel', String(e?.message || e), 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerHTML = origLabel; }
+  }
 }
 
 // ====================================================================
