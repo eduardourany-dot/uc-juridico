@@ -81,6 +81,9 @@ function handle_(e, method) {
       case 'listUsuarios':  return json_(actionListUsuarios_(ctx));
       case 'addUsuario':    return json_(actionAddUsuario_(ctx));
       case 'gerarPeticaoIA':return json_(actionGerarPeticaoIA_(ctx));
+      case 'criarEventoCalendar':     return json_(actionCriarEventoCalendar_(ctx));
+      case 'atualizarEventoCalendar': return json_(actionAtualizarEventoCalendar_(ctx));
+      case 'cancelarEventoCalendar':  return json_(actionCancelarEventoCalendar_(ctx));
       default: return json_({ error: 'unknown_action', action: action }, 400);
     }
   } catch (err) {

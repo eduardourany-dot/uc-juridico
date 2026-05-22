@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.65.2 (MNI: lookup de credencial tolerante a casing/acento + fallback genérico de tribunal; DataJud fix TJDFT)
-const CACHE_NAME = 'uc-juridico-v6-65-2';
+// Service Worker — UC Jurídico v6.66.0 (Agenda: criar reunião Google Meet + convite por e-mail + sync editar/cancelar via Apps Script Calendar)
+const CACHE_NAME = 'uc-juridico-v6-66-0';
 const APP_SHELL = [
   './',
   './index.html',

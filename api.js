@@ -636,6 +636,21 @@ const RemoteDB = {
     });
   },
 
+  // ====== Google Calendar + Meet (módulo Agenda) ======
+  // Cria/atualiza/cancela evento na agenda da conta do escritório
+  // (uranydecastro@ · Workspace). Backend: Apps Script Calendar.gs.
+  // dados: { titulo, descricao?, local?, inicioISO, fimISO?, convidados[], lembretes[], gerarMeet? }
+  // retorna: { ok, eventId, meetLink, htmlLink } | { ok:false, erro }
+  async criarEventoCalendar(dados) {
+    return await callAppsScript('criarEventoCalendar', null, dados);
+  },
+  async atualizarEventoCalendar(dados) {
+    return await callAppsScript('atualizarEventoCalendar', null, dados);
+  },
+  async cancelarEventoCalendar(eventId) {
+    return await callAppsScript('cancelarEventoCalendar', null, { eventId });
+  },
+
   // Jurisprudência
   async getJurisprudenceByProcess(pid) {
     return (await getAll_('jurisprudencia')).filter(j => j.processId === pid);

@@ -11458,6 +11458,7 @@ function _renderCompromissoCard(c, procById, cliById) {
             <span style="font-size: 12px; color: var(--uc-warm-gray);">⏰ ${horario}</span>
           </div>
           ${c.local ? `<div style="font-size: 12px; color: var(--uc-warm-gray); margin-bottom: 4px;">📍 ${escapeHtml(c.local)}</div>` : ''}
+          ${c.meetLink ? `<div style="font-size: 12px; margin-bottom: 4px;">📹 <a href="${escapeHtml(c.meetLink)}" target="_blank" rel="noopener" style="color:var(--uc-gold);">Entrar na reunião Google Meet</a></div>` : ''}
           <div style="font-size: 12px; color: var(--uc-warm-gray);">
             ${c.responsavel ? '👤 ' + escapeHtml(c.responsavel.split(' ')[0]) : ''}
             ${c.participantes && c.participantes.length ? ' + ' + c.participantes.length + ' participante(s)' : ''}
@@ -11516,6 +11517,12 @@ async function novoCompromissoFlow(opts) {
   const me = (window.UC_Auth?.getUser?.() || {}).email || '';
   const meuNome = defaultAdvogado(me) || '';
 
+  // Convidados iniciais sugeridos: e-mail do próprio usuário (pra cair na
+  // agenda pessoal dele) + e-mail do cliente vinculado (se houver).
+  const _clienteInicial = clientes.find(c => c.id === clienteIdInicial);
+  const _emailsIniciais = [me, _clienteInicial?.email].filter(e => e && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e));
+  const convidadosIniciais = [...new Set(_emailsIniciais)].join(', ');
+
   // Default próximo dia útil 9h — ou data clicada no calendário
   let dataInicialISO;
   if (state._agNovoCompromissoDataInicial) {
@@ -11545,22 +11552,32 @@ async function novoCompromissoFlow(opts) {
       options: [{ value: '', label: '— não atribuído —' }, ...ADVOGADOS.map(n => ({ value: n, label: n }))] },
     { label: 'Status', name: 'status', type: 'select', default: 'agendado',
       options: COMPROMISSO_STATUS.map(s => ({ value: s.value, label: s.label })) },
-    { label: 'Observações', name: 'observacoes', type: 'textarea', rows: 3 }
+    { label: 'Observações', name: 'observacoes', type: 'textarea', rows: 3 },
+    { label: '📹 Criar reunião Google Meet', name: 'criarMeet', type: 'checkbox', default: false,
+      help: 'Gera link Meet, envia convite por e-mail aos convidados e cria lembrete (1 dia + 30 min antes).' },
+    { label: 'Convidados (e-mails, separados por vírgula)', name: 'convidadosEmails', type: 'textarea', rows: 2,
+      default: convidadosIniciais,
+      placeholder: 'advogado@escritorio.com, cliente@email.com, perito@email.com' }
   ], {
     confirmLabel: 'Cadastrar',
-    intro: 'Compromissos disparam push (T-1 dia anterior) e push+email (T-0 dia/horário) automaticamente.'
+    intro: 'Compromissos disparam push (T-1 dia anterior) e push+email (T-0 dia/horário) automaticamente. Marque "Google Meet" pra também gerar reunião + convite por e-mail.'
   });
   if (!r) return;
-  const [tipo, titulo, dataHoraInicio, dataHoraFim, local, processoId, clienteId, responsavel, status, observacoes] = r;
+  const [tipo, titulo, dataHoraInicio, dataHoraFim, local, processoId, clienteId, responsavel, status, observacoes, criarMeet, convidadosEmails] = r;
   if (!titulo?.trim()) { toast('Título obrigatório', '', 'error'); return; }
   if (!dataHoraInicio) { toast('Data e hora de início obrigatórias', '', 'error'); return; }
 
-  await DB.saveCompromisso({
-    id: uid(),
+  const compromissoId = uid();
+  const inicioISO = new Date(dataHoraInicio).toISOString();
+  const fimISO = dataHoraFim ? new Date(dataHoraFim).toISOString() : null;
+  const convidados = _parseEmails(convidadosEmails);
+
+  const compromisso = {
+    id: compromissoId,
     tipo: tipo || 'outro',
     titulo: titulo.trim(),
-    dataHoraInicio: new Date(dataHoraInicio).toISOString(),
-    dataHoraFim: dataHoraFim ? new Date(dataHoraFim).toISOString() : null,
+    dataHoraInicio: inicioISO,
+    dataHoraFim: fimISO,
     local: (local || '').trim() || null,
     processoId: processoId || null,
     clienteId: clienteId || null,
@@ -11570,13 +11587,103 @@ async function novoCompromissoFlow(opts) {
     observacoes: (observacoes || '').trim() || null,
     notificado: {},
     createdAt: Date.now()
-  });
+  };
+  await DB.saveCompromisso(compromisso);
   toast('Compromisso cadastrado', titulo.trim(), 'success');
 
-  // Re-render do contexto
+  // Re-render do contexto (não bloqueia a criação do Meet abaixo)
   if (state.currentRoute === 'agenda') renderAgenda();
   else if (state.currentRoute === 'process') renderProcessTabContent();
   else if (state.currentRoute === 'clienteDetalhe') renderClienteDetalhe();
+
+  // Google Meet (opcional) — cria o evento no Calendar do escritório
+  if (criarMeet) {
+    await _criarMeetParaCompromisso(compromisso, convidados);
+  }
+}
+
+// Extrai e valida e-mails de um texto livre (vírgula, ponto-e-vírgula ou quebra).
+function _parseEmails(texto) {
+  if (!texto) return [];
+  const re = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  return [...new Set(
+    String(texto).split(/[,;\n]+/).map(s => s.trim().toLowerCase()).filter(e => e && re.test(e))
+  )];
+}
+
+// Chama o Apps Script pra criar evento+Meet+convite e vincula ao compromisso.
+// emails: array de strings já validadas.
+async function _criarMeetParaCompromisso(compromisso, emails) {
+  const loading = toast('Criando reunião Google Meet…', 'Gerando link e enviando convites', 'info');
+  try {
+    const r = await window.UC_RemoteDB.criarEventoCalendar({
+      titulo: compromisso.titulo,
+      descricao: compromisso.observacoes || '',
+      local: compromisso.local || '',
+      inicioISO: compromisso.dataHoraInicio,
+      fimISO: compromisso.dataHoraFim || null,
+      convidados: (emails || []).map(e => ({ email: e })),
+      gerarMeet: true
+    });
+    if (!r || r.ok === false) {
+      const erro = r?.erro || r?.error || 'desconhecido';
+      const dica = erro === 'calendar_api_nao_habilitada'
+        ? ' — habilite a Google Calendar API no Apps Script (Serviços).'
+        : '';
+      toast('Reunião não criada', 'Erro: ' + erro + dica + ' O compromisso foi salvo normalmente.', 'error');
+      return;
+    }
+    // Vincula o evento ao compromisso (pra editar/cancelar depois — Fase 2).
+    // Guarda os convidados pra re-enviar na edição sem apagá-los (o modal de
+    // edição não tem campo de convidados).
+    compromisso.googleEventId = r.eventId || null;
+    compromisso.meetLink = r.meetLink || null;
+    compromisso.htmlLink = r.htmlLink || null;
+    compromisso.convidados = emails || [];
+    await DB.saveCompromisso(compromisso);
+
+    _mostrarMeetCriado(compromisso, emails);
+
+    if (state.currentRoute === 'agenda') renderAgenda();
+    else if (state.currentRoute === 'process') renderProcessTabContent();
+    else if (state.currentRoute === 'clienteDetalhe') renderClienteDetalhe();
+  } catch (e) {
+    console.error('[Meet] erro ao criar evento', e);
+    toast('Falha ao criar reunião', String(e?.message || e) + ' — o compromisso foi salvo normalmente.', 'error');
+  }
+}
+
+// Modal de confirmação com o link Meet pronto pra copiar/abrir.
+function _mostrarMeetCriado(compromisso, emails) {
+  const modal = document.createElement('div');
+  modal.className = 'modal-backdrop';
+  const link = compromisso.meetLink || '';
+  modal.innerHTML = `
+    <div class="modal" style="max-width: 520px;">
+      <h3 class="modal-title" style="color: var(--uc-green);">✓ Reunião criada</h3>
+      <p class="help-text" style="margin-bottom: 12px;">
+        Evento no Google Calendar do escritório · convite enviado por e-mail pra
+        <strong>${emails.length}</strong> convidado(s) · lembrete 1 dia + 30 min antes.
+      </p>
+      ${link ? `
+        <div style="background:var(--uc-cream);padding:10px 12px;border-radius:6px;margin-bottom:12px;">
+          <div style="font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--uc-warm-gray);margin-bottom:4px;">Link Google Meet</div>
+          <a href="${escapeHtml(link)}" target="_blank" rel="noopener" style="color:var(--uc-gold);word-break:break-all;font-size:13px;">${escapeHtml(link)}</a>
+        </div>
+        <div style="display:flex;gap:8px;">
+          <button class="btn btn-outline" id="_meetCopy" style="flex:1;">📋 Copiar link</button>
+          <a class="btn btn-secondary" href="${escapeHtml(link)}" target="_blank" rel="noopener" style="flex:1;text-align:center;">Abrir Meet</a>
+        </div>
+      ` : `<p class="help-text">Evento criado, mas o link Meet não voltou. Verifique no Google Calendar.</p>`}
+      <button class="btn btn-primary" id="_meetClose" style="width:100%;margin-top:10px;">Fechar</button>
+    </div>`;
+  $('modalContainer').appendChild(modal);
+  const copyBtn = document.getElementById('_meetCopy');
+  if (copyBtn) copyBtn.onclick = async () => {
+    try { await navigator.clipboard.writeText(link); toast('Link copiado', '', 'success'); }
+    catch { toast('Não foi possível copiar', 'Copie manualmente do campo acima.', 'error'); }
+  };
+  document.getElementById('_meetClose').onclick = () => modal.remove();
 }
 
 async function editarCompromisso(id) {
@@ -11629,6 +11736,14 @@ async function editarCompromisso(id) {
   if (state.currentRoute === 'agenda') renderAgenda();
   else if (state.currentRoute === 'process') renderProcessTabContent();
   else if (state.currentRoute === 'clienteDetalhe') renderClienteDetalhe();
+
+  // Sync Google Meet (Fase 2): se este compromisso tem evento vinculado,
+  // reflete a mudança no Calendar e re-notifica convidados. Se virou
+  // 'cancelado', cancela o evento.
+  if (c.googleEventId) {
+    if (c.status === 'cancelado') await _cancelarMeetDoCompromisso(c);
+    else await _sincronizarMeetEdicao(c);
+  }
 }
 
 async function alterarStatusCompromisso(id) {
@@ -11647,15 +11762,73 @@ async function alterarStatusCompromisso(id) {
   if (state.currentRoute === 'agenda') renderAgenda();
   else if (state.currentRoute === 'process') renderProcessTabContent();
   else if (state.currentRoute === 'clienteDetalhe') renderClienteDetalhe();
+
+  // Se cancelou um compromisso com Meet → cancela o evento Google e notifica
+  if (c.googleEventId && status === 'cancelado') {
+    await _cancelarMeetDoCompromisso(c);
+  }
 }
 
 async function removerCompromisso(id) {
-  const ok = await confirmDialog('Remover compromisso?', 'Ação irreversível.', true);
+  const compromissos = await DB.getAllCompromissos();
+  const c = compromissos.find(x => x.id === id);
+  const temMeet = !!c?.googleEventId;
+  const ok = await confirmDialog('Remover compromisso?',
+    temMeet ? 'Isso também cancela a reunião Google Meet e notifica os convidados. Ação irreversível.' : 'Ação irreversível.',
+    true);
   if (!ok) return;
+  // Cancela o evento Google antes de remover o compromisso local
+  if (temMeet) await _cancelarMeetDoCompromisso(c, /*silencioso*/ true);
   await DB.deleteCompromisso(id);
   if (state.currentRoute === 'agenda') renderAgenda();
   else if (state.currentRoute === 'process') renderProcessTabContent();
   else if (state.currentRoute === 'clienteDetalhe') renderClienteDetalhe();
+}
+
+// Fase 2 — re-sincroniza o evento Google a partir do compromisso editado.
+async function _sincronizarMeetEdicao(c) {
+  try {
+    const res = await window.UC_RemoteDB.atualizarEventoCalendar({
+      eventId: c.googleEventId,
+      titulo: c.titulo,
+      descricao: c.observacoes || '',
+      local: c.local || '',
+      inicioISO: c.dataHoraInicio,
+      fimISO: c.dataHoraFim || null,
+      convidados: (c.convidados || []).map(e => ({ email: e })),
+      gerarMeet: false
+    });
+    if (res?.limparVinculo) {
+      // Evento foi deletado manualmente no Google → desvincula
+      c.googleEventId = null; c.meetLink = null; c.htmlLink = null;
+      await DB.saveCompromisso(c);
+      toast('Reunião não encontrada no Google', 'O vínculo foi removido. Crie uma nova reunião se precisar.', 'info');
+      return;
+    }
+    if (res?.ok === false) {
+      toast('Reunião não sincronizada', 'Erro: ' + (res.erro || 'desconhecido') + '. O compromisso foi salvo.', 'error');
+      return;
+    }
+    toast('Reunião atualizada', 'Convidados foram notificados da mudança.', 'success');
+  } catch (e) {
+    console.error('[Meet] erro ao atualizar', e);
+    toast('Falha ao sincronizar reunião', String(e?.message || e), 'error');
+  }
+}
+
+// Fase 2 — cancela o evento Google vinculado (notifica convidados) e
+// desvincula do compromisso. silencioso=true omite o toast de sucesso
+// (usado quando o próprio compromisso vai ser removido logo em seguida).
+async function _cancelarMeetDoCompromisso(c, silencioso) {
+  try {
+    await window.UC_RemoteDB.cancelarEventoCalendar(c.googleEventId);
+    c.googleEventId = null; c.meetLink = null; c.htmlLink = null;
+    await DB.saveCompromisso(c);
+    if (!silencioso) toast('Reunião cancelada', 'Convidados foram notificados.', 'success');
+  } catch (e) {
+    console.error('[Meet] erro ao cancelar', e);
+    toast('Falha ao cancelar reunião no Google', String(e?.message || e) + ' — cancele manualmente no Calendar.', 'error');
+  }
 }
 
 // ====================================================================
