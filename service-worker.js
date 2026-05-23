@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.70.1 (DJEN agendar prazo: +contraminutas/contrarrazões na lista + opção "Outro (personalizado)" com nome/prazo manual)
-const CACHE_NAME = 'uc-juridico-v6-70-1';
+// Service Worker — UC Jurídico v6.71.0 (Agenda: filtro "Vencidos" + prazo agendado vira compromisso-espelho na agenda + remove overlay de prazos read-only)
+const CACHE_NAME = 'uc-juridico-v6-71-0';
 const APP_SHELL = [
   './',
   './index.html',

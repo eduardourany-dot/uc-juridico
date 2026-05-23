@@ -1069,6 +1069,10 @@ function cron_lembretesDeCompromissos() {
   let tokensRemovidos = false;
 
   for (const c of compromissos) {
+    // Espelho de prazo (criado ao agendar publicação): NÃO dispara lembrete
+    // próprio — o deadline correspondente já cobre os marcos T-7..T-0.
+    // Evita push/e-mail duplicado pro advogado.
+    if (c.espelhoPrazo === true) { ignorados++; continue; }
     const marco = _marcoDoCompromisso(c, todayMs);
     if (!marco) { ignorados++; continue; }
 

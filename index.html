@@ -11084,6 +11084,11 @@ async function renderAgenda() {
     const fim = new Date(calRef.ano, calRef.mes + 1, 0);
     dataInicioISO = ini.toISOString().slice(0, 10);
     dataFimISO = fim.toISOString().slice(0, 10);
+  } else if (f.periodo === 'vencidos') {
+    // Vencidos: tudo que ficou pra trás (sem limite inferior) até ontem.
+    // Combinado com status 'ativos' (default) → vencidos não-tratados.
+    dataInicioISO = '';
+    dataFimISO = new Date(hoje.getTime() - 86400000).toISOString().slice(0, 10);
   } else if (f.periodo === 'semana') {
     dataInicioISO = hoje.toISOString().slice(0, 10);
     dataFimISO = new Date(hoje.getTime() + 7 * 86400000).toISOString().slice(0, 10);
@@ -11115,26 +11120,10 @@ async function renderAgenda() {
   }
   filtrados.sort((a, b) => (a.dataHoraInicio || '').localeCompare(b.dataHoraInicio || ''));
 
-  // ===== Overlay de prazos ativos =====
-  // Read-only: mostra prazo no dia da deadlineDate. Editar/cumprir continua
-  // em /prazos. O filtro "Tipo" só esconde quando o usuário escolhe um
-  // tipo específico de compromisso (não 'todos').
-  let prazosOverlay = [];
-  if (f.incluirPrazos && f.tipo === 'todos') {
-    prazosOverlay = (deadlines || []).filter(d => prazoEstaAtivo(d));
-    if (f.responsavel) prazosOverlay = prazosOverlay.filter(d => d.advogadoResponsavel === f.responsavel);
-    if (dataInicioISO) prazosOverlay = prazosOverlay.filter(d => (d.deadlineDate || '').slice(0, 10) >= dataInicioISO);
-    if (dataFimISO) prazosOverlay = prazosOverlay.filter(d => (d.deadlineDate || '').slice(0, 10) <= dataFimISO);
-    if (f.busca && f.busca.trim()) {
-      const q = f.busca.trim().toLowerCase();
-      prazosOverlay = prazosOverlay.filter(d =>
-        (d.description || '').toLowerCase().includes(q) ||
-        (d.type || '').toLowerCase().includes(q) ||
-        (procById[d.processId]?.name || '').toLowerCase().includes(q) ||
-        (procById[d.processId]?.cnj || '').toLowerCase().includes(q)
-      );
-    }
-  }
+  // Overlay de prazos removido (v6.71): os prazos de publicação agora viram
+  // compromissos 'prazo_judicial' na própria agenda (espelho criado no
+  // agendamento). A página Publicações segue como a torre de prazos.
+  const prazosOverlay = [];
 
   // Stats
   const venceram = compromissos.filter(c => {
@@ -11212,6 +11201,7 @@ async function renderAgenda() {
         <div>
           <label class="label" style="font-size: 11px; margin-bottom: 4px;">Período</label>
           <select class="select" onchange="_setAgFiltro('periodo', this.value)">
+            <option value="vencidos" ${f.periodo === 'vencidos' ? 'selected' : ''}>⚠ Vencidos</option>
             <option value="semana" ${f.periodo === 'semana' ? 'selected' : ''}>Próximos 7 dias</option>
             <option value="prox30" ${f.periodo === 'prox30' ? 'selected' : ''}>Próximos 30 dias</option>
             <option value="mes" ${f.periodo === 'mes' ? 'selected' : ''}>Este mês</option>
@@ -11250,10 +11240,6 @@ async function renderAgenda() {
             <label class="label" style="font-size: 11px; margin-bottom: 4px;">Buscar</label>
             <input type="text" class="input" value="${escapeHtml(f.busca || '')}" placeholder="Título, local, observações" oninput="_setAgFiltroDebounced('busca', this.value)">
           </div>
-          <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 12px; color: var(--uc-graphite); padding-bottom: 6px; user-select: none;">
-            <input type="checkbox" ${f.incluirPrazos ? 'checked' : ''} onchange="_setAgFiltro('incluirPrazos', this.checked)" style="cursor: pointer;">
-            <span>⏰ Incluir publicações do processo${f.tipo !== 'todos' ? ' <em style="color: var(--uc-warm-gray);">(oculto: filtro de tipo)</em>' : ''}</span>
-          </label>
         </div>
       </div>
     </div>
@@ -21820,6 +21806,40 @@ async function djenImportSelected(modal) {
         appendLogPrazo(deadline, 'criado', { origem: 'djen', djenHash: pub.hash, tipoEscolhido: r.tipoAto, deadlineDate: deadline.deadlineDate, parserConfianca: parsed?.confianca, parserFonte: parsed?.fonte });
         await DB.saveDeadline(deadline);
         prazosCriados++;
+
+        // Espelho na Agenda: cria um compromisso 'prazo_judicial' vinculado
+        // ao deadline, pra o prazo aparecer e ser gerenciável na Agenda
+        // (Eduardo: "o prazo agendado deve virar compromisso na agenda").
+        // espelhoPrazo:true → o cron de lembretes de COMPROMISSO o ignora
+        // (o deadline já dispara os lembretes T-7..T-0; evita push duplo).
+        try {
+          const _meEsp = (window.UC_Auth?.getUser?.() || {}).email || '';
+          const _respEsp = proc?.advogadoResponsavel
+            || (typeof defaultAdvogado === 'function' ? defaultAdvogado(_meEsp) : '') || null;
+          const _dataComp = new Date(calc.deadline); _dataComp.setHours(9, 0, 0, 0);
+          const _procIdent = proc ? ((proc.cnj || '') + (proc.name ? ' · ' + proc.name : '')).trim() : (pub._cnjFormatted || '');
+          const _unidLbl = r.unidade === 'CORRIDOS' ? 'corridos' : 'úteis';
+          await DB.saveCompromisso({
+            id: uid(),
+            tipo: 'prazo_judicial',
+            titulo: `${r.tipoAtoLabel || 'Prazo'} · ${_procIdent}`.slice(0, 200),
+            dataHoraInicio: _dataComp.toISOString(),
+            dataHoraFim: null,
+            local: (pub.nomeOrgao || pub.orgao || '') || null,
+            processoId: processId || null,
+            clienteId: proc?.clienteId || null,
+            responsavel: _respEsp,
+            participantes: [],
+            status: 'agendado',
+            observacoes: `Prazo de publicação DJEN.\nVence: ${formatDate(calc.deadline)}\nPrazo: ${r.prazo} dias ${_unidLbl}${r.tipoAtoBaseLegal ? ' · ' + r.tipoAtoBaseLegal : ''}`,
+            notificado: {},
+            djenHash: pub.hash,
+            djenRecurso: r.tipoAto,
+            deadlineId: deadline.id,
+            espelhoPrazo: true,
+            createdAt: Date.now()
+          });
+        } catch (e) { console.warn('[DJEN] espelho de prazo na agenda falhou', e); }
       }
 
       // 1 evento por publicação (não por recurso) — representa a intimação
