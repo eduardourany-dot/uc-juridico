@@ -838,6 +838,29 @@ function decodeHtmlEntities(s) {
   return ta.value;
 }
 
+// Converte texto de publicação que vem como HTML (ex: STJ devolve tabelas
+// <table> com relator/partes/advogados) em texto legível. Para texto puro,
+// só decodifica entidades (comportamento antigo). NÃO renderiza o HTML —
+// extrai o conteúdo textual via strip de tags (zero risco de XSS).
+function djenTextoLegivel(s) {
+  if (s == null) return '';
+  let txt = String(s);
+  // Sem tags estruturais → texto puro, só decodifica entidades.
+  if (!/<\s*(table|tr|td|th|p|br|div|html|body|li)\b/i.test(txt)) {
+    return decodeHtmlEntities(txt);
+  }
+  txt = txt
+    .replace(/<\s*br\s*\/?\s*>/gi, '\n')                       // <br> → quebra
+    .replace(/<\s*\/\s*(p|tr|div|h[1-6]|li)\s*>/gi, '\n')      // fim de bloco → quebra
+    .replace(/<\s*\/\s*(td|th)\s*>/gi, '\t')                   // fim de célula → tab
+    .replace(/<[^>]+>/g, '');                                  // remove tags restantes
+  return decodeHtmlEntities(txt)
+    .replace(/[ \t]+\n/g, '\n')   // tira espaço/tab antes da quebra
+    .replace(/\t{2,}/g, '\t')     // colapsa tabs repetidos (células vazias)
+    .replace(/\n{3,}/g, '\n\n')   // colapsa linhas vazias
+    .replace(/^\s+|\s+$/g, '');   // trim
+}
+
 function formatBytes(b) {
   if (!b) return '0 B';
   const k = 1024, sizes = ['B','KB','MB','GB'];
@@ -21185,9 +21208,9 @@ function djenRenderPubRow(pub, kind, idx) {
   const tipo = pub.tipoComunicacao || pub.tipo_documento_id || 'Intimação';
   const meta = _djenExtractMeta(pub);
   pub._meta = meta; // disponível pra djenShowFullPublicacao / djenImportSelected
-  // Decodifica entidades HTML (DJEN devolve &aacute;, &ndash;, etc.) antes
-  // de cortar/escapar — assim a prévia mostra "á", "–" etc. legíveis.
-  const textoDecoded = decodeHtmlEntities(pub.texto || '');
+  // Normaliza o texto (decodifica entidades + converte HTML/tabela do STJ
+  // em texto legível) antes de cortar/escapar.
+  const textoDecoded = djenTextoLegivel(pub.texto || '');
   const textoPreview = textoDecoded.slice(0, 500);
   const temMais = textoDecoded.length > 500;
   return `
@@ -21259,7 +21282,7 @@ function djenShowFullPublicacao(hash) {
   if (!c) { toast('Cache de publicações expirado', 'Re-execute a busca DJEN.', 'error'); return; }
   const pub = [...(c.matched || []), ...(c.unmatched || [])].find(p => p.hash === hash);
   if (!pub) { toast('Publicação não encontrada', '', 'error'); return; }
-  const texto = decodeHtmlEntities(pub.texto || '');
+  const texto = djenTextoLegivel(pub.texto || '');
   const cnj = pub._cnjFormatted || pub.numero_processo || '(sem CNJ)';
   const orgao = pub.nomeOrgao || pub.orgao || '';
   const tribunal = pub.siglaTribunal || pub.tribunal || '';
@@ -21546,7 +21569,7 @@ async function renderIntimacoes() {
 function _intimacaoCard(p, procById) {
   const proc = p.processId ? procById[p.processId] : null;
   const dataDispo = p.dataDisponibilizacao || p.data_disponibilizacao || '';
-  const texto = (p.texto || '').slice(0, 360);
+  const texto = djenTextoLegivel(p.texto || '').slice(0, 360);
   const cnj = normalizeCnj(p.cnj) || (p.raw && (p.raw.numero_processo || p.raw.numeroProcesso)) || '(sem CNJ)';
   return `
     <div class="card" style="margin-bottom:8px;padding:12px;border-left:4px solid var(--uc-amber);">

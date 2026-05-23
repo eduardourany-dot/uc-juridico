@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.69.1 (DJEN: resiliência a HTTP 429 — retry com backoff + espaçamento entre OABs na busca do client)
-const CACHE_NAME = 'uc-juridico-v6-69-1';
+// Service Worker — UC Jurídico v6.69.2 (DJEN: texto de publicação HTML/tabela do STJ convertido pra texto legível — strip de tags sem XSS)
+const CACHE_NAME = 'uc-juridico-v6-69-2';
 const APP_SHELL = [
   './',
   './index.html',
