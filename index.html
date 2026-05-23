@@ -20529,12 +20529,20 @@ const DJEN_DEFAULT_OABS = [
 ];
 
 // Try direct call first, fallback to user-configured worker URL
-async function djenFetch(params) {
+async function djenFetch(params, _tentativa = 0) {
   const workerUrl = await DB.getSetting('djenWorkerUrl', null);
   const baseUrl = workerUrl || DJEN_API_DIRECT;
   const qs = new URLSearchParams(params).toString();
   const url = `${baseUrl}?${qs}`;
   const resp = await fetch(url, { method: 'GET', headers: { 'Accept': 'application/json' } });
+  // HTTP 429 (rate limit do CNJ): retry com backoff. Respeita Retry-After
+  // se vier no header; senão backoff exponencial 1s/2s/4s (até 3 tentativas).
+  if (resp.status === 429 && _tentativa < 3) {
+    const retryAfter = parseInt(resp.headers.get('Retry-After'), 10) || 0;
+    const waitMs = retryAfter > 0 ? retryAfter * 1000 : Math.pow(2, _tentativa) * 1000;
+    await new Promise(r => setTimeout(r, waitMs));
+    return djenFetch(params, _tentativa + 1);
+  }
   if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${resp.statusText}`);
   return await resp.json();
 }
@@ -20582,6 +20590,9 @@ async function djenFetchAll(oabs, dataInicio, dataFim, progressCb = null) {
   let total = 0;
   for (let i = 0; i < oabs.length; i++) {
     const oab = oabs[i];
+    // Espaça as OABs pra não estourar o rate limit do CNJ (HTTP 429).
+    // Espelha o cron do servidor, que já usa _sleep entre requisições.
+    if (i > 0) await new Promise(r => setTimeout(r, 350));
     if (progressCb) progressCb(`Consultando OAB ${oab.numero}/${oab.uf}...`, (i / oabs.length) * 0.9);
     let pagina = 1;
     while (true) {
@@ -20604,6 +20615,7 @@ async function djenFetchAll(oabs, dataInicio, dataFim, progressCb = null) {
         if (items.length < 100) break;
         pagina += 1;
         if (pagina > 20) break; // safety cap
+        await new Promise(r => setTimeout(r, 200)); // espaça entre páginas
       } catch(err) {
         throw new Error(`Falha na OAB ${oab.numero}/${oab.uf}: ${err.message}`);
       }

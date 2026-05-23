@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.69.0 (P0.2: Caixa de entrada de Intimações — ciência + atribuição obrigatória, badge persistente no menu)
-const CACHE_NAME = 'uc-juridico-v6-69-0';
+// Service Worker — UC Jurídico v6.69.1 (DJEN: resiliência a HTTP 429 — retry com backoff + espaçamento entre OABs na busca do client)
+const CACHE_NAME = 'uc-juridico-v6-69-1';
 const APP_SHELL = [
   './',
   './index.html',
