@@ -18,7 +18,15 @@
 const { onSchedule } = require('firebase-functions/v2/scheduler');
 const { onRequest } = require('firebase-functions/v2/https');
 const { logger } = require('firebase-functions/v2');
+const { defineSecret } = require('firebase-functions/params');
 const admin = require('firebase-admin');
+
+// Secret do Secret Manager pra autenticar o trigger HTTP manual.
+// Precisa ser criado antes do deploy:
+//   firebase functions:secrets:set DJEN_HTTP_SECRET --project uc-juridico
+// Declarar em `secrets: [...]` no onRequest faz o Firebase injetá-lo em
+// runtime (v2 não expõe secrets via process.env sem declaração).
+const DJEN_HTTP_SECRET = defineSecret('DJEN_HTTP_SECRET');
 
 admin.initializeApp();
 const db = admin.firestore();
@@ -353,7 +361,8 @@ exports.djenAutoCheckHttp = onRequest({
   region: 'southamerica-east1',
   memory: '256MiB',
   timeoutSeconds: 540,
-  cors: false
+  cors: false,
+  secrets: [DJEN_HTTP_SECRET]
 }, async (req, res) => {
   // Auth: query param ?secret=... compara com env var.
   // Pra setar: firebase functions:secrets:set DJEN_HTTP_SECRET
@@ -365,7 +374,8 @@ exports.djenAutoCheckHttp = onRequest({
   // (djenAutoCheckCron via onSchedule) não passa por aqui, então fechar
   // este endpoint não afeta o agendamento automático.
   const secret = String(req.query.secret || '');
-  const expected = process.env.DJEN_HTTP_SECRET || '';
+  let expected = '';
+  try { expected = DJEN_HTTP_SECRET.value() || ''; } catch (_) { expected = ''; }
   if (!expected || secret !== expected) {
     res.status(403).json({ erro: 'secret_inválido' });
     return;
