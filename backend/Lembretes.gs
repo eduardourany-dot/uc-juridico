@@ -1177,6 +1177,80 @@ function cron_lembretesDeCompromissos() {
   return { compromissos: compromissos.length, processados, enviados, erros, ignorados, elapsed };
 }
 
+// =====================================================================
+// DEAD-MAN'S SWITCH — monitoramento cruzado de crons (P0.1)
+// =====================================================================
+// Este cron (Apps Script) vigia o cron do DJEN (Cloud Function). Se o
+// DJEN parar de rodar, novas intimações deixam de ser capturadas — risco
+// de prazo perdido. Como rodam em infra independente, este detecta a
+// morte do outro e alerta por e-mail. (O caminho reverso — Cloud Function
+// vigiando este cron via push — está em functions/index.js.)
+
+const CRON_ALERT_EMAIL = 'eduardourany@uranydecastro.com.br';
+const CRON_ALERT_COOLDOWN_MS = 24 * 60 * 60 * 1000; // re-alerta no máx 1x/dia
+
+// Início (00:00) do último dia útil ANTERIOR a hoje (pula sáb/dom).
+function _inicioUltimoDiaUtilAnterior(agoraMs) {
+  const d = new Date(agoraMs);
+  d.setDate(d.getDate() - 1);
+  while (d.getDay() === 0 || d.getDay() === 6) d.setDate(d.getDate() - 1);
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+}
+
+// Cron está "morto" se não roda desde o último dia útil anterior.
+// Tolera fim de semana (não alerta por gap normal sex→seg).
+function _cronEstaStale(lastRunMs, agoraMs) {
+  if (!lastRunMs) return true;
+  return lastRunMs < _inicioUltimoDiaUtilAnterior(agoraMs);
+}
+
+// Grava o heartbeat deste cron (lido pelo watcher do Cloud Function).
+function _gravarHeartbeatLembretes(resumo) {
+  try {
+    _firestoreUpdate('settings/lembretesCron', {
+      value: { lastRun: Date.now(), resumo: String(resumo || '').slice(0, 500) },
+      updatedAt: Date.now()
+    });
+  } catch (e) {
+    Logger.log('[deadman] heartbeat lembretes falhou: ' + e.message);
+  }
+}
+
+// Vigia o cron do DJEN. Se stale, manda e-mail de alerta (com cooldown).
+function _vigiarCronDjen() {
+  try {
+    const agora = Date.now();
+    const doc = _firestoreGet('settings/djenCron');
+    const lastRun = (doc && doc.value && doc.value.lastRun) || 0;
+    if (!_cronEstaStale(lastRun, agora)) return;
+
+    // Anti-spam: não repete o alerta dentro do cooldown
+    const alertDoc = _firestoreGet('settings/cronAlertas');
+    const alertVal = (alertDoc && alertDoc.value) || {};
+    if (agora - (alertVal.djenLastAlert || 0) < CRON_ALERT_COOLDOWN_MS) return;
+
+    const horas = lastRun ? Math.round((agora - lastRun) / 3600000) : null;
+    const ultima = lastRun ? new Date(lastRun).toLocaleString('pt-BR') : 'nunca registrada';
+    const html = '<div style="font-family:Arial,sans-serif;max-width:520px">' +
+      '<h2 style="color:#a8472d;margin:0 0 8px">&#9888; Monitor de intima&ccedil;&otilde;es (DJEN) parado</h2>' +
+      '<p>O cron <b>djenAutoCheckCron</b> n&atilde;o roda h&aacute; ' +
+      (horas != null ? ('aproximadamente <b>' + horas + 'h</b>') : '<b>tempo indeterminado</b>') +
+      ' (&uacute;ltima execu&ccedil;&atilde;o: ' + ultima + ').</p>' +
+      '<p><b>Novas intima&ccedil;&otilde;es podem n&atilde;o estar sendo capturadas.</b> ' +
+      'Verifique o Cloud Scheduler / Cloud Functions do projeto <code>uc-juridico</code> ' +
+      '(fun&ccedil;&atilde;o djenAutoCheckCron, regi&atilde;o southamerica-east1).</p>' +
+      '<p style="color:#888;font-size:12px;margin-top:16px">Alerta autom&aacute;tico do dead-man\'s switch &middot; UC Jur&iacute;dico</p></div>';
+    enviarEmail(CRON_ALERT_EMAIL, "⚠ UC Jurídico — monitor DJEN parado", html);
+
+    alertVal.djenLastAlert = agora;
+    _firestoreUpdate('settings/cronAlertas', { value: alertVal, updatedAt: agora });
+    Logger.log('[deadman] ALERTA DJEN enviado (lastRun=' + ultima + ')');
+  } catch (e) {
+    Logger.log('[deadman] vigiar DJEN falhou: ' + e.message);
+  }
+}
+
 /**
  * Cron unificado — chama prazos + parcelas + compromissos em sequência.
  * Use ESTE como trigger time-driven (substituindo o cron_lembretesDePrazo
@@ -1191,6 +1265,13 @@ function cron_lembretesUnificado() {
   catch (e) { Logger.log('cron_lembretesDeParcelas erro: ' + e.message); }
   try { resCompromissos = cron_lembretesDeCompromissos(); }
   catch (e) { Logger.log('cron_lembretesDeCompromissos erro: ' + e.message); }
+
+  // Dead-man's switch: registra que ESTE cron rodou + vigia o cron do DJEN.
+  _gravarHeartbeatLembretes(JSON.stringify({
+    prazos: resPrazos, parcelas: resParcelas, compromissos: resCompromissos
+  }));
+  _vigiarCronDjen();
+
   Logger.log('=== cron_lembretesUnificado concluído ===');
   return { prazos: resPrazos, parcelas: resParcelas, compromissos: resCompromissos };
 }

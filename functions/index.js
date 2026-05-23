@@ -331,6 +331,79 @@ async function _enviarPushDjen(novas, orfas) {
 }
 
 // =====================================================================
+// DEAD-MAN'S SWITCH — este cron (DJEN) vigia o cron de lembretes (P0.1)
+// =====================================================================
+// O cron de lembretes de prazo roda no Apps Script (infra independente).
+// Se ele parar, alertas de prazo (T-1/T-0) deixam de sair. Como este cron
+// (Cloud Function) roda em outra infra, ele detecta a morte do outro e
+// alerta via push. O caminho reverso (Apps Script vigiando este via e-mail)
+// está em backend/Lembretes.gs.
+
+// Início (00:00) do último dia útil ANTERIOR a hoje (pula sáb/dom).
+function _inicioUltimoDiaUtilAnterior(agoraMs) {
+  const d = new Date(agoraMs);
+  d.setDate(d.getDate() - 1);
+  while (d.getDay() === 0 || d.getDay() === 6) d.setDate(d.getDate() - 1);
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+}
+
+// Cron está "morto" se não roda desde o último dia útil anterior.
+function _cronEstaStale(lastRunMs, agoraMs) {
+  if (!lastRunMs) return true;
+  return lastRunMs < _inicioUltimoDiaUtilAnterior(agoraMs);
+}
+
+// Envia push pra todos os devices registrados (alerta de sistema).
+async function _enviarPushAlerta(title, body, tag) {
+  const fcmSnap = await db.doc('settings/fcmTokens').get();
+  if (!fcmSnap.exists) return;
+  const tokens = (fcmSnap.data().value) || {};
+  const dataPayload = {
+    type: 'cron_alerta',
+    title: String(title),
+    body: String(body),
+    timestamp: String(Date.now()),
+    tag: tag || 'cron-alerta'
+  };
+  let pushed = 0;
+  for (const email of Object.keys(tokens)) {
+    const ti = tokens[email];
+    if (!ti || !ti.token) continue;
+    try { await messaging.send({ token: ti.token, data: dataPayload }); pushed++; }
+    catch (e) { logger.warn(`[deadman push] ${email}: ${e.code || ''} ${e.message || ''}`); }
+  }
+  logger.info(`[deadman push] enviado pra ${pushed} device(s)`);
+}
+
+// Vigia o cron de lembretes (Apps Script). Se stale, push (com cooldown 24h).
+async function _vigiarCronLembretes() {
+  try {
+    const agora = Date.now();
+    const snap = await db.doc('settings/lembretesCron').get();
+    const lastRun = snap.exists ? ((snap.data().value || {}).lastRun || 0) : 0;
+    if (!_cronEstaStale(lastRun, agora)) return;
+
+    const alSnap = await db.doc('settings/cronAlertas').get();
+    const alVal = alSnap.exists ? (alSnap.data().value || {}) : {};
+    const COOLDOWN = 24 * 60 * 60 * 1000;
+    if (agora - (alVal.lembretesLastAlert || 0) < COOLDOWN) return;
+
+    const horas = lastRun ? Math.round((agora - lastRun) / 3600000) : null;
+    const body = 'O cron de lembretes de prazo não roda há '
+      + (horas != null ? horas + 'h' : 'tempo indeterminado')
+      + '. Alertas de prazo (T-1/T-0) podem não estar saindo — verifique o trigger do Apps Script (cron_lembretesUnificado).';
+    await _enviarPushAlerta('⚠ UC Jurídico — lembretes de prazo parados', body, 'cron-lembretes-parado');
+
+    alVal.lembretesLastAlert = agora;
+    await db.doc('settings/cronAlertas').set({ value: alVal, updatedAt: agora }, { merge: true });
+    logger.warn('[deadman] ALERTA lembretes enviado (lastRun=' + (lastRun ? new Date(lastRun).toISOString() : 'nunca') + ')');
+  } catch (e) {
+    logger.error('[deadman] vigiar lembretes falhou: ' + (e && e.message || e));
+  }
+}
+
+// =====================================================================
 // EXPORTS — Scheduled + HTTP (teste)
 // =====================================================================
 
@@ -350,8 +423,12 @@ exports.djenAutoCheckCron = onSchedule({
     logger.info('[DJEN cron] resultado: ' + JSON.stringify(r));
   } catch (e) {
     logger.error('[DJEN cron] ERRO: ' + (e && e.message || String(e)), e);
-    throw e;
+    // Não relança antes de vigiar — o dead-man's switch deve rodar mesmo
+    // se a captura falhar (a falha aqui é justamente o que queremos cobrir).
   }
+  // Dead-man's switch reverso: vigia o cron de lembretes (Apps Script).
+  try { await _vigiarCronLembretes(); }
+  catch (e) { logger.error('[deadman] erro: ' + (e && e.message || e)); }
 });
 
 // HTTP trigger pra teste manual. Acessar via:
