@@ -14421,16 +14421,20 @@ async function _exportarCarteiraExcel(btn) {
 // briefing /docs/BRIEFING_Peticoes.md, sem versionamento nem geração IA.
 
 const PETICAO_TIPOS = [
-  { value: 'contestacao',     label: 'Contestação' },
-  { value: 'manifestacao',    label: 'Manifestação' },
-  { value: 'apelacao',        label: 'Apelação' },
-  { value: 'emb_exec_fiscal', label: 'Embargos à execução fiscal' },
-  { value: 'epe',             label: 'Exceção de pré-executividade' },
-  { value: 'recurso',         label: 'Recurso' },
-  { value: 'requerimento',    label: 'Requerimento simples' },
-  { value: 'procuracao',      label: 'Procuração / Substabelecimento' },
-  { value: 'declaracao',      label: 'Declaração / Termo' },
-  { value: 'outro',           label: 'Outro' }
+  { value: 'peticao_inicial',       label: 'Petição Inicial' },
+  { value: 'contestacao',           label: 'Contestação' },
+  { value: 'manifestacao',          label: 'Manifestação' },
+  { value: 'emb_exec_fiscal',       label: 'Embargos à execução fiscal' },
+  { value: 'epe',                   label: 'Exceção de pré-executividade' },
+  { value: 'emb_declaracao',        label: 'Embargos de Declaração' },
+  { value: 'agravo_instrumento',    label: 'Agravo de Instrumento' },
+  { value: 'apelacao',              label: 'Apelação' },
+  { value: 'recurso_constitucional',label: 'Recurso Constitucional (RE/REsp/RR)' },
+  { value: 'recurso',               label: 'Recurso (outro)' },
+  { value: 'requerimento',          label: 'Requerimento simples' },
+  { value: 'procuracao',            label: 'Procuração / Substabelecimento' },
+  { value: 'declaracao',            label: 'Declaração / Termo' },
+  { value: 'outro',                 label: 'Outro' }
 ];
 
 // Catálogo de placeholders disponíveis. Cada um sabe extrair seu valor
@@ -14481,6 +14485,15 @@ REGRAS INVIOLÁVEIS:
 6. Produza a peça COMPLETA e pronta (endereçamento, qualificação, fundamentos, pedidos, fecho), não um esboço.`;
 
 const PETICAO_PROMPTS_TIPO = {
+  peticao_inicial: `TIPO DE PEÇA: PETIÇÃO INICIAL (art. 319 e ss. do CPC).
+Requisitos obrigatórios:
+- Endereçamento ao juízo competente + qualificação completa de autor e réu (art. 319, I e II).
+- DOS FATOS: narrativa cronológica, clara e completa da causa de pedir remota e próxima.
+- DO DIREITO: fundamentos jurídicos do pedido (art. 319, III), com legislação, doutrina e jurisprudência reais.
+- TUTELA PROVISÓRIA, se cabível: urgência (art. 300 — probabilidade do direito + perigo de dano) ou evidência (art. 311).
+- DOS PEDIDOS: certos e determinados (art. 322/324); inclua pedido principal, subsidiários e cominações; citação do réu; produção de provas; eventual audiência de conciliação (art. 319, VII).
+- VALOR DA CAUSA fundamentado (art. 291-292).`,
+
   contestacao: `TIPO DE PEÇA: CONTESTAÇÃO (art. 335 e ss. do CPC).
 Estrutura obrigatória:
 - Endereçamento ao juízo + qualificação das partes.
@@ -14512,6 +14525,30 @@ Regras essenciais:
 - Matérias típicas: nulidade da CDA, prescrição, decadência, ilegitimidade passiva, pagamento comprovado documentalmente, inexigibilidade do título.
 - Demonstre que a prova é pré-constituída (documental) — se exigir instrução, a via é de embargos, não de exceção.
 - PEDIDOS: extinção da execução (art. 924/925 CPC) e, se total, condenação do exequente em honorários.`,
+
+  emb_declaracao: `TIPO DE PEÇA: EMBARGOS DE DECLARAÇÃO (art. 1.022 do CPC).
+Regras essenciais:
+- Hipóteses TAXATIVAS: obscuridade, contradição, omissão (inclusive sobre tese de repercussão geral/repetitivo) ou erro material. Aponte EXATAMENTE qual ponto da decisão é omisso/contraditório/obscuro.
+- NÃO se prestam a rediscutir o mérito; efeito infringente só é admissível como consequência do saneamento do vício.
+- Se o objetivo for PREQUESTIONAR, declare-o (Súmula 98/STJ: embargos com fim de prequestionamento não têm caráter protelatório).
+- TEMPESTIVIDADE: 5 dias.
+- PEDIDO: sanar o vício apontado e, se for o caso, atribuir efeitos modificativos.`,
+
+  agravo_instrumento: `TIPO DE PEÇA: AGRAVO DE INSTRUMENTO (art. 1.015 e ss. do CPC).
+Pontos críticos:
+- CABIMENTO: rol do art. 1.015 (taxatividade mitigada — Tema 988/STJ, admite-se em situações de urgência por inutilidade do julgamento futuro). Justifique o enquadramento.
+- TEMPESTIVIDADE (15 dias úteis) e formação do instrumento com as peças do art. 1.017.
+- EFEITO SUSPENSIVO ou tutela antecipada recursal (art. 1.019, I): demonstre probabilidade de provimento + risco de dano grave/difícil reparação.
+- DIALETICIDADE: ataque os fundamentos da decisão interlocutória agravada.
+- PEDIDOS: concessão do efeito suspensivo/ativo e, no mérito, provimento para reformar ou cassar a decisão.`,
+
+  recurso_constitucional: `TIPO DE PEÇA: RECURSO EXCEPCIONAL (RE / REsp / RR).
+Adeque ao recurso indicado no briefing:
+- RECURSO EXTRAORDINÁRIO (art. 102, III, CF): exige REPERCUSSÃO GERAL (demonstração em preliminar formal e destacada), PREQUESTIONAMENTO e ofensa DIRETA à Constituição. Atenção à Súmula 279/STF (não cabe reexame de prova).
+- RECURSO ESPECIAL (art. 105, III, CF): PREQUESTIONAMENTO; enquadre na alínea a (violação de lei federal), b ou c (divergência — com COTEJO ANALÍTICO e indicação do paradigma). Atenção à Súmula 7/STJ (não cabe reexame de prova).
+- RECURSO DE REVISTA (art. 896 da CLT): pressupostos específicos + TRANSCENDÊNCIA (art. 896-A CLT).
+- Demonstre analiticamente cabimento e admissibilidade; aponte os dispositivos tidos por violados; mantenha estrita DIALETICIDADE.
+- PEDIDOS: conhecimento e provimento.`,
 
   recurso: `TIPO DE PEÇA: RECURSO.
 - Identifique e nomeie o recurso adequado ao ato impugnado e ao momento processual.
