@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.71.1 (Prazos perdidos: seção dedicada em Publicações + alerta leva direto a ela + ações Reconhecer/Reabrir resolvem o aviso)
-const CACHE_NAME = 'uc-juridico-v6-71-1';
+// Service Worker — UC Jurídico v6.72.0 (Reorg: Agenda vira centro de prazos+compromissos (perdidos/vencidos/urgentes gerenciáveis); Publicações vira só caixa de intimações; espelho de prazo revertido)
+const CACHE_NAME = 'uc-juridico-v6-72-0';
 const APP_SHELL = [
   './',
   './index.html',
