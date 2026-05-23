@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.71.0 (Agenda: filtro "Vencidos" + prazo agendado vira compromisso-espelho na agenda + remove overlay de prazos read-only)
-const CACHE_NAME = 'uc-juridico-v6-71-0';
+// Service Worker — UC Jurídico v6.71.1 (Prazos perdidos: seção dedicada em Publicações + alerta leva direto a ela + ações Reconhecer/Reabrir resolvem o aviso)
+const CACHE_NAME = 'uc-juridico-v6-71-1';
 const APP_SHELL = [
   './',
   './index.html',

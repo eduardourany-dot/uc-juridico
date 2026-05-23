@@ -6835,6 +6835,8 @@ async function renderDeadlines() {
   });
   const active = enriched.filter(d => prazoEstaAtivo(d));
   const done = enriched.filter(d => prazoEstaResolvido(d));
+  // Perdidos não-reconhecidos: precisam de ação (reconhecer ou reabrir).
+  const perdidos = enriched.filter(d => d.status === STATUS_PRAZO.PERDIDO && !d.perdidoCienteEm);
   const expired = active.filter(d => d.days < 0);
   const urgent = active.filter(d => d.days >= 0 && d.days <= 5);
   const warning = active.filter(d => d.days > 5 && d.days <= 14);
@@ -6853,6 +6855,30 @@ async function renderDeadlines() {
     </div>
 
     ${secaoIntimacoes}
+
+    ${perdidos.length > 0 ? `
+      <div id="secao-prazos-perdidos" class="card mb-4" style="border-left: 4px solid var(--uc-red); background: var(--uc-red-soft, #fde8e8);">
+        <h3 class="font-serif font-semibold smallcaps mb-1" style="color: var(--uc-red);">✗ Prazos perdidos · ${perdidos.length}</h3>
+        <p class="help-text" style="margin: 0 0 10px;">Resolva o alerta: <strong>Reconhecer</strong> tira do aviso (mantém no histórico) · <strong>Reabrir</strong> volta pra pendente (se foi marcado por engano).</p>
+        ${perdidos.sort((a, b) => a.days - b.days).map(d => `
+          <div class="card" style="margin-bottom: 6px; padding: 10px; background: #fff;">
+            <div style="display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; align-items: center;">
+              <div style="flex: 1; min-width: 0;">
+                <strong style="color: var(--uc-black);">${escapeHtml(d.description || d.type)}</strong>
+                <div style="font-size: 12px; color: var(--uc-warm-gray); margin-top: 2px;">
+                  ${escapeHtml(d.processName)}${d.processCnj ? ` · ${d.processCnj}` : ''} · venceu ${formatDate(d.deadlineDate)} (há ${Math.abs(d.days)}d)
+                </div>
+              </div>
+              <div style="display: flex; gap: 4px; flex-shrink: 0; flex-wrap: wrap;">
+                <button class="btn btn-ghost btn-sm" onclick="navigate('process', { currentProcessId: '${d.processId}' })" title="Abrir processo" style="padding: 2px 8px;">↗ Processo</button>
+                <button class="btn btn-outline btn-sm" onclick="reabrirPrazoPerdido('${d.id}')" title="Reabrir — foi marcado perdido por engano" style="padding: 2px 8px;">↻ Reabrir</button>
+                <button class="btn btn-secondary btn-sm" onclick="prazoReconhecerPerdido('${d.id}')" title="Reconhecer — tira do alerta, mantém no histórico" style="padding: 2px 8px;">✓ Reconhecer</button>
+              </div>
+            </div>
+          </div>
+        `).join('')}
+      </div>
+    ` : ''}
 
     <div class="grid gap-3 mb-6" style="grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));">
       <div class="stat-card" style="${expired.length > 0 ? 'background: var(--uc-red-soft); border-color: var(--uc-red);' : ''}">
@@ -7778,7 +7804,9 @@ function renderBannerPrazos() {
   const ativos = (state.deadlines || []).filter(prazoEstaAtivo);
   const iminentes = ativos.filter(d => recomputarStatusVisual(d, today) === 'iminente');
   const expirados = ativos.filter(d => recomputarStatusVisual(d, today) === 'expirado');
-  const perdidos = (state.deadlines || []).filter(d => d.status === STATUS_PRAZO.PERDIDO);
+  // Perdidos só contam enquanto NÃO reconhecidos — reconhecer tira do alerta
+  // mas mantém o registro de perdido no histórico.
+  const perdidos = (state.deadlines || []).filter(d => d.status === STATUS_PRAZO.PERDIDO && !d.perdidoCienteEm);
 
   // Suprime banner se usuário fechou nesta sessão E nada novo apareceu
   const fechadoNestaSessao = sessionStorage.getItem('uc-banner-prazos-fechado') === '1';
@@ -7805,10 +7833,58 @@ function renderBannerPrazos() {
   banner.innerHTML = `
     <span style="font-size:18px;">⚠</span>
     <span style="flex:1;">${partes.join(' · ')} — clique pra abrir o painel de Publicações</span>
-    <button onclick="navigate('deadlines')" style="background:white;color:var(--uc-red,#a82a2a);border:0;padding:4px 12px;border-radius:4px;font-weight:600;cursor:pointer;font-size:12px;">Ver prazos</button>
+    <button onclick="_irParaPrazos(${perdidos.length > 0 ? 'true' : 'false'})" style="background:white;color:var(--uc-red,#a82a2a);border:0;padding:4px 12px;border-radius:4px;font-weight:600;cursor:pointer;font-size:12px;">Ver prazos</button>
     <button onclick="(function(){sessionStorage.setItem('uc-banner-prazos-fechado','1');document.getElementById('uc-banner-prazos').remove();})()" title="Esconder até próxima recarga" style="background:transparent;color:white;border:1px solid rgba(255,255,255,.4);padding:4px 8px;border-radius:4px;cursor:pointer;font-size:12px;">×</button>
   `;
   banner.style.cursor = 'default';
+}
+
+// Abre a página Publicações. Se focar=true (há prazos perdidos), rola até
+// a seção "Perdidos" pra o advogado resolver direto.
+function _irParaPrazos(focar) {
+  navigate('deadlines');
+  if (focar) {
+    setTimeout(() => {
+      const el = document.getElementById('secao-prazos-perdidos');
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        el.style.transition = 'background 0.3s';
+        el.style.background = 'var(--uc-red-soft, #fde8e8)';
+        setTimeout(() => { el.style.background = ''; }, 1600);
+      }
+    }, 200);
+  }
+}
+
+// Reconhecer prazo perdido: tira do alerta (banner) mantendo o registro
+// histórico de perdido. Pra quando o advogado já tomou ciência/providência.
+async function prazoReconhecerPerdido(id) {
+  const d = await _findPrazoForAction(id);
+  if (!d) { toast('Prazo não encontrado', '', 'error'); return; }
+  d.perdidoCienteEm = Date.now();
+  d.perdidoCientePor = (window.UC_Auth?.getUser?.() || {}).email || '';
+  appendLogPrazo(d, 'perdido_reconhecido', { por: d.perdidoCientePor });
+  d.updatedAt = Date.now();
+  await DB.saveDeadline(d);
+  toast('Prazo perdido reconhecido', 'Saiu do alerta. Permanece no histórico.', 'success');
+  _refreshAfterPrazoAction();
+}
+
+// Reabrir prazo perdido: volta pra pendente (usar quando foi marcado
+// perdido por engano, ex: foi cumprido a tempo mas não registrado).
+async function reabrirPrazoPerdido(id) {
+  const d = await _findPrazoForAction(id);
+  if (!d) { toast('Prazo não encontrado', '', 'error'); return; }
+  if (d.status !== STATUS_PRAZO.PERDIDO) { toast('Só prazos perdidos podem ser reabertos aqui', '', 'info'); return; }
+  const ok = await confirmDialog('Reabrir prazo perdido?', 'Volta o prazo para PENDENTE. Use se ele foi marcado perdido por engano.', false);
+  if (!ok) return;
+  d.status = STATUS_PRAZO.PENDENTE;
+  delete d.perdidoCienteEm; delete d.perdidoCientePor;
+  appendLogPrazo(d, 'reaberto', { de: 'perdido' });
+  d.updatedAt = Date.now();
+  await DB.saveDeadline(d);
+  toast('Prazo reaberto', 'Voltou para pendente.', 'success');
+  _refreshAfterPrazoAction();
 }
 
 // ====================================================================
