@@ -381,7 +381,13 @@ async function _vigiarCronLembretes() {
   try {
     const agora = Date.now();
     const snap = await db.doc('settings/lembretesCron').get();
-    const lastRun = snap.exists ? ((snap.data().value || {}).lastRun || 0) : 0;
+    // Grace period: se o heartbeat nunca foi gravado (ex: Apps Script ainda
+    // não atualizado), não alerta — evita falso positivo na implantação.
+    if (!snap.exists) {
+      logger.info('[deadman] lembretesCron ainda não inicializado — pulando');
+      return;
+    }
+    const lastRun = (snap.data().value || {}).lastRun || 0;
     if (!_cronEstaStale(lastRun, agora)) return;
 
     const alSnap = await db.doc('settings/cronAlertas').get();

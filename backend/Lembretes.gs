@@ -1222,7 +1222,13 @@ function _vigiarCronDjen() {
   try {
     const agora = Date.now();
     const doc = _firestoreGet('settings/djenCron');
-    const lastRun = (doc && doc.value && doc.value.lastRun) || 0;
+    // Grace period: se o heartbeat do DJEN nunca existiu, não alerta
+    // (evita falso positivo antes do cron rodar pela primeira vez).
+    if (!doc || !doc.value || !doc.value.lastRun) {
+      Logger.log('[deadman] djenCron ainda não inicializado — pulando');
+      return;
+    }
+    const lastRun = doc.value.lastRun;
     if (!_cronEstaStale(lastRun, agora)) return;
 
     // Anti-spam: não repete o alerta dentro do cooldown
