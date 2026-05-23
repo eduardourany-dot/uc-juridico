@@ -297,11 +297,6 @@ body.cliente-mode .nav-section { display: none !important; }
       <span>Clientes</span>
       <span id="navClienteCount" class="nav-badge gray hidden">0</span>
     </a>
-    <a class="nav-item" data-route="intimacoes">
-      <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
-      <span>Intimações</span>
-      <span id="navIntimacoesCount" class="nav-badge hidden">0</span>
-    </a>
     <a class="nav-item" data-route="deadlines">
       <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
       <span>Publicações</span>
@@ -766,7 +761,7 @@ const routes = {
   process: renderProcessDetail,
   clientes: renderClientesList,
   clienteDetalhe: renderClienteDetalhe,
-  intimacoes: renderIntimacoes,
+  intimacoes: renderDeadlines, // alias: intimações foram integradas em Publicações
   deadlines: renderDeadlines,
   agenda: renderAgenda,
   financeiro: renderFinanceiro,
@@ -1618,25 +1613,15 @@ function updateNavBadges() {
     return v === 'iminente' || v === 'expirado';
   }).length;
   const vincendos = ativos.filter(d => recomputarStatusVisual(d, today) === 'vincendo').length;
-  const urgentes = iminentes + vincendos;
-  const navD = $('navDeadlineCount');
-  if (urgentes > 0) {
-    navD.textContent = urgentes;
-    navD.classList.remove('hidden');
-    // .nav-badge é vermelho por default; .amber é override.
-    // Iminente/expirado → vermelho; só vincendo → âmbar.
-    navD.classList.toggle('amber', iminentes === 0 && vincendos > 0);
-  } else {
-    navD.classList.add('hidden');
-    navD.classList.remove('amber');
-  }
+  // Guarda pra _atualizarBadgePublicacoes somar com intimações pendentes (async).
+  state._navPrazos = { iminentes, vincendos };
 
   // Banner sticky no topo — única atualização de UI fora do conteúdo principal.
   // Roda em try/catch porque o banner é UX, não funcionalidade.
   try { renderBannerPrazos(); } catch (err) { console.warn('renderBannerPrazos:', err); }
 
-  // Badge de intimações pendentes de ciência (async — lê o DB).
-  _atualizarBadgeIntimacoes().catch(() => {});
+  // Badge unificado do menu "Publicações" (async — lê o DB de intimações).
+  _atualizarBadgePublicacoes().catch(() => {});
 }
 
 // Conta intimações pendentes de ciência: status 'pending' sem cienteEm.
@@ -1648,15 +1633,28 @@ async function _contarIntimacoesPendentes() {
   } catch (_) { return 0; }
 }
 
-// Atualiza o badge vermelho no menu "Intimações". Não some sozinho — só
-// zera quando todas as pendências forem tratadas (dar ciência ou agendar prazo).
-async function _atualizarBadgeIntimacoes() {
-  const n = await _contarIntimacoesPendentes();
-  const badge = $('navIntimacoesCount');
-  if (!badge) return;
-  if (n > 0) { badge.textContent = n; badge.classList.remove('hidden'); }
-  else { badge.classList.add('hidden'); }
+// Badge unificado do menu "Publicações": intimações pendentes de ciência
+// + prazos vencidos/urgentes/vincendo. Um número de "precisa de ação".
+// Vermelho se há intimação pendente OU prazo iminente/expirado; âmbar se
+// só vincendo. Não some até zerar tudo.
+async function _atualizarBadgePublicacoes() {
+  const navD = $('navDeadlineCount');
+  if (!navD) return;
+  const { iminentes = 0, vincendos = 0 } = state._navPrazos || {};
+  const pendentes = await _contarIntimacoesPendentes();
+  const total = pendentes + iminentes + vincendos;
+  if (total > 0) {
+    navD.textContent = total;
+    navD.classList.remove('hidden');
+    navD.classList.toggle('amber', pendentes === 0 && iminentes === 0 && vincendos > 0);
+  } else {
+    navD.classList.add('hidden');
+    navD.classList.remove('amber');
+  }
 }
+
+// Alias retrocompatível — chamadas antigas continuam funcionando.
+function _atualizarBadgeIntimacoes() { return _atualizarBadgePublicacoes(); }
 
 // ====================================================================
 // === MÓDULO CLIENTES (v6.19+, Sprint Cli.1) =========================
@@ -6819,9 +6817,14 @@ async function downloadProcessPackage() {
 async function renderDeadlines() {
   const deadlines = await DB.getAllDeadlines();
   const processes = await DB.getAllProcesses();
+  const djenPubs = await DB.getAllDjenPublications().catch(() => []);
   state.deadlines = deadlines;
   state.processes = processes;
   updateNavBadges();
+
+  // Caixa de intimações pendentes de ciência (P0.2) — integrada no topo.
+  const _procById = {}; processes.forEach(p => { _procById[p.id] = p; });
+  const secaoIntimacoes = _secaoIntimacoesHtml(djenPubs, _procById);
 
   const today = new Date(); today.setHours(0,0,0,0);
   const enriched = deadlines.map(d => {
@@ -6848,6 +6851,8 @@ async function renderDeadlines() {
         <button class="btn btn-outline btn-sm" onclick="exportDeadlinesCsv()">Exportar CSV</button>
       </div>
     </div>
+
+    ${secaoIntimacoes}
 
     <div class="grid gap-3 mb-6" style="grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));">
       <div class="stat-card" style="${expired.length > 0 ? 'background: var(--uc-red-soft); border-color: var(--uc-red);' : ''}">
@@ -21489,66 +21494,48 @@ async function djenEnrichProcessFromPublication(processId, pub) {
 // Toda intimação capturada (DJEN cron) nasce 'pending'. Fica nesta caixa
 // como PENDENTE DE CIÊNCIA até alguém: (a) dar ciência + atribuir
 // responsável, ou (b) agendar prazo (que também dá ciência). Garante que
-// nenhuma intimação fique órfã. Badge persistente no menu não some até zerar.
+// nenhuma intimação fique órfã.
+//
+// Integrada na página Publicações (renderDeadlines) como seção no topo —
+// intimação e prazo são o mesmo fluxo (intimação → ciência → prazo).
 
-async function renderIntimacoes() {
-  // Cliente não vê intimações (dado interno do escritório)
-  if (typeof _isClienteMode === 'function' && _isClienteMode()) {
-    $('appContent').innerHTML = '<div class="page-header"><div><h1 class="page-title"><span class="smallcaps-prefix">Intimações</span></h1></div></div><p class="help-text" style="padding:24px;">Seção restrita à equipe do escritório.</p>';
-    return;
-  }
-
-  const [todas, processos] = await Promise.all([
-    DB.getAllDjenPublications(), DB.getAllProcesses()
-  ]);
-  const procById = {}; processos.forEach(p => { procById[p.id] = p; });
+// Retorna o HTML da caixa de intimações pra embutir no topo de Publicações.
+// `todas` = pubs DJEN; `procById` = índice de processos. Retorna '' quando
+// não há pendentes nem histórico (não polui a página).
+function _secaoIntimacoesHtml(todas, procById) {
+  if (typeof _isClienteMode === 'function' && _isClienteMode()) return '';
 
   const pendentes = (todas || [])
     .filter(p => p.status === 'pending' && !p.cienteEm)
     .sort((a, b) => (b.fetchedAt || b.importedAt || 0) - (a.fetchedAt || a.importedAt || 0));
-
   const vinculadas = pendentes.filter(p => p.processId || p.matched);
   const orfas = pendentes.filter(p => !p.processId && !p.matched);
-
-  // Cientes recentes (últimas 30) — pra histórico/auditoria
   const cientes = (todas || [])
     .filter(p => p.cienteEm)
     .sort((a, b) => (b.cienteEm || 0) - (a.cienteEm || 0))
     .slice(0, 30);
 
-  $('appContent').innerHTML = `
-    <div class="page-header">
-      <div>
-        <h1 class="page-title"><span class="smallcaps-prefix">Intimações</span></h1>
-        <p class="page-subtitle">Caixa de entrada · ${pendentes.length} pendente(s) de ciência</p>
-      </div>
-      <button class="btn btn-outline btn-sm" onclick="djenRunSearch()" title="Buscar novas no DJEN agora">🔔 Buscar agora</button>
-    </div>
+  if (pendentes.length === 0 && cientes.length === 0) return '';
 
-    ${pendentes.length === 0 ? `
-      <div class="card empty-state">
-        <h3 class="empty-state-title">✓ Nenhuma intimação pendente</h3>
-        <p class="empty-state-msg">Toda intimação capturada já recebeu ciência. Quando o monitor DJEN trouxer algo novo, aparece aqui com badge no menu.</p>
-      </div>
-    ` : `
+  return `
+    ${pendentes.length > 0 ? `
       <div class="card mb-3" style="background: var(--uc-amber-soft, #fff7e6); border-left: 4px solid var(--uc-amber);">
+        <h3 class="font-serif font-semibold smallcaps mb-1" style="color: var(--uc-black);">📬 Intimações pendentes de ciência · ${pendentes.length}</h3>
         <p style="margin:0;font-size:13px;color:var(--uc-graphite);">
-          <strong>${pendentes.length}</strong> intimação(ões) aguardando ciência.
           Dê ciência (atribuindo um responsável) ou agende o prazo — só assim saem desta caixa.
         </p>
       </div>
       ${vinculadas.length > 0 ? `
-        <h3 class="font-serif font-semibold smallcaps mb-2" style="color: var(--uc-black); font-size: 13px;">Vinculadas a processo · ${vinculadas.length}</h3>
+        <h4 class="font-serif font-semibold smallcaps mb-2" style="color: var(--uc-black); font-size: 12px;">Vinculadas a processo · ${vinculadas.length}</h4>
         ${vinculadas.map(p => _intimacaoCard(p, procById)).join('')}
       ` : ''}
       ${orfas.length > 0 ? `
-        <h3 class="font-serif font-semibold smallcaps mb-2 mt-3" style="color: var(--uc-warm-gray); font-size: 13px;">Órfãs (sem processo cadastrado) · ${orfas.length}</h3>
+        <h4 class="font-serif font-semibold smallcaps mb-2 mt-3" style="color: var(--uc-warm-gray); font-size: 12px;">Órfãs (sem processo cadastrado) · ${orfas.length}</h4>
         ${orfas.map(p => _intimacaoCard(p, procById)).join('')}
       ` : ''}
-    `}
-
+    ` : ''}
     ${cientes.length > 0 ? `
-      <details style="margin-top:20px;">
+      <details style="margin: 8px 0 20px;">
         <summary style="cursor:pointer;font-size:12px;color:var(--uc-warm-gray);">Histórico de ciência (${cientes.length} recentes)</summary>
         <div style="margin-top:8px;">
           ${cientes.map(p => `
@@ -21620,8 +21607,8 @@ async function _intimacaoCienciaFlow(hash) {
 
   await djenDarCiencia(hash, responsavel, nota);
   toast('Ciência registrada', `Responsável: ${responsavel}`, 'success');
-  if (state.currentRoute === 'intimacoes') renderIntimacoes();
-  _atualizarBadgeIntimacoes().catch(() => {});
+  if (state.currentRoute === 'deadlines') renderDeadlines();
+  _atualizarBadgePublicacoes().catch(() => {});
 }
 
 // Persiste a ciência no doc da intimação.
@@ -21827,9 +21814,8 @@ async function djenImportSelected(modal) {
   if (state.currentRoute === 'dashboard') renderDashboard();
   else if (state.currentRoute === 'deadlines') renderDeadlines();
   else if (state.currentRoute === 'processes') renderProcessList();
-  else if (state.currentRoute === 'intimacoes') renderIntimacoes();
   // Importar deu ciência → atualiza o badge de pendentes
-  _atualizarBadgeIntimacoes().catch(() => {});
+  _atualizarBadgePublicacoes().catch(() => {});
 }
 
 // Try to extract a meaningful name and metadata from a DJEN publication

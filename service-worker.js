@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.69.2 (DJEN: texto de publicação HTML/tabela do STJ convertido pra texto legível — strip de tags sem XSS)
-const CACHE_NAME = 'uc-juridico-v6-69-2';
+// Service Worker — UC Jurídico v6.70.0 (Unifica Intimações em Publicações — caixa de ciência no topo da página, item de menu duplicado removido, badge unificado)
+const CACHE_NAME = 'uc-juridico-v6-70-0';
 const APP_SHELL = [
   './',
   './index.html',
