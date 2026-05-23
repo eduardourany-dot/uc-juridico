@@ -8095,10 +8095,14 @@ const TIPOS_ATO = {
   APELACAO:           { prazo: 15, unidade: 'UTEIS',    baseLegal: 'CPC art. 1.003 §5º', label: 'Apelação' },
   CONTRARRAZOES_APEL: { prazo: 15, unidade: 'UTEIS',    baseLegal: 'CPC art. 1.010 §1º', label: 'Contrarrazões à apelação' },
   AGRAVO_INSTR:       { prazo: 15, unidade: 'UTEIS',    baseLegal: 'CPC art. 1.003 §5º', label: 'Agravo de instrumento' },
+  CONTRAMINUTA_AI:    { prazo: 15, unidade: 'UTEIS',    baseLegal: 'CPC art. 1.019, II', label: 'Contraminuta a agravo de instrumento' },
   AGRAVO_INTERNO:     { prazo: 15, unidade: 'UTEIS',    baseLegal: 'CPC art. 1.021 §2º', label: 'Agravo interno' },
+  CONTRARRAZOES_AG_INTERNO: { prazo: 15, unidade: 'UTEIS', baseLegal: 'CPC art. 1.021 §2º', label: 'Contrarrazões a agravo interno' },
   RESP:               { prazo: 15, unidade: 'UTEIS',    baseLegal: 'CPC art. 1.003 §5º', label: 'Recurso especial' },
   RE:                 { prazo: 15, unidade: 'UTEIS',    baseLegal: 'CPC art. 1.003 §5º', label: 'Recurso extraordinário' },
+  CONTRARRAZOES_RESP_RE: { prazo: 15, unidade: 'UTEIS', baseLegal: 'CPC art. 1.030',   label: 'Contrarrazões a REsp/RE' },
   AGRAVO_RESP_RE:     { prazo: 15, unidade: 'UTEIS',    baseLegal: 'CPC art. 1.042',   label: 'Agravo em REsp/RE' },
+  CONTRARRAZOES_AG_RESP_RE: { prazo: 15, unidade: 'UTEIS', baseLegal: 'CPC art. 1.042 §2º', label: 'Contrarrazões a agravo em REsp/RE' },
   EMB_DIVERGENCIA:    { prazo: 15, unidade: 'UTEIS',    baseLegal: 'CPC art. 1.043',   label: 'Embargos de divergência' },
   EMB_EXECUCAO:       { prazo: 15, unidade: 'UTEIS',    baseLegal: 'CPC art. 915',     label: 'Embargos à execução' },
   IMPUGNACAO_CUMPR:   { prazo: 15, unidade: 'UTEIS',    baseLegal: 'CPC art. 525',     label: 'Impugnação ao cumprimento' },
@@ -8116,6 +8120,10 @@ const TIPOS_ATO = {
   REC_REVISTA:        { prazo: 8,  unidade: 'UTEIS',    baseLegal: 'CLT art. 896 §6º', label: 'Recurso de revista' },
   EMB_DECL_TRAB:      { prazo: 5,  unidade: 'UTEIS',    baseLegal: 'CLT art. 897-A',   label: 'Embargos de declaração trabalhistas' },
   CONTRARRAZOES_TRAB: { prazo: 8,  unidade: 'UTEIS',    baseLegal: 'CLT art. 900',     label: 'Contrarrazões trabalhista' },
+
+  // Inclusão manual — usuário digita nome + prazo + unidade (label real
+  // vem do campo data-djen-nome-custom no slot). Pra atos sem entrada fixa.
+  PERSONALIZADO:      { prazo: null, unidade: 'UTEIS',  baseLegal: null,              label: 'Outro (personalizado)' },
 
   // Atos do juiz (CPC art. 203) — não trazem prazo próprio, mas habilitam
   // recursos cujos prazos são fixados em lei. `recursosCabiveis` lista os
@@ -20817,12 +20825,14 @@ async function djenShowResultsModal(classified, oabs, dataInicio, dataFim) {
 
 // Lista de recursos/atos pra "Outros" no dropdown (ordem de exibição).
 const _DJEN_RECURSOS_OUTROS = [
-  // Cível CPC
+  // Cível CPC — recursos
   'CONTESTACAO', 'REPLICA', 'MANIFESTACAO',
   'APELACAO', 'CONTRARRAZOES_APEL',
-  'AGRAVO_INSTR', 'AGRAVO_INTERNO',
+  'AGRAVO_INSTR', 'CONTRAMINUTA_AI',
+  'AGRAVO_INTERNO', 'CONTRARRAZOES_AG_INTERNO',
   'EMBARGOS_DECL',
-  'RESP', 'RE', 'AGRAVO_RESP_RE', 'EMB_DIVERGENCIA',
+  'RESP', 'RE', 'CONTRARRAZOES_RESP_RE',
+  'AGRAVO_RESP_RE', 'CONTRARRAZOES_AG_RESP_RE', 'EMB_DIVERGENCIA',
   'EMB_EXECUCAO', 'EMB_EXEC_FISCAL', 'IMPUGNACAO_CUMPR',
   // Tributário
   'DEFESA_AI_FEDERAL', 'REC_VOL_CARF', 'MANIF_INCONFORM',
@@ -20881,7 +20891,8 @@ function _djenBuildRecursoOptions(parsed) {
   }
   html += `</optgroup>`;
 
-  // Ciência ao final (sempre disponível)
+  // Inclusão manual + Ciência ao final (sempre disponíveis)
+  html += `<option value="PERSONALIZADO" data-prazo="" data-unidade="UTEIS" data-baselegal="" data-label="Outro (personalizado)">✏ Outro — inclusão manual…</option>`;
   html += `<option value="CIENCIA" data-prazo="" data-unidade="UTEIS" data-baselegal="" data-label="Ciência (sem prazo)"${detectedTipo === 'CIENCIA' ? ' selected' : ''}>⊙ Ciência (sem prazo)</option>`;
 
   return html;
@@ -20898,6 +20909,7 @@ function _djenBuildRecursoOptionsAll() {
     html += _djenFmtRecursoOption(code, false);
   }
   html += `</optgroup>`;
+  html += `<option value="PERSONALIZADO" data-prazo="" data-unidade="UTEIS" data-baselegal="" data-label="Outro (personalizado)">✏ Outro — inclusão manual…</option>`;
   html += `<option value="CIENCIA" data-prazo="" data-unidade="UTEIS" data-baselegal="" data-label="Ciência (sem prazo)">⊙ Ciência (sem prazo)</option>`;
   return html;
 }
@@ -20925,6 +20937,7 @@ function _djenBuildSlot(parsed, isFirst) {
         </select>
         ${isFirst ? '' : `<button type="button" onclick="_djenRemoveSlot(this)" title="Remover este recurso" style="border: 1px solid var(--uc-red); background: #fff; color: var(--uc-red); cursor: pointer; padding: 2px 8px; border-radius: 3px; font-size: 11px;">✕</button>`}
       </div>
+      <input type="text" data-djen-nome-custom placeholder="Nome do ato/recurso (ex: Contraminuta ao agravo)" style="display: none; padding: 4px 8px; border: 1px solid var(--uc-gold); border-radius: 3px; font-size: 11px;">
       <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 11px;">
         <label style="display: inline-flex; align-items: center; gap: 6px;">
           Prazo:
@@ -21025,12 +21038,26 @@ function _djenRecursoChange(select) {
   if (!slot) return;
   const prazoInput = slot.querySelector('[data-djen-prazo]');
   const unidadeSelect = slot.querySelector('[data-djen-unidade]');
+  const nomeCustom = slot.querySelector('[data-djen-nome-custom]');
+  const isCustom = select.value === 'PERSONALIZADO';
   const prazoVal = opt.dataset.prazo || '';
   const unidadeVal = opt.dataset.unidade || 'UTEIS';
+
+  // Inclusão manual: revela o campo de nome e deixa o prazo livre pra digitar.
+  if (nomeCustom) {
+    nomeCustom.style.display = isCustom ? 'block' : 'none';
+    if (isCustom) setTimeout(() => nomeCustom.focus(), 0);
+  }
   if (prazoInput) {
-    prazoInput.value = prazoVal;
-    prazoInput.disabled = !prazoVal;
-    prazoInput.style.opacity = prazoVal ? '1' : '0.5';
+    if (isCustom) {
+      prazoInput.disabled = false;
+      prazoInput.style.opacity = '1';
+      // mantém o que estiver digitado; não força valor
+    } else {
+      prazoInput.value = prazoVal;
+      prazoInput.disabled = !prazoVal;
+      prazoInput.style.opacity = prazoVal ? '1' : '0.5';
+    }
   }
   if (unidadeSelect) unidadeSelect.value = unidadeVal;
 
@@ -21666,18 +21693,25 @@ async function djenImportSelected(modal) {
       const tipoAtoSelect = slot.querySelector('[data-djen-tipo-ato]');
       const prazoInput = slot.querySelector('[data-djen-prazo]');
       const unidadeSelect = slot.querySelector('[data-djen-unidade]');
+      const nomeCustomInput = slot.querySelector('[data-djen-nome-custom]');
       const tipoAto = tipoAtoSelect?.value || '';
       const prazoRaw = prazoInput?.value || '';
       const prazoParsed = parseInt(prazoRaw);
+      // Inclusão manual: o label vem do campo digitado, não do TIPOS_ATO.
+      const isCustom = tipoAto === 'PERSONALIZADO';
+      const nomeCustom = (nomeCustomInput?.value || '').trim();
       return {
         tipoAto,
-        tipoAtoLabel: TIPOS_ATO[tipoAto]?.label || '',
-        tipoAtoBaseLegal: TIPOS_ATO[tipoAto]?.baseLegal || '',
+        tipoAtoLabel: isCustom ? (nomeCustom || 'Ato (personalizado)') : (TIPOS_ATO[tipoAto]?.label || ''),
+        tipoAtoBaseLegal: isCustom ? '' : (TIPOS_ATO[tipoAto]?.baseLegal || ''),
         prazo: Number.isFinite(prazoParsed) && prazoParsed > 0 ? prazoParsed : null,
         unidade: unidadeSelect?.value || 'UTEIS',
-        emDobro: false  // checkbox removido da UI; usuário ajusta no detalhe do prazo se preciso
+        emDobro: false,  // checkbox removido da UI; usuário ajusta no detalhe do prazo se preciso
+        custom: isCustom
       };
-    }).filter(r => r.tipoAto && r.tipoAto !== 'CIENCIA' && r.prazo); // só slots válidos
+    }).filter(r => r.tipoAto && r.tipoAto !== 'CIENCIA' && r.prazo
+      // Personalizado exige nome digitado (senão ignora o slot)
+      && (!r.custom || (r.tipoAtoLabel && r.tipoAtoLabel !== 'Ato (personalizado)')));
     rowSettings[hash] = {
       selected: checkbox?.checked,
       createProcess: createProcCheckbox?.checked ?? false,
@@ -21745,7 +21779,10 @@ async function djenImportSelected(modal) {
       for (const r of cfg.recursos) {
         const calc = calcDjenDeadline(dataDispo, r.prazo, tribunal, r.unidade, r.emDobro);
         if (!calcAlgum) calcAlgum = calc;
-        const dup = existingDeadlines.some(x => x.djenHash === pub.hash && x.tipoEscolhido === r.tipoAto);
+        // tipoEscolhido único: pra atos personalizados, inclui o nome — assim
+        // dois personalizados distintos no mesmo pub não colidem no dedup.
+        const tipoEsc = r.custom ? ('PERSONALIZADO:' + (r.tipoAtoLabel || '').slice(0, 40)) : r.tipoAto;
+        const dup = existingDeadlines.some(x => x.djenHash === pub.hash && x.tipoEscolhido === tipoEsc);
         if (dup) continue;
         const parsed = pub._parsed || null;
         const baseDesc = r.tipoAtoLabel || pub.tipoComunicacao || 'Intimação';
@@ -21767,7 +21804,8 @@ async function djenImportSelected(modal) {
           // Trilha de auditoria: tipo escolhido pelo user (decisão atual)
           // + parser (sugestão original do sistema). Permite ver depois se
           // o user concordou ou divergiu do que foi sugerido.
-          tipoEscolhido: r.tipoAto,
+          tipoEscolhido: tipoEsc,
+          tipoEscolhidoLabel: r.tipoAtoLabel,
           tipoEscolhidoBaseLegal: r.tipoAtoBaseLegal,
           parser: parsed ? {
             tipo: parsed.tipo,

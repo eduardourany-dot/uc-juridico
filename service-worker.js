@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.70.0 (Unifica Intimações em Publicações — caixa de ciência no topo da página, item de menu duplicado removido, badge unificado)
-const CACHE_NAME = 'uc-juridico-v6-70-0';
+// Service Worker — UC Jurídico v6.70.1 (DJEN agendar prazo: +contraminutas/contrarrazões na lista + opção "Outro (personalizado)" com nome/prazo manual)
+const CACHE_NAME = 'uc-juridico-v6-70-1';
 const APP_SHELL = [
   './',
   './index.html',
