@@ -297,6 +297,11 @@ body.cliente-mode .nav-section { display: none !important; }
       <span>Clientes</span>
       <span id="navClienteCount" class="nav-badge gray hidden">0</span>
     </a>
+    <a class="nav-item" data-route="intimacoes">
+      <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
+      <span>Intimações</span>
+      <span id="navIntimacoesCount" class="nav-badge hidden">0</span>
+    </a>
     <a class="nav-item" data-route="deadlines">
       <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
       <span>Publicações</span>
@@ -761,6 +766,7 @@ const routes = {
   process: renderProcessDetail,
   clientes: renderClientesList,
   clienteDetalhe: renderClienteDetalhe,
+  intimacoes: renderIntimacoes,
   deadlines: renderDeadlines,
   agenda: renderAgenda,
   financeiro: renderFinanceiro,
@@ -1605,6 +1611,28 @@ function updateNavBadges() {
   // Banner sticky no topo — única atualização de UI fora do conteúdo principal.
   // Roda em try/catch porque o banner é UX, não funcionalidade.
   try { renderBannerPrazos(); } catch (err) { console.warn('renderBannerPrazos:', err); }
+
+  // Badge de intimações pendentes de ciência (async — lê o DB).
+  _atualizarBadgeIntimacoes().catch(() => {});
+}
+
+// Conta intimações pendentes de ciência: status 'pending' sem cienteEm.
+// (Importados antigos têm status imported/orphan → não poluem a fila.)
+async function _contarIntimacoesPendentes() {
+  try {
+    const todas = await DB.getAllDjenPublications();
+    return (todas || []).filter(p => p.status === 'pending' && !p.cienteEm).length;
+  } catch (_) { return 0; }
+}
+
+// Atualiza o badge vermelho no menu "Intimações". Não some sozinho — só
+// zera quando todas as pendências forem tratadas (dar ciência ou agendar prazo).
+async function _atualizarBadgeIntimacoes() {
+  const n = await _contarIntimacoesPendentes();
+  const badge = $('navIntimacoesCount');
+  if (!badge) return;
+  if (n > 0) { badge.textContent = n; badge.classList.remove('hidden'); }
+  else { badge.classList.add('hidden'); }
 }
 
 // ====================================================================
@@ -21420,6 +21448,185 @@ async function djenEnrichProcessFromPublication(processId, pub) {
   }
 }
 
+// ====================================================================
+// === CAIXA DE ENTRADA DE INTIMAÇÕES — ciência + atribuição (P0.2) ===
+// ====================================================================
+// Toda intimação capturada (DJEN cron) nasce 'pending'. Fica nesta caixa
+// como PENDENTE DE CIÊNCIA até alguém: (a) dar ciência + atribuir
+// responsável, ou (b) agendar prazo (que também dá ciência). Garante que
+// nenhuma intimação fique órfã. Badge persistente no menu não some até zerar.
+
+async function renderIntimacoes() {
+  // Cliente não vê intimações (dado interno do escritório)
+  if (typeof _isClienteMode === 'function' && _isClienteMode()) {
+    $('appContent').innerHTML = '<div class="page-header"><div><h1 class="page-title"><span class="smallcaps-prefix">Intimações</span></h1></div></div><p class="help-text" style="padding:24px;">Seção restrita à equipe do escritório.</p>';
+    return;
+  }
+
+  const [todas, processos] = await Promise.all([
+    DB.getAllDjenPublications(), DB.getAllProcesses()
+  ]);
+  const procById = {}; processos.forEach(p => { procById[p.id] = p; });
+
+  const pendentes = (todas || [])
+    .filter(p => p.status === 'pending' && !p.cienteEm)
+    .sort((a, b) => (b.fetchedAt || b.importedAt || 0) - (a.fetchedAt || a.importedAt || 0));
+
+  const vinculadas = pendentes.filter(p => p.processId || p.matched);
+  const orfas = pendentes.filter(p => !p.processId && !p.matched);
+
+  // Cientes recentes (últimas 30) — pra histórico/auditoria
+  const cientes = (todas || [])
+    .filter(p => p.cienteEm)
+    .sort((a, b) => (b.cienteEm || 0) - (a.cienteEm || 0))
+    .slice(0, 30);
+
+  $('appContent').innerHTML = `
+    <div class="page-header">
+      <div>
+        <h1 class="page-title"><span class="smallcaps-prefix">Intimações</span></h1>
+        <p class="page-subtitle">Caixa de entrada · ${pendentes.length} pendente(s) de ciência</p>
+      </div>
+      <button class="btn btn-outline btn-sm" onclick="djenRunSearch()" title="Buscar novas no DJEN agora">🔔 Buscar agora</button>
+    </div>
+
+    ${pendentes.length === 0 ? `
+      <div class="card empty-state">
+        <h3 class="empty-state-title">✓ Nenhuma intimação pendente</h3>
+        <p class="empty-state-msg">Toda intimação capturada já recebeu ciência. Quando o monitor DJEN trouxer algo novo, aparece aqui com badge no menu.</p>
+      </div>
+    ` : `
+      <div class="card mb-3" style="background: var(--uc-amber-soft, #fff7e6); border-left: 4px solid var(--uc-amber);">
+        <p style="margin:0;font-size:13px;color:var(--uc-graphite);">
+          <strong>${pendentes.length}</strong> intimação(ões) aguardando ciência.
+          Dê ciência (atribuindo um responsável) ou agende o prazo — só assim saem desta caixa.
+        </p>
+      </div>
+      ${vinculadas.length > 0 ? `
+        <h3 class="font-serif font-semibold smallcaps mb-2" style="color: var(--uc-black); font-size: 13px;">Vinculadas a processo · ${vinculadas.length}</h3>
+        ${vinculadas.map(p => _intimacaoCard(p, procById)).join('')}
+      ` : ''}
+      ${orfas.length > 0 ? `
+        <h3 class="font-serif font-semibold smallcaps mb-2 mt-3" style="color: var(--uc-warm-gray); font-size: 13px;">Órfãs (sem processo cadastrado) · ${orfas.length}</h3>
+        ${orfas.map(p => _intimacaoCard(p, procById)).join('')}
+      ` : ''}
+    `}
+
+    ${cientes.length > 0 ? `
+      <details style="margin-top:20px;">
+        <summary style="cursor:pointer;font-size:12px;color:var(--uc-warm-gray);">Histórico de ciência (${cientes.length} recentes)</summary>
+        <div style="margin-top:8px;">
+          ${cientes.map(p => `
+            <div style="font-size:12px;color:var(--uc-warm-gray);padding:6px 0;border-bottom:1px solid var(--uc-line-soft);">
+              <strong>${escapeHtml(normalizeCnj(p.cnj) || '(sem CNJ)')}</strong>
+              ${p.tribunal ? '· ' + escapeHtml(p.tribunal) : ''}
+              · ciência por <strong>${escapeHtml(p.responsavel || p.cientePor || '—')}</strong>
+              em ${formatDateTime(p.cienteEm)}
+              ${p.status === 'imported' ? ' · <span style="color:var(--uc-green);">prazo agendado</span>' : (p.status === 'ciente' ? ' · <span>só ciência</span>' : '')}
+            </div>
+          `).join('')}
+        </div>
+      </details>
+    ` : ''}
+  `;
+}
+
+function _intimacaoCard(p, procById) {
+  const proc = p.processId ? procById[p.processId] : null;
+  const dataDispo = p.dataDisponibilizacao || p.data_disponibilizacao || '';
+  const texto = (p.texto || '').slice(0, 360);
+  const cnj = normalizeCnj(p.cnj) || (p.raw && (p.raw.numero_processo || p.raw.numeroProcesso)) || '(sem CNJ)';
+  return `
+    <div class="card" style="margin-bottom:8px;padding:12px;border-left:4px solid var(--uc-amber);">
+      <div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:6px;">
+        <div style="min-width:0;">
+          <strong style="color:var(--uc-black);">${escapeHtml(cnj)}</strong>
+          ${p.tribunal ? `<span class="badge" style="margin-left:6px;">${escapeHtml(p.tribunal)}</span>` : ''}
+          ${proc ? ` · <a onclick="navigate('process', { currentProcessId: '${proc.id}' })" style="cursor:pointer;color:var(--uc-gold);">${escapeHtml(proc.name || 'processo')}</a>` : ''}
+        </div>
+        <span style="font-size:12px;color:var(--uc-warm-gray);">${dataDispo ? formatDate(dataDispo) : ''}</span>
+      </div>
+      ${p.orgao ? `<div style="font-size:12px;color:var(--uc-warm-gray);margin-bottom:4px;">${escapeHtml(p.orgao)}</div>` : ''}
+      ${texto ? `<div style="font-size:12px;color:var(--uc-graphite);margin-bottom:8px;line-height:1.5;">${escapeHtml(texto)}${texto.length >= 360 ? '…' : ''}</div>` : ''}
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <button class="btn btn-primary btn-sm" onclick="_intimacaoCienciaFlow('${p.hash}')">✓ Dar ciência</button>
+        <button class="btn btn-secondary btn-sm" onclick="_intimacaoAgendarPrazo('${p.hash}')">📅 Agendar prazo</button>
+        ${p.texto ? `<button class="btn btn-ghost btn-sm" onclick="djenShowFullPublicacaoFromDb('${p.hash}')">Ver íntegra</button>` : ''}
+      </div>
+    </div>
+  `;
+}
+
+// Marca ciência (responsável obrigatório). Não cria prazo — pra intimações
+// de mero andamento/ciência. Sai da caixa de pendentes.
+async function _intimacaoCienciaFlow(hash) {
+  const todas = await DB.getAllDjenPublications();
+  const pub = (todas || []).find(p => p.hash === hash);
+  if (!pub) { toast('Intimação não encontrada', '', 'error'); return; }
+
+  const proc = pub.processId ? await DB.getProcess(pub.processId) : null;
+  const me = (window.UC_Auth?.getUser?.() || {}).email || '';
+  const meuNome = defaultAdvogado(me) || '';
+  const sugestao = proc?.advogadoResponsavel || meuNome || '';
+
+  const r = await showModal('Dar ciência à intimação', [
+    { label: 'Responsável (obrigatório)', name: 'responsavel', type: 'select',
+      default: sugestao,
+      options: [{ value: '', label: '— selecione —' }, ...ADVOGADOS.map(n => ({ value: n, label: n }))] },
+    { label: 'Observação (opcional)', name: 'nota', type: 'textarea', rows: 2,
+      placeholder: 'Ex: mero andamento, sem prazo · ciência registrada' }
+  ], {
+    confirmLabel: 'Confirmar ciência',
+    intro: 'Registra que esta intimação foi vista e está sob responsabilidade do advogado escolhido. Use "Agendar prazo" se ela gera prazo.'
+  });
+  if (!r) return;
+  const [responsavel, nota] = r;
+  if (!responsavel) { toast('Selecione um responsável', 'Atribuição é obrigatória.', 'error'); return; }
+
+  await djenDarCiencia(hash, responsavel, nota);
+  toast('Ciência registrada', `Responsável: ${responsavel}`, 'success');
+  if (state.currentRoute === 'intimacoes') renderIntimacoes();
+  _atualizarBadgeIntimacoes().catch(() => {});
+}
+
+// Persiste a ciência no doc da intimação.
+async function djenDarCiencia(hash, responsavel, nota) {
+  const todas = await DB.getAllDjenPublications();
+  const pub = (todas || []).find(p => p.hash === hash);
+  if (!pub) throw new Error('intimação não encontrada');
+  const me = (window.UC_Auth?.getUser?.() || {}).email || '';
+  pub.status = 'ciente';
+  pub.cienteEm = Date.now();
+  pub.cientePor = me;
+  pub.responsavel = responsavel || null;
+  pub.cienciaNota = (nota || '').trim() || null;
+  pub.updatedAt = Date.now();
+  await DB.saveDjenPublication(pub);
+}
+
+// Agenda prazo a partir da intimação — reusa o modal de resultados DJEN
+// (escolha de recurso/prazo + importação). Ao importar, djenImportSelected
+// grava cienteEm → some da caixa.
+async function _intimacaoAgendarPrazo(hash) {
+  const todas = await DB.getAllDjenPublications();
+  const pub = (todas || []).find(p => p.hash === hash);
+  if (!pub) { toast('Intimação não encontrada', '', 'error'); return; }
+  const adapted = _djenAdaptCronPubToApi(pub);
+  const processos = await DB.getAllProcesses();
+  const cnjMap = new Map();
+  processos.forEach(p => { if (p.cnj) cnjMap.set(normalizeCnjForCompare(p.cnj), p); });
+  const found = cnjMap.get(adapted._cnjNormalized);
+  if (found) adapted._proc = found;
+  const classified = {
+    matched: adapted._proc ? [adapted] : [],
+    unmatched: adapted._proc ? [] : [adapted],
+    duplicates: [], internalDuplicates: 0
+  };
+  const hoje = new Date(); const ini = new Date(hoje); ini.setDate(hoje.getDate() - 7);
+  const fmt = d => d.toISOString().slice(0, 10);
+  djenShowResultsModal(classified, [], fmt(ini), fmt(hoje));
+}
+
 async function djenImportSelected(modal) {
   const classified = window._djenClassifiedCache || { matched: [], unmatched: [] };
   const allPubs = [...classified.matched, ...classified.unmatched];
@@ -21470,8 +21677,13 @@ async function djenImportSelected(modal) {
       processosCriados++;
     }
 
-    // Save publication record (always, for dedup)
+    // Save publication record (always, for dedup).
+    // Importar = dá ciência automaticamente (P0.2): grava cienteEm +
+    // responsável (do processo ou usuário logado) → sai da caixa de pendentes.
     const dataDispo = pub.data_disponibilizacao || pub.data_publicacao;
+    const _meImport = (window.UC_Auth?.getUser?.() || {}).email || '';
+    const _respImport = (pub._proc && pub._proc.advogadoResponsavel)
+      || (typeof defaultAdvogado === 'function' ? defaultAdvogado(_meImport) : '') || null;
     await DB.saveDjenPublication({
       hash: pub.hash,
       cnj: pub._cnjNormalized,
@@ -21485,7 +21697,10 @@ async function djenImportSelected(modal) {
       oab: pub._oab,
       raw: pub,
       status: processId ? 'imported' : 'orphan',
-      importedAt: Date.now()
+      importedAt: Date.now(),
+      cienteEm: Date.now(),
+      cientePor: _meImport,
+      responsavel: _respImport
     });
     imported++;
 
@@ -21577,6 +21792,9 @@ async function djenImportSelected(modal) {
   if (state.currentRoute === 'dashboard') renderDashboard();
   else if (state.currentRoute === 'deadlines') renderDeadlines();
   else if (state.currentRoute === 'processes') renderProcessList();
+  else if (state.currentRoute === 'intimacoes') renderIntimacoes();
+  // Importar deu ciência → atualiza o badge de pendentes
+  _atualizarBadgeIntimacoes().catch(() => {});
 }
 
 // Try to extract a meaningful name and metadata from a DJEN publication

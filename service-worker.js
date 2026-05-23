@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.68.1 (P3 completo: +4 tipos — Petição Inicial, Embargos de Declaração, Agravo de Instrumento, Recurso Constitucional RE/REsp/RR)
-const CACHE_NAME = 'uc-juridico-v6-68-1';
+// Service Worker — UC Jurídico v6.69.0 (P0.2: Caixa de entrada de Intimações — ciência + atribuição obrigatória, badge persistente no menu)
+const CACHE_NAME = 'uc-juridico-v6-69-0';
 const APP_SHELL = [
   './',
   './index.html',
