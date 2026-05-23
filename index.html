@@ -14460,6 +14460,78 @@ const PETICAO_PLACEHOLDERS = [
   { grupo: 'Escritório', tag: '{{escritorio.oabSocio}}',        desc: 'OAB do sócio principal' }
 ];
 
+// ====================================================================
+// P3 — Prompts de sistema especializados POR TIPO DE PEÇA
+// ====================================================================
+// Cada tipo argumentativo tem um prompt otimizado, derivado do
+// conhecimento das skills do escritório (construir-peticao,
+// contrarrazoes-recursos, excecao-pre-executividade). Quando o advogado
+// escolhe o tipo no "Gerar petição IA", o app injeta o prompt certo
+// automaticamente — sem precisar cadastrar um template manualmente.
+// Prioridade na resolução: template escolhido > prompt do tipo > genérico.
+
+const _PETICAO_PROMPT_BASE = `Você é advogado(a) sênior brasileiro(a) do escritório Urany de Castro Advocacia, com domínio técnico impecável e escrita jurídica formal de alto nível. Sua tarefa é REDIGIR a peça processual pronta para protocolo, a partir do briefing e do contexto do processo fornecidos.
+
+REGRAS INVIOLÁVEIS:
+1. NUNCA invente jurisprudência, doutrina, súmulas ou precedentes. Cite apenas o que tiver certeza (com número do acórdão/tema, relator, órgão e data quando aplicável). Em caso de dúvida sobre uma citação, escreva "[conferir citação]" em vez de fabricar.
+2. Cite legislação pela redação vigente, indicando artigo, parágrafo e diploma.
+3. Quando faltar um dado concreto (data, valor, nome, documento), insira um marcador "[____]" para preenchimento manual — não preencha com suposição.
+4. Use os dados reais do processo, do cliente e dos eventos do contexto fornecido.
+5. Português jurídico formal, períodos claros, sem prolixidade. Estrutura impecável.
+6. Produza a peça COMPLETA e pronta (endereçamento, qualificação, fundamentos, pedidos, fecho), não um esboço.`;
+
+const PETICAO_PROMPTS_TIPO = {
+  contestacao: `TIPO DE PEÇA: CONTESTAÇÃO (art. 335 e ss. do CPC).
+Estrutura obrigatória:
+- Endereçamento ao juízo + qualificação das partes.
+- PRELIMINARES (art. 337 CPC), se houver: incompetência, inépcia da inicial, ilegitimidade, falta de interesse, prescrição/decadência, conexão, litispendência. Trate cada uma em tópico próprio.
+- IMPUGNAÇÃO ESPECIFICADA DOS FATOS (art. 341 CPC): rebata ponto a ponto a narrativa da inicial — o ônus da impugnação especificada é seu; fatos não impugnados presumem-se verdadeiros.
+- MÉRITO: teses defensivas com fatos impeditivos, modificativos ou extintivos do direito do autor (art. 350 CPC).
+- PROVAS a produzir (art. 336/369).
+- PEDIDOS: acolhimento das preliminares e/ou improcedência total dos pedidos, com condenação em sucumbência.
+Se houver fundamento para reconvenção, sinalize ao final.`,
+
+  apelacao: `TIPO DE PEÇA: APELAÇÃO (art. 1.009 e ss. do CPC).
+Estrutura obrigatória:
+- Petição de interposição (endereçada ao juízo a quo) + razões recursais (endereçadas ao Tribunal).
+- TEMPESTIVIDADE e PREPARO (ou pedido de gratuidade/dispensa), no início das razões.
+- DIALETICIDADE: ataque ESPECIFICAMENTE cada fundamento da sentença recorrida — não basta repetir a inicial/contestação. Identifique se o vício é error in judicando (mérito) ou error in procedendo (processual).
+- PREQUESTIONAMENTO explícito dos dispositivos legais/constitucionais, visando recursos superiores.
+- PEDIDO: conhecimento e provimento para reformar/anular a sentença. Requeira efeito suspensivo se cabível e justifique.`,
+
+  emb_exec_fiscal: `TIPO DE PEÇA: EMBARGOS À EXECUÇÃO FISCAL (art. 16 da Lei 6.830/80; CPC subsidiário).
+Pontos de atenção:
+- Pressuposto: garantia do juízo (art. 16, §1º, LEF) — registre que está garantida ou justifique a dispensa (ex.: hipossuficiência — Tema 1.012/STJ se aplicável).
+- TEMPESTIVIDADE (30 dias da intimação da garantia).
+- Matérias usuais: nulidade da CDA por ausência de requisitos (art. 2º, §5º, LEF c/c art. 202/203 CTN), prescrição e decadência (art. 174 e 173 CTN), ilegitimidade passiva, excesso de execução (com memória de cálculo), pagamento/compensação, ilegalidade da exação.
+- PEDIDOS: procedência para extinguir a execução ou reduzir o débito; produção de provas.`,
+
+  epe: `TIPO DE PEÇA: EXCEÇÃO DE PRÉ-EXECUTIVIDADE.
+Regras essenciais:
+- Cabível APENAS para matérias de ordem pública conhecíveis de ofício e que DISPENSEM dilação probatória (Súmula 393/STJ). Não exige garantia do juízo.
+- Matérias típicas: nulidade da CDA, prescrição, decadência, ilegitimidade passiva, pagamento comprovado documentalmente, inexigibilidade do título.
+- Demonstre que a prova é pré-constituída (documental) — se exigir instrução, a via é de embargos, não de exceção.
+- PEDIDOS: extinção da execução (art. 924/925 CPC) e, se total, condenação do exequente em honorários.`,
+
+  recurso: `TIPO DE PEÇA: RECURSO.
+- Identifique e nomeie o recurso adequado ao ato impugnado e ao momento processual.
+- Demonstre os requisitos de admissibilidade (cabimento, tempestividade, preparo, legitimidade, interesse).
+- Observe a DIALETICIDADE (atacar os fundamentos específicos da decisão) e o PREQUESTIONAMENTO quando visar instâncias superiores.
+- PEDIDOS: conhecimento e provimento, com o resultado prático pretendido.`,
+
+  manifestacao: `TIPO DE PEÇA: MANIFESTAÇÃO / PETIÇÃO INTERCORRENTE.
+- Responda objetivamente ao que foi determinado/intimado no processo (despacho, decisão ou diligência).
+- Seja direto e fundamentado; evite repetir peças anteriores sem necessidade.
+- Conclua com o requerimento específico decorrente da manifestação.`
+};
+
+// Resolve o prompt de sistema especializado para um tipo de peça.
+// Retorna '' quando o tipo não tem especialização (backend usa o genérico).
+function _promptSistemaPorTipo(tipo) {
+  const esp = PETICAO_PROMPTS_TIPO[tipo];
+  return esp ? (_PETICAO_PROMPT_BASE + '\n\n' + esp) : '';
+}
+
 const MES_EXTENSO = ['janeiro','fevereiro','março','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro'];
 
 // Compõe endereço em uma linha
@@ -15539,12 +15611,12 @@ async function gerarPeticaoIAFlow() {
   const escolha = await showModal('🤖 Gerar petição com Gemini', [
     { label: 'Briefing — o que precisa ser argumentado?', name: 'briefing', type: 'textarea', rows: 8,
       placeholder: 'Ex: Fazer contestação alegando ilegitimidade passiva. Cliente nunca contratou o serviço executado pela autora. CDA é nula porque não consta o número do processo administrativo. Pedir improcedência total.' },
-    { label: 'Template (opcional — só pra system prompt)', name: 'modeloId', type: 'select', default: '', options: tiposOpts },
-    { label: 'Tipo da peça', name: 'tipo', type: 'select', default: 'outro',
-      options: PETICAO_TIPOS.map(t => ({ value: t.value, label: t.label })) }
+    { label: 'Template (opcional — sobrepõe o prompt do tipo)', name: 'modeloId', type: 'select', default: '', options: tiposOpts },
+    { label: 'Tipo da peça (⚡ = prompt especializado)', name: 'tipo', type: 'select', default: 'outro',
+      options: PETICAO_TIPOS.map(t => ({ value: t.value, label: t.label + (PETICAO_PROMPTS_TIPO[t.value] ? ' ⚡' : '') })) }
   ], {
     confirmLabel: '🤖 Gerar (envia pra Gemini)',
-    intro: `Processo: <strong>${escapeHtml(proc.name || proc.cnj || '—')}</strong>${cliente ? ' · Cliente: <strong>' + escapeHtml(cliente.nome) + '</strong>' : ''}<br>O briefing + contexto do processo (CNJ, partes, eventos recentes, prazos ativos) são enviados pro Gemini 2.5 Flash. Use depois o botão "Revisar no Claude" pra checagem crítica.`
+    intro: `Processo: <strong>${escapeHtml(proc.name || proc.cnj || '—')}</strong>${cliente ? ' · Cliente: <strong>' + escapeHtml(cliente.nome) + '</strong>' : ''}<br>O briefing + contexto do processo (CNJ, partes, eventos, prazos) vão pro Gemini. Tipos com <strong>⚡</strong> usam um <strong>prompt especializado</strong> (estrutura e cuidados próprios da peça). Revise no Claude depois.`
   });
   if (!escolha) return;
   const [briefing, modeloId, tipo] = escolha;
@@ -15596,10 +15668,17 @@ async function gerarPeticaoIAFlow() {
   `;
   $('modalContainer').appendChild(loading);
 
+  // P3: resolve o prompt de sistema na ordem de prioridade:
+  //   1. Template escolhido manualmente (controle total do advogado)
+  //   2. Prompt especializado do tipo de peça (contestação, apelação…)
+  //   3. Vazio → backend usa o prompt genérico
+  const promptDoTipo = _promptSistemaPorTipo(tipo);
+  const promptSistemaFinal = modeloEscolhido?.promptSistema || promptDoTipo || '';
+
   let resp;
   try {
     resp = await DB.gerarPeticaoIA(briefing, contextoSnapshot, {
-      modeloPromptSistema: modeloEscolhido?.promptSistema || '',
+      modeloPromptSistema: promptSistemaFinal,
       tipo: tipo || 'outro',
       modeloApi: 'gemini-3-flash-preview'
     });

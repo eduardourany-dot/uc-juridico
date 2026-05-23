@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.67.0 (Relatório: exportar carteira de processos em Excel .xlsx via SheetJS lazy-load)
-const CACHE_NAME = 'uc-juridico-v6-67-0';
+// Service Worker — UC Jurídico v6.68.0 (P3: prompts de IA especializados por tipo de peça — contestação, apelação, embargos, EPE, recurso, manifestação)
+const CACHE_NAME = 'uc-juridico-v6-68-0';
 const APP_SHELL = [
   './',
   './index.html',
