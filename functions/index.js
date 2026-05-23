@@ -355,12 +355,18 @@ exports.djenAutoCheckHttp = onRequest({
   timeoutSeconds: 540,
   cors: false
 }, async (req, res) => {
-  // Auth simples: query param ?secret=... compara com env var
+  // Auth: query param ?secret=... compara com env var.
   // Pra setar: firebase functions:secrets:set DJEN_HTTP_SECRET
-  // (ou usa Variables — mas Secrets é o jeito moderno)
-  const secret = req.query.secret;
+  //
+  // FAIL-CLOSED: se o secret não estiver configurado no ambiente, NEGA o
+  // acesso (em vez de liberar geral). Antes era fail-open — sem env var, a
+  // checagem era pulada e qualquer um podia disparar a função (que escreve
+  // no Firestore via Admin SDK e dispara push). O cron interno
+  // (djenAutoCheckCron via onSchedule) não passa por aqui, então fechar
+  // este endpoint não afeta o agendamento automático.
+  const secret = String(req.query.secret || '');
   const expected = process.env.DJEN_HTTP_SECRET || '';
-  if (expected && secret !== expected) {
+  if (!expected || secret !== expected) {
     res.status(403).json({ erro: 'secret_inválido' });
     return;
   }
