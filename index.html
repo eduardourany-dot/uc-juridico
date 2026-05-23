@@ -6826,28 +6826,92 @@ async function renderDeadlines() {
   const _procById = {}; processes.forEach(p => { _procById[p.id] = p; });
   const secaoIntimacoes = _secaoIntimacoesHtml(djenPubs, _procById);
 
-  const pendentesCiencia = (djenPubs || []).filter(p => p.status === 'pending' && !p.cienteEm).length;
+  const today = new Date(); today.setHours(0,0,0,0);
+  const enriched = deadlines.map(d => {
+    const proc = processes.find(p => p.id === d.processId);
+    const dl = new Date(d.deadlineDate);
+    const days = Math.ceil((dl - today) / 86400000);
+    return { ...d, processName: proc?.name || 'Processo removido', processCnj: proc?.cnj, days };
+  });
+  const active = enriched.filter(d => prazoEstaAtivo(d));
+  const done = enriched.filter(d => prazoEstaResolvido(d));
+  // Perdidos não-reconhecidos: precisam de ação (reconhecer ou reabrir).
+  const perdidos = enriched.filter(d => d.status === STATUS_PRAZO.PERDIDO && !d.perdidoCienteEm);
+  const expired = active.filter(d => d.days < 0);
+  const urgent = active.filter(d => d.days >= 0 && d.days <= 5);
+  const warning = active.filter(d => d.days > 5 && d.days <= 14);
+  const safe = active.filter(d => d.days > 14);
 
-  // Publicações (v6.72) = caixa de intimações (triagem). A gestão de prazos
-  // (perdidos/vencidos/urgentes) foi pra Agenda — onde se resolve tudo que
-  // tem data. Aqui é só captura: dar ciência ou agendar prazo.
   $('appContent').innerHTML = `
     <div class="page-header">
       <div>
         <h1 class="page-title"><span class="smallcaps-prefix">Publicações</span></h1>
-        <p class="page-subtitle">Caixa de intimações · ${pendentesCiencia} pendente(s) de ciência</p>
+        <p class="page-subtitle">${active.length} publicação(ões) com prazo ativo na carteira</p>
       </div>
       <div class="flex gap-2 flex-wrap">
         <button class="btn btn-secondary btn-sm" onclick="djenRunSearch()" title="Buscar publicações novas no Diário de Justiça Eletrônico (CNJ)">🔔 Pesquisar DJ</button>
-        <button class="btn btn-ghost btn-sm" onclick="navigate('agenda')" title="Prazos e compromissos ficam na Agenda">📅 Ver prazos na Agenda</button>
+        <button class="btn btn-outline btn-sm" onclick="exportDeadlinesCsv()">Exportar CSV</button>
       </div>
     </div>
 
-    ${secaoIntimacoes || `
-      <div class="card empty-state">
-        <h3 class="empty-state-title">✓ Nenhuma intimação pendente</h3>
-        <p class="empty-state-msg">Toda intimação capturada já recebeu ciência ou virou prazo. Quando o monitor DJEN trouxer algo novo, aparece aqui. Os prazos agendados ficam na <a onclick="navigate('agenda')" style="cursor:pointer;color:var(--uc-gold);">Agenda</a>.</p>
+    ${secaoIntimacoes}
+
+    ${perdidos.length > 0 ? `
+      <div id="secao-prazos-perdidos" class="card mb-4" style="border-left: 4px solid var(--uc-red); background: var(--uc-red-soft, #fde8e8);">
+        <h3 class="font-serif font-semibold smallcaps mb-1" style="color: var(--uc-red);">✗ Prazos perdidos · ${perdidos.length}</h3>
+        <p class="help-text" style="margin: 0 0 10px;">Resolva o alerta: <strong>Reconhecer</strong> tira do aviso (mantém no histórico) · <strong>Reabrir</strong> volta pra pendente (se foi marcado por engano).</p>
+        ${perdidos.sort((a, b) => a.days - b.days).map(d => `
+          <div class="card" style="margin-bottom: 6px; padding: 10px; background: #fff;">
+            <div style="display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; align-items: center;">
+              <div style="flex: 1; min-width: 0;">
+                <strong style="color: var(--uc-black);">${escapeHtml(d.description || d.type)}</strong>
+                <div style="font-size: 12px; color: var(--uc-warm-gray); margin-top: 2px;">
+                  ${escapeHtml(d.processName)}${d.processCnj ? ` · ${d.processCnj}` : ''} · venceu ${formatDate(d.deadlineDate)} (há ${Math.abs(d.days)}d)
+                </div>
+              </div>
+              <div style="display: flex; gap: 4px; flex-shrink: 0; flex-wrap: wrap;">
+                <button class="btn btn-ghost btn-sm" onclick="navigate('process', { currentProcessId: '${d.processId}' })" title="Abrir processo" style="padding: 2px 8px;">↗ Processo</button>
+                <button class="btn btn-outline btn-sm" onclick="reabrirPrazoPerdido('${d.id}')" title="Reabrir — foi marcado perdido por engano" style="padding: 2px 8px;">↻ Reabrir</button>
+                <button class="btn btn-secondary btn-sm" onclick="prazoReconhecerPerdido('${d.id}')" title="Reconhecer — tira do alerta, mantém no histórico" style="padding: 2px 8px;">✓ Reconhecer</button>
+              </div>
+            </div>
+          </div>
+        `).join('')}
       </div>
+    ` : ''}
+
+    <div class="grid gap-3 mb-6" style="grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));">
+      <div class="stat-card" style="${expired.length > 0 ? 'background: var(--uc-red-soft); border-color: var(--uc-red);' : ''}">
+        <div class="stat-label">Vencidos</div>
+        <div class="stat-value" style="${expired.length > 0 ? 'color: var(--uc-red);' : ''}">${expired.length}</div>
+      </div>
+      <div class="stat-card" style="${urgent.length > 0 ? 'background: var(--uc-red-soft);' : ''}">
+        <div class="stat-label">Urgentes</div>
+        <div class="stat-value">${urgent.length}</div>
+        <div class="stat-meta">≤ 5 dias</div>
+      </div>
+      <div class="stat-card" style="${warning.length > 0 ? 'background: var(--uc-amber-soft);' : ''}">
+        <div class="stat-label">Atenção</div>
+        <div class="stat-value">${warning.length}</div>
+        <div class="stat-meta">6-14 dias</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Tranquilos</div>
+        <div class="stat-value">${safe.length}</div>
+        <div class="stat-meta">+14 dias</div>
+      </div>
+    </div>
+
+    ${active.length === 0 ? `
+      <div class="card empty-state">
+        <h3 class="empty-state-title">Nenhuma publicação ativa</h3>
+        <p class="empty-state-msg">Você não tem publicações com prazo pendente. Adicione publicações a partir de cada processo na aba "Publicações".</p>
+      </div>
+    ` : `
+      ${expired.length > 0 ? `<h3 class="font-serif text-lg font-semibold smallcaps mb-3" style="color: var(--uc-red);">⚠ Vencidos · ${expired.length}</h3>${expired.sort((a,b) => a.days - b.days).map(d => renderGlobalDeadlineRow(d)).join('')}` : ''}
+      ${urgent.length > 0 ? `<h3 class="font-serif text-lg font-semibold smallcaps mt-6 mb-3" style="color: var(--uc-red);">Urgentes · ${urgent.length}</h3>${urgent.sort((a,b) => a.days - b.days).map(d => renderGlobalDeadlineRow(d)).join('')}` : ''}
+      ${warning.length > 0 ? `<h3 class="font-serif text-lg font-semibold smallcaps mt-6 mb-3" style="color: var(--uc-amber);">Atenção · ${warning.length}</h3>${warning.sort((a,b) => a.days - b.days).map(d => renderGlobalDeadlineRow(d)).join('')}` : ''}
+      ${safe.length > 0 ? `<h3 class="font-serif text-lg font-semibold smallcaps mt-6 mb-3" style="color: var(--uc-green);">Próximos · ${safe.length}</h3>${safe.sort((a,b) => a.days - b.days).map(d => renderGlobalDeadlineRow(d)).join('')}` : ''}
     `}
   `;
 }
@@ -7775,10 +7839,10 @@ function renderBannerPrazos() {
   banner.style.cursor = 'default';
 }
 
-// Abre a Agenda (centro de gestão de prazos). Se focar=true (há prazos
-// perdidos), rola até a seção "Perdidos" pra o advogado resolver direto.
+// Abre Publicações. Se focar=true (há prazos perdidos), rola até a seção
+// "Prazos perdidos" pra o advogado resolver direto.
 function _irParaPrazos(focar) {
-  navigate('agenda');
+  navigate('deadlines');
   if (focar) {
     setTimeout(() => {
       const el = document.getElementById('secao-prazos-perdidos');
@@ -11132,30 +11196,10 @@ async function renderAgenda() {
   }
   filtrados.sort((a, b) => (a.dataHoraInicio || '').localeCompare(b.dataHoraInicio || ''));
 
-  // Prazos na Agenda (v6.72): a Agenda é o centro de gestão de prazos +
-  // compromissos. Mostra os prazos ATIVOS na timeline (gerenciáveis via
-  // _renderPrazoNaAgenda) + a seção de Perdidos no topo. Publicações virou
-  // só a caixa de intimações.
-  let prazosOverlay = [];
-  if (f.tipo === 'todos') {
-    prazosOverlay = (deadlines || []).filter(d => prazoEstaAtivo(d));
-    if (f.responsavel) prazosOverlay = prazosOverlay.filter(d => d.advogadoResponsavel === f.responsavel);
-    if (dataInicioISO) prazosOverlay = prazosOverlay.filter(d => (d.deadlineDate || '').slice(0, 10) >= dataInicioISO);
-    if (dataFimISO) prazosOverlay = prazosOverlay.filter(d => (d.deadlineDate || '').slice(0, 10) <= dataFimISO);
-    if (f.busca && f.busca.trim()) {
-      const q = f.busca.trim().toLowerCase();
-      prazosOverlay = prazosOverlay.filter(d =>
-        (d.description || '').toLowerCase().includes(q) ||
-        (d.type || '').toLowerCase().includes(q) ||
-        (procById[d.processId]?.name || '').toLowerCase().includes(q) ||
-        (procById[d.processId]?.cnj || '').toLowerCase().includes(q)
-      );
-    }
-  }
-
-  // Prazos perdidos não-reconhecidos → seção de alerta no topo (sempre,
-  // independente do filtro de período).
-  const prazosPerdidos = (deadlines || []).filter(d => d.status === STATUS_PRAZO.PERDIDO && !d.perdidoCienteEm);
+  // Prazos NÃO aparecem na Agenda (ficam em Publicações). O que vem de uma
+  // publicação é o COMPROMISSO gerado no agendamento (djenAgendarPrazos),
+  // que linka pra a publicação que o originou. Evita duplicar prazo + compromisso.
+  const prazosOverlay = [];
 
   // Stats
   const venceram = compromissos.filter(c => {
@@ -11183,35 +11227,6 @@ async function renderAgenda() {
   const calMesLabel = new Date(calRef.ano, calRef.mes, 1)
     .toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
 
-  // Seção de prazos perdidos (alerta no topo da Agenda) — resolver direto aqui.
-  const _todayISO = hoje.toISOString().slice(0, 10);
-  const secaoPerdidos = prazosPerdidos.length > 0 ? `
-    <div id="secao-prazos-perdidos" class="card mb-3" style="border-left: 4px solid var(--uc-red); background: var(--uc-red-soft, #fde8e8);">
-      <h3 class="font-serif font-semibold smallcaps mb-1" style="color: var(--uc-red);">✗ Prazos perdidos · ${prazosPerdidos.length}</h3>
-      <p class="help-text" style="margin: 0 0 10px;">Resolva o alerta: <strong>Reconhecer</strong> tira do aviso (mantém histórico) · <strong>Reabrir</strong> volta pra pendente (se foi por engano).</p>
-      ${prazosPerdidos.sort((a, b) => new Date(a.deadlineDate) - new Date(b.deadlineDate)).map(d => {
-        const proc = procById[d.processId];
-        const diasAtras = Math.ceil((new Date(_todayISO) - new Date((d.deadlineDate || '').slice(0,10))) / 86400000);
-        return `
-          <div class="card" style="margin-bottom: 6px; padding: 10px; background: #fff;">
-            <div style="display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; align-items: center;">
-              <div style="flex: 1; min-width: 0;">
-                <strong style="color: var(--uc-black);">${escapeHtml(d.description || d.type || 'Prazo')}</strong>
-                <div style="font-size: 12px; color: var(--uc-warm-gray); margin-top: 2px;">
-                  ${escapeHtml(proc?.name || 'Processo removido')}${proc?.cnj ? ` · ${proc.cnj}` : ''} · venceu ${formatDate(d.deadlineDate)}${Number.isFinite(diasAtras) ? ` (há ${Math.abs(diasAtras)}d)` : ''}
-                </div>
-              </div>
-              <div style="display: flex; gap: 4px; flex-shrink: 0; flex-wrap: wrap;">
-                ${proc ? `<button class="btn btn-ghost btn-sm" onclick="navigate('process', { currentProcessId: '${proc.id}' })" title="Abrir processo" style="padding: 2px 8px;">↗ Processo</button>` : ''}
-                <button class="btn btn-outline btn-sm" onclick="reabrirPrazoPerdido('${d.id}')" title="Reabrir — foi por engano" style="padding: 2px 8px;">↻ Reabrir</button>
-                <button class="btn btn-secondary btn-sm" onclick="prazoReconhecerPerdido('${d.id}')" title="Reconhecer — tira do alerta" style="padding: 2px 8px;">✓ Reconhecer</button>
-              </div>
-            </div>
-          </div>`;
-      }).join('')}
-    </div>
-  ` : '';
-
   $('appContent').innerHTML = `
     <div class="page-header">
       <div>
@@ -11226,8 +11241,6 @@ async function renderAgenda() {
         <button class="btn btn-primary" onclick="novoCompromissoFlow()">+ Novo compromisso</button>
       </div>
     </div>
-
-    ${secaoPerdidos}
 
     ${viewMode === 'calendario' ? `
       <div class="card mb-3" style="padding: 10px; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;">
@@ -11568,6 +11581,7 @@ function _renderCompromissoCard(c, procById, cliById) {
           </div>
           ${c.local ? `<div style="font-size: 12px; color: var(--uc-warm-gray); margin-bottom: 4px;">📍 ${escapeHtml(c.local)}</div>` : ''}
           ${c.meetLink ? `<div style="font-size: 12px; margin-bottom: 4px;">📹 <a href="${escapeHtml(c.meetLink)}" target="_blank" rel="noopener" style="color:var(--uc-gold);">Entrar na reunião Google Meet</a></div>` : ''}
+          ${c.djenHash ? `<div style="font-size: 12px; margin-bottom: 4px;">📰 <a onclick="event.stopPropagation(); djenShowFullPublicacaoFromDb('${c.djenHash}')" style="cursor:pointer; color:var(--uc-gold);">Ver publicação que gerou este prazo</a></div>` : ''}
           <div style="font-size: 12px; color: var(--uc-warm-gray);">
             ${c.responsavel ? '👤 ' + escapeHtml(c.responsavel.split(' ')[0]) : ''}
             ${c.participantes && c.participantes.length ? ' + ' + c.participantes.length + ' participante(s)' : ''}

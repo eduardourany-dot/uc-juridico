@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.72.0 (Reorg: Agenda vira centro de prazos+compromissos (perdidos/vencidos/urgentes gerenciáveis); Publicações vira só caixa de intimações; espelho de prazo revertido)
-const CACHE_NAME = 'uc-juridico-v6-72-0';
+// Service Worker — UC Jurídico v6.72.1 (Reverte reorg: Publicações volta a ter os prazos; Agenda sem overlay de prazo (sem duplicação); compromisso de publicação ganha link "Ver publicação")
+const CACHE_NAME = 'uc-juridico-v6-72-1';
 const APP_SHELL = [
   './',
   './index.html',
