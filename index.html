@@ -3668,6 +3668,8 @@ async function renderProcessDetail() {
   try { calculos = await DB.getCalculosByProcess(p.id); } catch (e) { console.warn('calculos não disponíveis', e); }
   let custas = [];
   try { custas = await DB.getCustasByProcess(p.id); } catch (e) { console.warn('custas não disponíveis', e); }
+  let djenPubs = [];
+  try { djenPubs = await DB.getDjenPublicationsByProcess(p.id); } catch (e) { console.warn('publicações DJEN não disponíveis', e); }
 
   // Update counts (skip pra read-only — não pode escrever; eventCount/
   // noteCount são metadados que continuam corretos derivados em runtime).
@@ -3678,7 +3680,7 @@ async function renderProcessDetail() {
     try { await DB.saveProcess(p); } catch (e) { console.warn('saveProcess (counts) falhou', e); }
   }
 
-  state._processView = { p, events, deadlines, notes, jurisprudence, honorarios, compromissos, peticoes, calculos, custas, activeTab: state._processView?.activeTab || 'overview' };
+  state._processView = { p, events, deadlines, notes, jurisprudence, honorarios, compromissos, peticoes, calculos, custas, djenPubs, activeTab: state._processView?.activeTab || 'overview' };
 
   $('appContent').innerHTML = `
     <div class="page-header">
@@ -3711,7 +3713,7 @@ async function renderProcessDetail() {
       ${_isClienteMode() ? '' : `<button class="detail-tab ${state._processView.activeTab === 'peticoes' ? 'active' : ''}" onclick="setProcessTab('peticoes')">Petições · ${peticoes.length}</button>`}
       ${/* Tabs 'atalho-cards' só aparecem quando ativas (acessadas via clique nos cards da visão geral). */ ''}
       ${state._processView.activeTab === 'events' ? `<button class="detail-tab active" onclick="setProcessTab('events')">Eventos · ${events.length}</button>` : ''}
-      ${state._processView.activeTab === 'deadlines' ? `<button class="detail-tab active" onclick="setProcessTab('deadlines')">Publicações · ${deadlines.filter(d => prazoEstaAtivo(d)).length}</button>` : ''}
+      ${state._processView.activeTab === 'deadlines' ? `<button class="detail-tab active" onclick="setProcessTab('deadlines')">Publicações · ${(state._processView.djenPubs || []).length}</button>` : ''}
       ${state._processView.activeTab === 'compromissos' ? `<button class="detail-tab active" onclick="setProcessTab('compromissos')">Compromissos · ${compromissos.length}</button>` : ''}
       ${(state._processView.activeTab === 'notes' && !_isClienteMode()) ? `<button class="detail-tab active" onclick="setProcessTab('notes')">Notas · ${notes.length}</button>` : ''}
       ${state._processView.activeTab === 'analysis' ? `<button class="detail-tab active" onclick="setProcessTab('analysis')">Análise IA</button>` : ''}
@@ -4473,7 +4475,7 @@ function renderProcessOverview(p, events, deadlines, notes, jurisprudence) {
   return `
     <div class="grid gap-4 mb-4" style="grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));">
       <div class="stat-card stat-card-link" onclick="setProcessTab('events')" title="Ver eventos do processo"><div class="stat-label">Eventos</div><div class="stat-value">${events.length}</div></div>
-      <div class="stat-card stat-card-link" onclick="setProcessTab('deadlines')" title="Ver publicações do processo"><div class="stat-label">Publicações ativas</div><div class="stat-value">${activeDeadlines.length}</div></div>
+      <div class="stat-card stat-card-link" onclick="setProcessTab('deadlines')" title="Ver publicações do processo"><div class="stat-label">Publicações</div><div class="stat-value">${(state._processView?.djenPubs || []).length}</div></div>
       <div class="stat-card stat-card-link" onclick="setProcessTab('compromissos')" title="Ver compromissos vinculados"><div class="stat-label">Compromissos</div><div class="stat-value">${compromissos.length}</div></div>
       ${_isClienteMode() ? '' : `<div class="stat-card stat-card-link" onclick="setProcessTab('notes')" title="Ver notas do processo"><div class="stat-label">Notas</div><div class="stat-value">${notes.length}</div></div>`}
     </div>

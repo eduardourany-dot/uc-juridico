@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.75.0 (busca DJEN auto-importa tudo como "não tratada" direto na caixa (sem modal de seleção) + publicação fica visível na aba do processo mesmo sem prazo agendado)
-const CACHE_NAME = 'uc-juridico-v6-75-0';
+// Service Worker — UC Jurídico v6.75.1 (card do processo: "Publicações ativas" → "Publicações", contando todas as publicações vinculadas ao processo, não só prazos ativos)
+const CACHE_NAME = 'uc-juridico-v6-75-1';
 const APP_SHELL = [
   './',
   './index.html',
