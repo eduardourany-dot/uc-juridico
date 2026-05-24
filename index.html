@@ -17397,6 +17397,17 @@ function renderSettingsTab(tab, prompts, defaultPromptId) {
       </div>
 
       <div class="card mb-3">
+        <h4 class="font-serif font-semibold smallcaps mb-2" style="color: var(--uc-black);">🔎 Buscar também pelo NOME do advogado</h4>
+        <p class="help-text" style="margin-bottom: 10px;">
+          Alguns tribunais publicam <strong>só com o nome do advogado, sem citar a OAB</strong> — a busca por OAB perderia essas publicações. Ligado, o sistema consulta também pelo nome de cada advogado cadastrado (derivado das OABs). Pode trazer publicações de homônimos — use o <strong>Descartar</strong> na caixa de intimações pra limpar.
+        </p>
+        <label style="display:inline-flex; align-items:center; gap:8px; cursor:pointer;">
+          <input type="checkbox" id="djenBuscarNomeInput" ${state._djenCache?.buscarPorNome !== false ? 'checked' : ''} onchange="_djenToggleBuscarNome(this.checked)">
+          <span><strong>Ativo</strong> — busca por OAB + nome</span>
+        </label>
+      </div>
+
+      <div class="card mb-3">
         <h4 class="font-serif font-semibold smallcaps mb-2" style="color: var(--uc-black);">⏱ Auto-check ao abrir o app</h4>
         <p class="help-text" style="margin-bottom: 10px;">
           Quando ativo, ao abrir o app o sistema verifica em background se há publicações novas
@@ -17930,10 +17941,18 @@ async function djenLoadSettingsCache() {
   const autoCheckEnabled = await DB.getSetting('djenAutoCheckEnabled', true);
   const autoCheckHours = await DB.getSetting('djenAutoCheckHours', 12);
   const lastAutoCheck = await DB.getSetting('djenLastAutoCheck', null);
+  const buscarPorNome = await DB.getSetting('djenBuscarPorNome', true);
   state._djenCache = {
     oabs, lookback, workerUrl, lastFetch,
-    autoCheckEnabled, autoCheckHours, lastAutoCheck
+    autoCheckEnabled, autoCheckHours, lastAutoCheck, buscarPorNome
   };
+}
+
+// Toggle "buscar também por nome" — salva e atualiza o cache.
+async function _djenToggleBuscarNome(checked) {
+  await DB.setSetting('djenBuscarPorNome', !!checked);
+  state._djenCache = { ...(state._djenCache || {}), buscarPorNome: !!checked };
+  toast('Preferência salva', checked ? 'Busca por OAB + nome' : 'Busca só por OAB', 'success');
 }
 
 async function djenAddOabFlow() {
@@ -20680,44 +20699,76 @@ function calcDjenDeadline(dataDisponibilizacao, daysAllowed = 15, tribunal = 'NA
 }
 
 // Fetch publications for all configured OABs in a date range
-async function djenFetchAll(oabs, dataInicio, dataFim, progressCb = null) {
+// Busca publicações por OAB e, opcionalmente, por NOME do advogado.
+// Busca por nome é necessária porque alguns tribunais publicam só com o
+// nome (sem citar a OAB) — capturar só por OAB perderia essas publicações.
+// Dedup por hash (djenDedupePublications + hasDjenPublication) colapsa o
+// que vier tanto pela OAB quanto pelo nome.
+async function djenFetchAll(oabs, dataInicio, dataFim, progressCb = null, nomes = []) {
   const allPubs = [];
-  let total = 0;
-  for (let i = 0; i < oabs.length; i++) {
-    const oab = oabs[i];
-    // Espaça as OABs pra não estourar o rate limit do CNJ (HTTP 429).
-    // Espelha o cron do servidor, que já usa _sleep entre requisições.
-    if (i > 0) await new Promise(r => setTimeout(r, 350));
-    if (progressCb) progressCb(`Consultando OAB ${oab.numero}/${oab.uf}...`, (i / oabs.length) * 0.9);
+
+  // Paginação genérica pra um conjunto de filtros (OAB ou nome).
+  const _fetchPaginado = async (baseParams, marcador) => {
     let pagina = 1;
     while (true) {
-      try {
-        const data = await djenFetch({
-          numeroOab: oab.numero,
-          ufOab: oab.uf,
-          dataDisponibilizacaoInicio: dataInicio,
-          dataDisponibilizacaoFim: dataFim,
-          itensPorPagina: 100,
-          pagina
-        });
-        const items = data.items || [];
-        if (items.length === 0) break;
-        items.forEach(item => {
-          item._oab = oab;
-          allPubs.push(item);
-        });
-        total += items.length;
-        if (items.length < 100) break;
-        pagina += 1;
-        if (pagina > 20) break; // safety cap
-        await new Promise(r => setTimeout(r, 200)); // espaça entre páginas
-      } catch(err) {
-        throw new Error(`Falha na OAB ${oab.numero}/${oab.uf}: ${err.message}`);
-      }
+      const data = await djenFetch({
+        ...baseParams,
+        dataDisponibilizacaoInicio: dataInicio,
+        dataDisponibilizacaoFim: dataFim,
+        itensPorPagina: 100,
+        pagina
+      });
+      const items = data.items || [];
+      if (items.length === 0) break;
+      items.forEach(item => { Object.assign(item, marcador); allPubs.push(item); });
+      if (items.length < 100) break;
+      pagina += 1;
+      if (pagina > 20) break; // safety cap
+      await new Promise(r => setTimeout(r, 200)); // espaça entre páginas
     }
+  };
+
+  const totalEtapas = oabs.length + nomes.length;
+  let etapa = 0;
+
+  for (let i = 0; i < oabs.length; i++) {
+    const oab = oabs[i];
+    if (etapa > 0) await new Promise(r => setTimeout(r, 350)); // anti rate-limit (429)
+    if (progressCb) progressCb(`Consultando OAB ${oab.numero}/${oab.uf}...`, (etapa / totalEtapas) * 0.9);
+    etapa++;
+    try { await _fetchPaginado({ numeroOab: oab.numero, ufOab: oab.uf }, { _oab: oab }); }
+    catch (err) { throw new Error(`Falha na OAB ${oab.numero}/${oab.uf}: ${err.message}`); }
   }
+
+  for (let j = 0; j < nomes.length; j++) {
+    const nome = nomes[j];
+    if (etapa > 0) await new Promise(r => setTimeout(r, 350));
+    if (progressCb) progressCb(`Consultando nome "${nome}"...`, (etapa / totalEtapas) * 0.9);
+    etapa++;
+    // Busca por nome é best-effort — não aborta tudo se uma falhar (nomes
+    // comuns podem dar timeout/volume); loga e segue.
+    try { await _fetchPaginado({ nomeAdvogado: nome }, { _porNome: nome }); }
+    catch (err) { console.warn(`[DJEN] busca por nome "${nome}" falhou: ${err.message}`); }
+  }
+
   if (progressCb) progressCb('Processando...', 0.95);
   return allPubs;
+}
+
+// Nomes únicos a monitorar (derivados das OABs cadastradas). Normaliza
+// duplicatas (mesma pessoa com 2 OABs → 1 nome).
+function _djenNomesMonitorados(oabs) {
+  const vistos = new Set();
+  const nomes = [];
+  for (const o of (oabs || [])) {
+    const n = (o.nome || '').trim();
+    if (!n) continue;
+    const k = n.toLowerCase();
+    if (vistos.has(k)) continue;
+    vistos.add(k);
+    nomes.push(n);
+  }
+  return nomes;
 }
 
 // Hash determinístico simples (djb2) pra gerar chave composta de dedupe.
@@ -22352,9 +22403,11 @@ async function djenMaybeAutoCheck() {
     : (() => { const d = new Date(today); d.setDate(today.getDate() - 3); return d; })();
   const fmtDate = d => d.toISOString().slice(0, 10);
 
-  console.log(`[DJEN auto] consultando ${oabs.length} OAB(s) · período ${fmtDate(inicioDate)} → ${fmtDate(fim)}`);
+  const buscarNomeAuto = await DB.getSetting('djenBuscarPorNome', true);
+  const nomesAuto = buscarNomeAuto ? _djenNomesMonitorados(oabs) : [];
+  console.log(`[DJEN auto] consultando ${oabs.length} OAB(s)${nomesAuto.length ? ' + ' + nomesAuto.length + ' nome(s)' : ''} · período ${fmtDate(inicioDate)} → ${fmtDate(fim)}`);
   try {
-    const pubs = await djenFetchAll(oabs, fmtDate(inicioDate), fmtDate(fim), null);
+    const pubs = await djenFetchAll(oabs, fmtDate(inicioDate), fmtDate(fim), null, nomesAuto);
     const classified = await djenClassify(pubs);
     await DB.setSetting('djenLastAutoCheck', Date.now());
     // Stash pra abrir modal sob demanda quando user clicar no banner
@@ -22475,8 +22528,10 @@ async function djenRunSearch() {
     if (b) b.style.width = (pct * 100) + '%';
   };
 
+  const buscarNome = await DB.getSetting('djenBuscarPorNome', true);
+  const nomesBusca = buscarNome ? _djenNomesMonitorados(oabs) : [];
   try {
-    const pubs = await djenFetchAll(oabs, fmtDate(inicio), fmtDate(fim), progressCb);
+    const pubs = await djenFetchAll(oabs, fmtDate(inicio), fmtDate(fim), progressCb, nomesBusca);
     const classified = await djenClassify(pubs);
     modal.remove();
     await djenShowResultsModal(classified, oabs, fmtDate(inicio), fmtDate(fim));

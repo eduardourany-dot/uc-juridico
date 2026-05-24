@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.73.0 (Caixa de intimações estilo Astrea: contadores + filtros (tribunal/status/busca), descartar/restaurar, e tratar criando compromisso/audiência)
-const CACHE_NAME = 'uc-juridico-v6-73-0';
+// Service Worker — UC Jurídico v6.74.0 (DJEN: captura também por NOME do advogado — tribunais que publicam sem OAB não escapam mais; toggle em Config DJEN)
+const CACHE_NAME = 'uc-juridico-v6-74-0';
 const APP_SHELL = [
   './',
   './index.html',
