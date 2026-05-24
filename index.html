@@ -6824,7 +6824,10 @@ async function renderDeadlines() {
 
   // Caixa de intimações pendentes de ciência (P0.2) — integrada no topo.
   const _procById = {}; processes.forEach(p => { _procById[p.id] = p; });
-  const secaoIntimacoes = _secaoIntimacoesHtml(djenPubs, _procById);
+  // Fonte da verdade pra "prazo agendado": hashes de publicação que têm
+  // deadline real (importar sem recurso NÃO cria prazo, só dá ciência).
+  const _hashesComPrazo = new Set((deadlines || []).filter(d => d.djenHash).map(d => d.djenHash));
+  const secaoIntimacoes = _secaoIntimacoesHtml(djenPubs, _procById, _hashesComPrazo);
 
   const today = new Date(); today.setHours(0,0,0,0);
   const enriched = deadlines.map(d => {
@@ -21639,9 +21642,10 @@ async function djenEnrichProcessFromPublication(processId, pub) {
 // Retorna o HTML da caixa de intimações pra embutir no topo de Publicações.
 // `todas` = pubs DJEN; `procById` = índice de processos. Retorna '' quando
 // não há pendentes nem histórico (não polui a página).
-function _secaoIntimacoesHtml(todas, procById) {
+function _secaoIntimacoesHtml(todas, procById, hashesComPrazo) {
   if (typeof _isClienteMode === 'function' && _isClienteMode()) return '';
   todas = todas || [];
+  hashesComPrazo = hashesComPrazo || new Set();
 
   // Contadores (estilo Astrea) — sempre sobre o conjunto total.
   const hojeISO = new Date().toISOString().slice(0, 10);
@@ -21701,17 +21705,18 @@ function _secaoIntimacoesHtml(todas, procById) {
 
     ${lista.length === 0 ? `
       <div class="card empty-state" style="margin-bottom:16px;"><p class="empty-state-msg">Nenhuma intimação ${f.status === 'pendentes' ? 'pendente de ciência' : f.status === 'descartadas' ? 'descartada' : 'com esse filtro'}.</p></div>
-    ` : lista.map(p => _intimacaoCard(p, procById)).join('')}
+    ` : lista.map(p => _intimacaoCard(p, procById, hashesComPrazo)).join('')}
   `;
 }
 
-function _intimacaoCard(p, procById) {
+function _intimacaoCard(p, procById, hashesComPrazo) {
   const proc = p.processId ? procById[p.processId] : null;
   const dataDispo = p.dataDisponibilizacao || p.data_disponibilizacao || '';
   const texto = djenTextoLegivel(p.texto || '').slice(0, 360);
   const cnj = normalizeCnj(p.cnj) || (p.raw && (p.raw.numero_processo || p.raw.numeroProcesso)) || '(sem CNJ)';
   const descartada = p.status === 'descartada';
   const tratada = !!p.cienteEm;
+  const temPrazo = !!(hashesComPrazo && hashesComPrazo.has(p.hash)); // deadline real vinculado
   const corBorda = descartada ? 'var(--uc-warm-gray)' : (tratada ? 'var(--uc-green)' : 'var(--uc-amber)');
   const opac = descartada ? 'opacity:.7;' : '';
 
@@ -21723,8 +21728,11 @@ function _intimacaoCard(p, procById) {
       <button class="btn btn-outline btn-sm" onclick="djenRestaurarIntimacao('${p.hash}')">↺ Restaurar</button>
       ${p.texto ? `<button class="btn btn-ghost btn-sm" onclick="djenShowFullPublicacaoFromDb('${p.hash}')">Ver íntegra</button>` : ''}`;
   } else if (tratada) {
+    // "prazo agendado" só quando há deadline real; senão é ciência sem prazo.
+    const rotuloTrat = temPrazo ? 'prazo agendado' : 'ciência (sem prazo)';
     acoes = `
-      <span style="font-size:11px;color:var(--uc-green);align-self:center;">✓ ${p.status === 'imported' ? 'prazo agendado' : 'ciente'}${p.responsavel ? ' · ' + escapeHtml(p.responsavel.split(' ')[0]) : ''}</span>
+      <span style="font-size:11px;color:var(--uc-green);align-self:center;">✓ ${rotuloTrat}${p.responsavel ? ' · ' + escapeHtml(p.responsavel.split(' ')[0]) : ''}</span>
+      ${!temPrazo ? `<button class="btn btn-secondary btn-sm" onclick="_intimacaoAgendarPrazo('${p.hash}')" title="Agendar prazo agora">📅 Agendar prazo</button>` : ''}
       ${p.texto ? `<button class="btn btn-ghost btn-sm" onclick="djenShowFullPublicacaoFromDb('${p.hash}')">Ver íntegra</button>` : ''}`;
   } else {
     acoes = `

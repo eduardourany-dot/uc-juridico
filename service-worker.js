@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.74.0 (DJEN: captura também por NOME do advogado — tribunais que publicam sem OAB não escapam mais; toggle em Config DJEN)
-const CACHE_NAME = 'uc-juridico-v6-74-0';
+// Service Worker — UC Jurídico v6.74.1 (fix: "prazo agendado" só quando há deadline real (status imported sem prazo mostrava label errado) + botão Agendar prazo na tratada sem prazo)
+const CACHE_NAME = 'uc-juridico-v6-74-1';
 const APP_SHELL = [
   './',
   './index.html',
