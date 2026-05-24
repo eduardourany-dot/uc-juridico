@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.75.2 (remove botões sem função no processo: "+ Adicionar publicação" (agendamento agora é direto na publicação) e "Protocolar" (função suspensa por ora))
-const CACHE_NAME = 'uc-juridico-v6-75-2';
+// Service Worker — UC Jurídico v6.75.3 (caixa de intimações: nome do processo em destaque acima do CNJ pra melhor identificação + remove "Adicionar publicação" também do card Ações do processo)
+const CACHE_NAME = 'uc-juridico-v6-75-3';
 const APP_SHELL = [
   './',
   './index.html',
