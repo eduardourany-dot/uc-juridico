@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.72.1 (Reverte reorg: Publicações volta a ter os prazos; Agenda sem overlay de prazo (sem duplicação); compromisso de publicação ganha link "Ver publicação")
-const CACHE_NAME = 'uc-juridico-v6-72-1';
+// Service Worker — UC Jurídico v6.73.0 (Caixa de intimações estilo Astrea: contadores + filtros (tribunal/status/busca), descartar/restaurar, e tratar criando compromisso/audiência)
+const CACHE_NAME = 'uc-juridico-v6-73-0';
 const APP_SHELL = [
   './',
   './index.html',

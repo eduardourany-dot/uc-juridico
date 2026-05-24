@@ -21590,52 +21590,67 @@ async function djenEnrichProcessFromPublication(processId, pub) {
 // não há pendentes nem histórico (não polui a página).
 function _secaoIntimacoesHtml(todas, procById) {
   if (typeof _isClienteMode === 'function' && _isClienteMode()) return '';
+  todas = todas || [];
 
-  const pendentes = (todas || [])
-    .filter(p => p.status === 'pending' && !p.cienteEm)
-    .sort((a, b) => (b.fetchedAt || b.importedAt || 0) - (a.fetchedAt || a.importedAt || 0));
-  const vinculadas = pendentes.filter(p => p.processId || p.matched);
-  const orfas = pendentes.filter(p => !p.processId && !p.matched);
-  const cientes = (todas || [])
-    .filter(p => p.cienteEm)
-    .sort((a, b) => (b.cienteEm || 0) - (a.cienteEm || 0))
-    .slice(0, 30);
+  // Contadores (estilo Astrea) — sempre sobre o conjunto total.
+  const hojeISO = new Date().toISOString().slice(0, 10);
+  const _isHoje = ts => ts && new Date(ts).toISOString().slice(0, 10) === hojeISO;
+  const cNaoTratadas   = todas.filter(p => p.status === 'pending' && !p.cienteEm).length;
+  const cRecebidasHoje = todas.filter(p => _isHoje(p.fetchedAt || p.importedAt || p.createdAt)).length;
+  const cTratadasHoje  = todas.filter(p => _isHoje(p.cienteEm)).length;
+  const cDescartadas   = todas.filter(p => p.status === 'descartada').length;
+  const totalCientes   = todas.filter(p => p.cienteEm).length;
 
-  if (pendentes.length === 0 && cientes.length === 0) return '';
+  // Nada pra mostrar?
+  if (cNaoTratadas === 0 && cDescartadas === 0 && totalCientes === 0) return '';
+
+  // Filtro persistente (default: pendentes de ciência).
+  const f = state._intimFiltro = state._intimFiltro || { status: 'pendentes', tribunal: '', busca: '' };
+
+  let lista = todas.slice();
+  if (f.status === 'pendentes')      lista = lista.filter(p => p.status === 'pending' && !p.cienteEm);
+  else if (f.status === 'tratadas')  lista = lista.filter(p => !!p.cienteEm);
+  else if (f.status === 'descartadas') lista = lista.filter(p => p.status === 'descartada');
+  // 'todas' → sem filtro de status
+  if (f.tribunal) lista = lista.filter(p => (p.tribunal || '') === f.tribunal);
+  if (f.busca && f.busca.trim()) {
+    const q = f.busca.trim().toLowerCase();
+    lista = lista.filter(p =>
+      (normalizeCnj(p.cnj) || '').toLowerCase().includes(q) ||
+      String(p.cnj || '').includes(q.replace(/\D/g, '')) ||
+      (p.texto || '').toLowerCase().includes(q) ||
+      (p.orgao || '').toLowerCase().includes(q));
+  }
+  lista.sort((a, b) => (b.fetchedAt || b.importedAt || b.cienteEm || 0) - (a.fetchedAt || a.importedAt || a.cienteEm || 0));
+
+  const tribunais = [...new Set(todas.map(p => p.tribunal).filter(Boolean))].sort();
+  const chip = (val, label, n, cor) =>
+    `<button onclick="_setIntimFiltro('status','${val}')" style="flex:1;min-width:110px;text-align:left;cursor:pointer;border:1px solid ${f.status === val ? cor : 'var(--uc-line)'};background:${f.status === val ? cor + '22' : '#fff'};border-radius:6px;padding:8px 10px;">
+      <div style="font-size:18px;font-weight:700;color:${cor};">${n}</div>
+      <div style="font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:var(--uc-warm-gray);">${label}</div>
+    </button>`;
 
   return `
-    ${pendentes.length > 0 ? `
-      <div class="card mb-3" style="background: var(--uc-amber-soft, #fff7e6); border-left: 4px solid var(--uc-amber);">
-        <h3 class="font-serif font-semibold smallcaps mb-1" style="color: var(--uc-black);">📬 Intimações pendentes de ciência · ${pendentes.length}</h3>
-        <p style="margin:0;font-size:13px;color:var(--uc-graphite);">
-          Dê ciência (atribuindo um responsável) ou agende o prazo — só assim saem desta caixa.
-        </p>
+    <div class="card mb-3" style="padding:12px;">
+      <h3 class="font-serif font-semibold smallcaps mb-2" style="color: var(--uc-black);">📬 Caixa de intimações</h3>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
+        ${chip('pendentes', 'Não tratadas', cNaoTratadas, 'var(--uc-amber)')}
+        ${chip('tratadas', 'Tratadas (' + cTratadasHoje + ' hoje)', totalCientes, 'var(--uc-green)')}
+        ${chip('descartadas', 'Descartadas', cDescartadas, 'var(--uc-warm-gray)')}
+        ${chip('todas', 'Todas (' + cRecebidasHoje + ' hoje)', todas.length, 'var(--uc-graphite)')}
       </div>
-      ${vinculadas.length > 0 ? `
-        <h4 class="font-serif font-semibold smallcaps mb-2" style="color: var(--uc-black); font-size: 12px;">Vinculadas a processo · ${vinculadas.length}</h4>
-        ${vinculadas.map(p => _intimacaoCard(p, procById)).join('')}
-      ` : ''}
-      ${orfas.length > 0 ? `
-        <h4 class="font-serif font-semibold smallcaps mb-2 mt-3" style="color: var(--uc-warm-gray); font-size: 12px;">Órfãs (sem processo cadastrado) · ${orfas.length}</h4>
-        ${orfas.map(p => _intimacaoCard(p, procById)).join('')}
-      ` : ''}
-    ` : ''}
-    ${cientes.length > 0 ? `
-      <details style="margin: 8px 0 20px;">
-        <summary style="cursor:pointer;font-size:12px;color:var(--uc-warm-gray);">Histórico de ciência (${cientes.length} recentes)</summary>
-        <div style="margin-top:8px;">
-          ${cientes.map(p => `
-            <div style="font-size:12px;color:var(--uc-warm-gray);padding:6px 0;border-bottom:1px solid var(--uc-line-soft);">
-              <strong>${escapeHtml(normalizeCnj(p.cnj) || '(sem CNJ)')}</strong>
-              ${p.tribunal ? '· ' + escapeHtml(p.tribunal) : ''}
-              · ciência por <strong>${escapeHtml(p.responsavel || p.cientePor || '—')}</strong>
-              em ${formatDateTime(p.cienteEm)}
-              ${p.status === 'imported' ? ' · <span style="color:var(--uc-green);">prazo agendado</span>' : (p.status === 'ciente' ? ' · <span>só ciência</span>' : '')}
-            </div>
-          `).join('')}
-        </div>
-      </details>
-    ` : ''}
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+        <select class="select" style="font-size:12px;max-width:200px;" onchange="_setIntimFiltro('tribunal', this.value)">
+          <option value="">Todos os tribunais</option>
+          ${tribunais.map(t => `<option value="${escapeHtml(t)}" ${f.tribunal === t ? 'selected' : ''}>${escapeHtml(t)}</option>`).join('')}
+        </select>
+        <input type="text" class="input" style="flex:1;min-width:180px;font-size:12px;" placeholder="Buscar CNJ, órgão, texto…" value="${escapeHtml(f.busca || '')}" onchange="_setIntimFiltro('busca', this.value)">
+      </div>
+    </div>
+
+    ${lista.length === 0 ? `
+      <div class="card empty-state" style="margin-bottom:16px;"><p class="empty-state-msg">Nenhuma intimação ${f.status === 'pendentes' ? 'pendente de ciência' : f.status === 'descartadas' ? 'descartada' : 'com esse filtro'}.</p></div>
+    ` : lista.map(p => _intimacaoCard(p, procById)).join('')}
   `;
 }
 
@@ -21644,25 +21659,135 @@ function _intimacaoCard(p, procById) {
   const dataDispo = p.dataDisponibilizacao || p.data_disponibilizacao || '';
   const texto = djenTextoLegivel(p.texto || '').slice(0, 360);
   const cnj = normalizeCnj(p.cnj) || (p.raw && (p.raw.numero_processo || p.raw.numeroProcesso)) || '(sem CNJ)';
+  const descartada = p.status === 'descartada';
+  const tratada = !!p.cienteEm;
+  const corBorda = descartada ? 'var(--uc-warm-gray)' : (tratada ? 'var(--uc-green)' : 'var(--uc-amber)');
+  const opac = descartada ? 'opacity:.7;' : '';
+
+  // Ações conforme o estado.
+  let acoes = '';
+  if (descartada) {
+    acoes = `
+      <span style="font-size:11px;color:var(--uc-warm-gray);align-self:center;">🗑 descartada ${p.descartadaEm ? '· ' + formatDate(p.descartadaEm) : ''}</span>
+      <button class="btn btn-outline btn-sm" onclick="djenRestaurarIntimacao('${p.hash}')">↺ Restaurar</button>
+      ${p.texto ? `<button class="btn btn-ghost btn-sm" onclick="djenShowFullPublicacaoFromDb('${p.hash}')">Ver íntegra</button>` : ''}`;
+  } else if (tratada) {
+    acoes = `
+      <span style="font-size:11px;color:var(--uc-green);align-self:center;">✓ ${p.status === 'imported' ? 'prazo agendado' : 'ciente'}${p.responsavel ? ' · ' + escapeHtml(p.responsavel.split(' ')[0]) : ''}</span>
+      ${p.texto ? `<button class="btn btn-ghost btn-sm" onclick="djenShowFullPublicacaoFromDb('${p.hash}')">Ver íntegra</button>` : ''}`;
+  } else {
+    acoes = `
+      <button class="btn btn-primary btn-sm" onclick="_intimacaoCienciaFlow('${p.hash}')">✓ Dar ciência</button>
+      <button class="btn btn-secondary btn-sm" onclick="_intimacaoAgendarPrazo('${p.hash}')">📅 Agendar prazo</button>
+      <button class="btn btn-outline btn-sm" onclick="_intimacaoCompromisso('${p.hash}')" title="Criar audiência/compromisso na agenda a partir desta intimação">📌 Compromisso</button>
+      <button class="btn btn-ghost btn-sm" onclick="djenDescartarIntimacao('${p.hash}')" title="Descartar (irrelevante/duplicada)">🗑 Descartar</button>
+      ${p.texto ? `<button class="btn btn-ghost btn-sm" onclick="djenShowFullPublicacaoFromDb('${p.hash}')">Ver íntegra</button>` : ''}`;
+  }
+
   return `
-    <div class="card" style="margin-bottom:8px;padding:12px;border-left:4px solid var(--uc-amber);">
+    <div class="card" style="margin-bottom:8px;padding:12px;border-left:4px solid ${corBorda};${opac}">
       <div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:6px;">
         <div style="min-width:0;">
           <strong style="color:var(--uc-black);">${escapeHtml(cnj)}</strong>
           ${p.tribunal ? `<span class="badge" style="margin-left:6px;">${escapeHtml(p.tribunal)}</span>` : ''}
-          ${proc ? ` · <a onclick="navigate('process', { currentProcessId: '${proc.id}' })" style="cursor:pointer;color:var(--uc-gold);">${escapeHtml(proc.name || 'processo')}</a>` : ''}
+          ${!proc ? ' <span class="badge badge-amber" style="font-size:9px;">órfã</span>' : ` · <a onclick="navigate('process', { currentProcessId: '${proc.id}' })" style="cursor:pointer;color:var(--uc-gold);">${escapeHtml(proc.name || 'processo')}</a>`}
         </div>
         <span style="font-size:12px;color:var(--uc-warm-gray);">${dataDispo ? formatDate(dataDispo) : ''}</span>
       </div>
       ${p.orgao ? `<div style="font-size:12px;color:var(--uc-warm-gray);margin-bottom:4px;">${escapeHtml(p.orgao)}</div>` : ''}
       ${texto ? `<div style="font-size:12px;color:var(--uc-graphite);margin-bottom:8px;line-height:1.5;">${escapeHtml(texto)}${texto.length >= 360 ? '…' : ''}</div>` : ''}
-      <div style="display:flex;gap:8px;flex-wrap:wrap;">
-        <button class="btn btn-primary btn-sm" onclick="_intimacaoCienciaFlow('${p.hash}')">✓ Dar ciência</button>
-        <button class="btn btn-secondary btn-sm" onclick="_intimacaoAgendarPrazo('${p.hash}')">📅 Agendar prazo</button>
-        ${p.texto ? `<button class="btn btn-ghost btn-sm" onclick="djenShowFullPublicacaoFromDb('${p.hash}')">Ver íntegra</button>` : ''}
-      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">${acoes}</div>
     </div>
   `;
+}
+
+// Filtro da caixa de intimações (status/tribunal/busca) — re-renderiza.
+function _setIntimFiltro(campo, valor) {
+  state._intimFiltro = state._intimFiltro || { status: 'pendentes', tribunal: '', busca: '' };
+  state._intimFiltro[campo] = valor;
+  if (state.currentRoute === 'deadlines') renderDeadlines();
+}
+
+// Descartar intimação irrelevante/duplicada (B). Sai da fila, fica pesquisável.
+async function djenDescartarIntimacao(hash) {
+  const ok = await confirmDialog('Descartar intimação?', 'Sai da caixa de pendentes, mas continua pesquisável (filtro "Descartadas"). Use pra intimações irrelevantes ou duplicadas.', false);
+  if (!ok) return;
+  const todas = await DB.getAllDjenPublications();
+  const pub = (todas || []).find(p => p.hash === hash);
+  if (!pub) { toast('Intimação não encontrada', '', 'error'); return; }
+  pub.status = 'descartada';
+  pub.descartadaEm = Date.now();
+  pub.descartadaPor = (window.UC_Auth?.getUser?.() || {}).email || '';
+  pub.updatedAt = Date.now();
+  await DB.saveDjenPublication(pub);
+  toast('Intimação descartada', '', 'success');
+  if (state.currentRoute === 'deadlines') renderDeadlines();
+  _atualizarBadgePublicacoes().catch(() => {});
+}
+
+// Restaura uma intimação descartada → volta pra pendente de ciência.
+async function djenRestaurarIntimacao(hash) {
+  const todas = await DB.getAllDjenPublications();
+  const pub = (todas || []).find(p => p.hash === hash);
+  if (!pub) { toast('Intimação não encontrada', '', 'error'); return; }
+  pub.status = 'pending';
+  delete pub.descartadaEm; delete pub.descartadaPor;
+  pub.updatedAt = Date.now();
+  await DB.saveDjenPublication(pub);
+  toast('Intimação restaurada', 'Voltou pra pendentes de ciência.', 'success');
+  if (state.currentRoute === 'deadlines') renderDeadlines();
+  _atualizarBadgePublicacoes().catch(() => {});
+}
+
+// Tratar intimação criando um compromisso/audiência na agenda (C).
+// Pré-preenche processo + título; ao salvar, dá ciência (vincula via djenHash).
+async function _intimacaoCompromisso(hash) {
+  const todas = await DB.getAllDjenPublications();
+  const pub = (todas || []).find(p => p.hash === hash);
+  if (!pub) { toast('Intimação não encontrada', '', 'error'); return; }
+  const proc = pub.processId ? await DB.getProcess(pub.processId) : null;
+  const me = (window.UC_Auth?.getUser?.() || {}).email || '';
+  const meuNome = defaultAdvogado(me) || '';
+  const tituloSugerido = (pub.tipo || 'Audiência') + (proc ? ' · ' + (proc.cnj || proc.name || '') : '');
+
+  const amanha = new Date(); amanha.setDate(amanha.getDate() + 1); amanha.setHours(9, 0, 0, 0);
+  amanha.setMinutes(amanha.getMinutes() - amanha.getTimezoneOffset());
+
+  const r = await showModal('Compromisso a partir da intimação', [
+    { label: 'Tipo', name: 'tipo', type: 'select', default: 'audiencia',
+      options: COMPROMISSO_TIPOS.map(t => ({ value: t.value, label: t.icon + ' ' + t.label })) },
+    { label: 'Título', name: 'titulo', default: tituloSugerido },
+    { label: 'Data e hora', name: 'dataHoraInicio', type: 'datetime-local', default: amanha.toISOString().slice(0, 16) },
+    { label: 'Local', name: 'local', default: pub.orgao || '' },
+    { label: 'Responsável', name: 'responsavel', type: 'select', default: proc?.advogadoResponsavel || meuNome || '',
+      options: [{ value: '', label: '— não atribuído —' }, ...ADVOGADOS.map(n => ({ value: n, label: n }))] }
+  ], { confirmLabel: 'Criar compromisso', intro: 'Cria o compromisso na Agenda e dá ciência à intimação (sai da caixa).' });
+  if (!r) return;
+  const [tipo, titulo, dataHoraInicio, local, responsavel] = r;
+  if (!titulo?.trim() || !dataHoraInicio) { toast('Título e data são obrigatórios', '', 'error'); return; }
+
+  await DB.saveCompromisso({
+    id: uid(),
+    tipo: tipo || 'audiencia',
+    titulo: titulo.trim(),
+    dataHoraInicio: new Date(dataHoraInicio).toISOString(),
+    dataHoraFim: null,
+    local: (local || '').trim() || null,
+    processoId: pub.processId || null,
+    clienteId: proc?.clienteId || null,
+    responsavel: responsavel || null,
+    participantes: [],
+    status: 'agendado',
+    observacoes: `Originado de intimação DJEN.\n${pub.orgao || ''}\n${djenTextoLegivel(pub.texto || '').slice(0, 500)}`,
+    notificado: {},
+    djenHash: pub.hash,
+    createdAt: Date.now()
+  });
+  // Dá ciência à intimação (tratada via compromisso)
+  await djenDarCiencia(hash, responsavel || meuNome || '(equipe)', 'Tratada com compromisso na agenda');
+  toast('Compromisso criado', 'Intimação tratada e agendada.', 'success');
+  if (state.currentRoute === 'deadlines') renderDeadlines();
+  _atualizarBadgePublicacoes().catch(() => {});
 }
 
 // Marca ciência (responsável obrigatório). Não cria prazo — pra intimações
