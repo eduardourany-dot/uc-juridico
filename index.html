@@ -3699,7 +3699,7 @@ async function renderProcessDetail() {
         ${_isClienteMode() ? '' : `<button class="btn btn-secondary btn-sm" onclick="generateProcessFiche()">Gerar ficha</button>`}
         ${_isClienteMode() ? '' : `<button class="btn btn-secondary btn-sm" onclick="setProcessTab('analysis')" title="Abre análise IA do processo">🧠 Análise IA</button>`}
         ${_isClienteMode() ? '' : `<button class="btn btn-primary btn-sm" onclick="gerarPeticaoEscolhaFlow()" title="Gerar petição — escolha entre modelo cadastrado ou geração via IA">📝 Gerar petição</button>`}
-        ${(p.cnj && !_isClienteMode()) ? `<button class="btn btn-primary btn-sm" onclick="mniProtocolarFlow('${p.id}')" title="Protocolar petição/manifestação direto no tribunal via SOAP/MNI" style="background:linear-gradient(135deg,#b87f1c 0%,#c9a14c 100%);">📤 Protocolar</button>` : ''}
+        ${/* Botão "Protocolar" (mniProtocolarFlow) suspenso por ora — função desativada na UI a pedido. */ ''}
       </div>
     </div>
 
@@ -4900,7 +4900,7 @@ async function renderProcessDeadlines(p, deadlines) {
   return `
     <div class="flex justify-between items-center mb-3">
       <p class="text-sm" style="color: var(--uc-warm-gray);">${active.length} ativo(s)${labelHist ? ' · ' + labelHist : ''}</p>
-      <button class="btn btn-primary btn-sm" onclick="addDeadlineFlow()">+ Adicionar publicação</button>
+      ${/* Botão "+ Adicionar publicação" removido — publicações entram via busca DJEN (auto-import) e o prazo é agendado direto na publicação. */ ''}
     </div>
     ${(deadlines.length === 0 && pubsSemPrazo.length === 0) ? `
       <div class="empty-state">

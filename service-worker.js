@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.75.1 (card do processo: "Publicações ativas" → "Publicações", contando todas as publicações vinculadas ao processo, não só prazos ativos)
-const CACHE_NAME = 'uc-juridico-v6-75-1';
+// Service Worker — UC Jurídico v6.75.2 (remove botões sem função no processo: "+ Adicionar publicação" (agendamento agora é direto na publicação) e "Protocolar" (função suspensa por ora))
+const CACHE_NAME = 'uc-juridico-v6-75-2';
 const APP_SHELL = [
   './',
   './index.html',
