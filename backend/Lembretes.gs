@@ -30,7 +30,7 @@ const NOME_EMAIL_MAP = {
   'EDUARDO URANY DE CASTRO':       'eduardourany@uranydecastro.com.br',
   'MARCELO MENDES FRANÇA':         'marcelofranca@uranydecastro.com.br',
   'JULIANO DA COSTA FERREIRA':     'juliano@uranydecastro.com.br',
-  'CLEBER RIBEIRO':                'cleber@uranydecastro.com.br',
+  'CLEBER RIBEIRO':                'cleberribeiro@uranydecastro.com.br',
   'MARKO ANTONIO DUARTE':          'markoduarte@uranydecastro.com.br',
   'SARA CAROLINA URANY DE CASTRO': 'sara@uranydecastro.com.br',
   'MARCELO BITTAR':                'marcelobittar@uranydecastro.com.br',
