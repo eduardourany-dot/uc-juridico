@@ -21637,7 +21637,11 @@ function djenParseAdvogados(trecho) {
 // retorna null quando não acha partes (ex: avisos de arquivo indisponível).
 function _djenPartesResumo(texto) {
   if (!texto) return null;
-  const t = String(texto).replace(/\s+/g, ' ').trim();
+  // Limpa HTML/entidades ANTES de casar — o texto bruto traz &nbsp;, &Uacute;,
+  // tags etc. (senão o nome sai "T&Uacute × ... &nbsp"). djenTextoLegivel
+  // decodifica entidades e remove tags;   (nbsp) cai no \s abaixo.
+  const limpo = (typeof djenTextoLegivel === 'function') ? djenTextoLegivel(texto) : String(texto);
+  const t = limpo.replace(/\s+/g, ' ').trim();
   // Para a captura no próximo rótulo de parte/advogado OU no corpo da decisão
   // (palavras espaçadas tipo "D E C I S Ã O", "DESPACHO", "SENTENÇA").
   const STOP = '(?=\\s+(?:POLO\\s+(?:ATIVO|PASSIVO)|REPRESENTANTES?|ADVOGAD[OA]|REQUER(?:ENTE|IDO)|EXEQUENTE|EXECUTAD[OA]|AUTOR|R[ÉE]US?|IMPETRA(?:NTE|D[OA])|AGRAVA(?:NTE|D[OA])|RECORR(?:ENTE|ID[OA])|EMBARG|TERCEIRO|MINIST[ÉE]RIO|RELATOR|DESPACHO|DECIS[ÃA]O|SENTEN[ÇC]A|[A-ZÁÉÍÓÚÂÊÔÃÕÇ](?:\\s+[A-ZÁÉÍÓÚÂÊÔÃÕÇ]){2,})|[;]|$)';
@@ -21649,7 +21653,12 @@ function _djenPartesResumo(texto) {
     nome = nome.split(/\s*;\s*|\s+e\s+(?=[A-ZÁÉÍÓÚÂÊÔÃÕÇ])/)[0].trim();
     nome = nome.replace(/\s+(?:[A-ZÁÉÍÓÚÂÊÔÃÕÇ]\s+){2,}[A-ZÁÉÍÓÚÂÊÔÃÕÇ]?\s*$/, '').trim();
     nome = nome.replace(/[\s.·–—\-]+$/, '').trim();
-    return nome.slice(0, 60).trim();
+    nome = nome.slice(0, 60).trim();
+    // Valida: começa com letra/dígito, ≥3 chars, sem resíduo de entidade/tag.
+    if (nome.length < 3) return '';
+    if (!/^[A-ZÁÉÍÓÚÂÊÔÃÕÇ0-9]/i.test(nome)) return '';
+    if (/[&<>]|&[a-z]+;?/i.test(nome)) return '';
+    return nome;
   };
   const pares = [
     ['POLO\\s+ATIVO', 'POLO\\s+PASSIVO'],
