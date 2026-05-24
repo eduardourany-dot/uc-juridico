@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.75.3 (caixa de intimações: nome do processo em destaque acima do CNJ pra melhor identificação + remove "Adicionar publicação" também do card Ações do processo)
-const CACHE_NAME = 'uc-juridico-v6-75-3';
+// Service Worker — UC Jurídico v6.75.4 (caixa de intimações: publicações órfãs agora mostram as partes (ativo × passivo) extraídas do texto acima do CNJ — antes só pubs já vinculadas a processo exibiam nome)
+const CACHE_NAME = 'uc-juridico-v6-75-4';
 const APP_SHELL = [
   './',
   './index.html',

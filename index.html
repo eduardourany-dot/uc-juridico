@@ -21630,6 +21630,45 @@ function djenParseAdvogados(trecho) {
   return advs;
 }
 
+// Resumo "Parte ativa × Parte passiva" extraído do texto da publicação, pra
+// identificar publicações ÓRFÃS (sem processo cadastrado) na caixa de
+// intimações. Cobre os rótulos mais comuns nos diários (Polo ativo/passivo,
+// Requerente/Requerido, Exequente/Executado, Autor/Réu, etc.). Best-effort:
+// retorna null quando não acha partes (ex: avisos de arquivo indisponível).
+function _djenPartesResumo(texto) {
+  if (!texto) return null;
+  const t = String(texto).replace(/\s+/g, ' ').trim();
+  // Para a captura no próximo rótulo de parte/advogado OU no corpo da decisão
+  // (palavras espaçadas tipo "D E C I S Ã O", "DESPACHO", "SENTENÇA").
+  const STOP = '(?=\\s+(?:POLO\\s+(?:ATIVO|PASSIVO)|REPRESENTANTES?|ADVOGAD[OA]|REQUER(?:ENTE|IDO)|EXEQUENTE|EXECUTAD[OA]|AUTOR|R[ÉE]US?|IMPETRA(?:NTE|D[OA])|AGRAVA(?:NTE|D[OA])|RECORR(?:ENTE|ID[OA])|EMBARG|TERCEIRO|MINIST[ÉE]RIO|RELATOR|DESPACHO|DECIS[ÃA]O|SENTEN[ÇC]A|[A-ZÁÉÍÓÚÂÊÔÃÕÇ](?:\\s+[A-ZÁÉÍÓÚÂÊÔÃÕÇ]){2,})|[;]|$)';
+  const cap = (label) => {
+    const re = new RegExp(label + '\\s*:?\\s*([A-ZÁÉÍÓÚÂÊÔÃÕÇ0-9][\\s\\S]{1,118}?)' + STOP, 'i');
+    const m = t.match(re);
+    if (!m) return '';
+    let nome = m[1].trim().replace(/\s*[,;]+\s*$/, '');
+    nome = nome.split(/\s*;\s*|\s+e\s+(?=[A-ZÁÉÍÓÚÂÊÔÃÕÇ])/)[0].trim();
+    nome = nome.replace(/\s+(?:[A-ZÁÉÍÓÚÂÊÔÃÕÇ]\s+){2,}[A-ZÁÉÍÓÚÂÊÔÃÕÇ]?\s*$/, '').trim();
+    nome = nome.replace(/[\s.·–—\-]+$/, '').trim();
+    return nome.slice(0, 60).trim();
+  };
+  const pares = [
+    ['POLO\\s+ATIVO', 'POLO\\s+PASSIVO'],
+    ['REQUERENTE(?:\\(S\\)|S)?', 'REQUERID[OA](?:\\(S\\)|S)?'],
+    ['EXEQUENTE(?:\\(S\\)|S)?', 'EXECUTAD[OA](?:\\(S\\)|S)?'],
+    ['AUTOR(?:\\(A\\)|A|ES|AS)?', 'R[ÉE]US?'],
+    ['IMPETRANTE(?:\\(S\\)|S)?', 'IMPETRAD[OA](?:\\(S\\)|S)?'],
+    ['AGRAVANTE(?:\\(S\\)|S)?', 'AGRAVAD[OA](?:\\(S\\)|S)?'],
+    ['RECORRENTE(?:\\(S\\)|S)?', 'RECORRID[OA](?:\\(S\\)|S)?']
+  ];
+  for (const [la, lp] of pares) {
+    const ativo = cap(la);
+    if (!ativo) continue;
+    const passivo = cap(lp);
+    return passivo ? `${ativo} × ${passivo}` : ativo;
+  }
+  return null;
+}
+
 // Aplica os dados extraídos da publicação no processo associado, sem sobrescrever
 // dados já preenchidos manualmente
 async function djenEnrichProcessFromPublication(processId, pub) {
@@ -21813,7 +21852,9 @@ function _intimacaoCard(p, procById, hashesComPrazo) {
     <div class="card" style="margin-bottom:8px;padding:12px;border-left:4px solid ${corBorda};${opac}">
       <div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:6px;">
         <div style="min-width:0;">
-          ${proc ? `<div style="margin-bottom:2px;"><a onclick="navigate('process', { currentProcessId: '${proc.id}' })" style="cursor:pointer;color:var(--uc-gold);font-weight:600;">${escapeHtml(proc.name || 'processo')}</a></div>` : ''}
+          ${proc
+            ? `<div style="margin-bottom:2px;"><a onclick="navigate('process', { currentProcessId: '${proc.id}' })" style="cursor:pointer;color:var(--uc-gold);font-weight:600;">${escapeHtml(proc.name || 'processo')}</a></div>`
+            : (() => { const _t = _djenPartesResumo(p.texto); return _t ? `<div style="margin-bottom:2px;color:var(--uc-graphite);font-weight:600;">${escapeHtml(_t)}</div>` : ''; })()}
           <strong style="color:var(--uc-black);">${escapeHtml(cnj)}</strong>
           ${p.tribunal ? `<span class="badge" style="margin-left:6px;">${escapeHtml(p.tribunal)}</span>` : ''}
           ${!proc ? ' <span class="badge badge-amber" style="font-size:9px;">órfã</span>' : ''}
