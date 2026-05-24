@@ -4875,17 +4875,38 @@ async function renderProcessDeadlines(p, deadlines) {
     ...otherResolvidosSorted.map(d => renderDeadlineRow(d, p))
   ].join('');
 
+  // Publicações vinculadas ao processo SEM prazo agendado (req. Eduardo:
+  // deixar a publicação visível no processo independentemente de gerar prazo).
+  // Cobre intimação de mero andamento, ciência sem prazo, ou ainda não tratada.
+  // Reusa o card da caixa de intimações (_intimacaoCard) — mesmas ações
+  // (dar ciência / agendar prazo / descartar). Pula as que já geraram prazo
+  // (essas aparecem nos cards de publicação acima, vinculadas pelo djenHash).
+  let pubsSemPrazo = [];
+  // _intimacaoCard expõe ações de escritório (ciência/descartar) — esconde
+  // pra cliente, igual à caixa de intimações (_secaoIntimacoesHtml).
+  if (!(typeof _isClienteMode === 'function' && _isClienteMode())) {
+    try {
+      const todasPubs = await DB.getDjenPublicationsByProcess(p.id);
+      const hashesComPrazo = new Set(deadlines.filter(d => d.djenHash).map(d => d.djenHash));
+      pubsSemPrazo = (todasPubs || [])
+        .filter(pub => pub.hash && !hashesComPrazo.has(pub.hash))
+        .sort((a, b) => String(b.dataDisponibilizacao || '').localeCompare(String(a.dataDisponibilizacao || '')));
+    } catch (e) { console.warn('pubs do processo não disponíveis', e); }
+  }
+  const cardsSemPrazo = pubsSemPrazo.map(pub => _intimacaoCard(pub, { [p.id]: p }, new Set())).join('');
+
   return `
     <div class="flex justify-between items-center mb-3">
       <p class="text-sm" style="color: var(--uc-warm-gray);">${active.length} ativo(s)${labelHist ? ' · ' + labelHist : ''}</p>
       <button class="btn btn-primary btn-sm" onclick="addDeadlineFlow()">+ Adicionar publicação</button>
     </div>
-    ${deadlines.length === 0 ? `
+    ${(deadlines.length === 0 && pubsSemPrazo.length === 0) ? `
       <div class="empty-state">
-        <p class="empty-state-msg">Nenhum prazo cadastrado para este processo.</p>
+        <p class="empty-state-msg">Nenhuma publicação ou prazo cadastrado para este processo.</p>
       </div>
     ` : ''}
     ${cardsAtivos}
+    ${cardsSemPrazo ? `<h4 class="smallcaps text-xs mt-6 mb-2" style="color: var(--uc-warm-gray);">Publicações sem prazo agendado · ${pubsSemPrazo.length}</h4>${cardsSemPrazo}` : ''}
     ${cardsHistorico ? `<h4 class="smallcaps text-xs mt-6 mb-2" style="color: var(--uc-warm-gray);">Histórico (resolvidos)</h4>${cardsHistorico}` : ''}
   `;
 }
@@ -20851,6 +20872,49 @@ async function djenClassify(publications) {
   return result;
 }
 
+// Persiste TODAS as publicações novas (matched + unmatched) como "não
+// tratada" (status 'pending', SEM ciência). É o comportamento da busca
+// manual: ao pesquisar o DJ, tudo já entra na caixa de intimações pendente
+// de triagem — o advogado dá ciência / agenda prazo / descarta depois.
+// Idempotente: pubs já no DB (classified.duplicates) são puladas, então
+// repesquisar não duplica nem reabre intimações já tratadas.
+async function _djenPersistComoNaoTratada(classified) {
+  const pubs = [...(classified.matched || []), ...(classified.unmatched || [])];
+  let novas = 0, vinculadas = 0, orfas = 0;
+  for (const pub of pubs) {
+    // Defensivo: re-checa no DB (a classificação pode ter ficado em cache).
+    if (await DB.hasDjenPublication(pub.hash)) continue;
+    const processId = pub._proc?.id || null;
+    const dataDispo = pub.data_disponibilizacao || pub.data_publicacao
+      || pub.dataDisponibilizacao || '';
+    await DB.saveDjenPublication({
+      hash: pub.hash,
+      cnj: pub._cnjNormalized || normalizeCnjForCompare(pub.numero_processo || pub.numeroProcesso || ''),
+      processId,
+      matched: !!processId,
+      tribunal: pub.siglaTribunal || pub.tribunal || '',
+      orgao: pub.nomeOrgao || pub.orgao || '',
+      tipo: pub.tipoComunicacao || pub.tipo_comunicacao || 'Intimação',
+      dataDisponibilizacao: dataDispo,
+      texto: pub.texto || '',
+      link: pub.link || '',
+      oab: pub._oab || {},
+      raw: pub,
+      status: 'pending',      // não tratada — pendente de ciência
+      fetchedAt: Date.now(),
+      source: 'djen-busca'
+      // SEM cienteEm / responsavel — só vira "tratada" após ciência/prazo
+    });
+    novas++;
+    if (processId) {
+      vinculadas++;
+      // Enriquece o processo com partes/advogados extraídos do texto.
+      if (pub.texto) { try { await djenEnrichProcessFromPublication(processId, pub); } catch (e) { console.warn('[DJEN] enrich falhou', e); } }
+    } else orfas++;
+  }
+  return { novas, vinculadas, orfas };
+}
+
 // Render the main DJEN modal with results
 async function djenShowResultsModal(classified, oabs, dataInicio, dataFim) {
   const total = classified.matched.length + classified.unmatched.length + classified.duplicates.length;
@@ -21781,6 +21845,7 @@ async function djenDescartarIntimacao(hash) {
   await DB.saveDjenPublication(pub);
   toast('Intimação descartada', '', 'success');
   if (state.currentRoute === 'deadlines') renderDeadlines();
+  else if (state.currentRoute === 'process') renderProcessDetail();
   _atualizarBadgePublicacoes().catch(() => {});
 }
 
@@ -21795,6 +21860,7 @@ async function djenRestaurarIntimacao(hash) {
   await DB.saveDjenPublication(pub);
   toast('Intimação restaurada', 'Voltou pra pendentes de ciência.', 'success');
   if (state.currentRoute === 'deadlines') renderDeadlines();
+  else if (state.currentRoute === 'process') renderProcessDetail();
   _atualizarBadgePublicacoes().catch(() => {});
 }
 
@@ -21846,6 +21912,7 @@ async function _intimacaoCompromisso(hash) {
   await djenDarCiencia(hash, responsavel || meuNome || '(equipe)', 'Tratada com compromisso na agenda');
   toast('Compromisso criado', 'Intimação tratada e agendada.', 'success');
   if (state.currentRoute === 'deadlines') renderDeadlines();
+  else if (state.currentRoute === 'process') renderProcessDetail();
   _atualizarBadgePublicacoes().catch(() => {});
 }
 
@@ -21878,6 +21945,7 @@ async function _intimacaoCienciaFlow(hash) {
   await djenDarCiencia(hash, responsavel, nota);
   toast('Ciência registrada', `Responsável: ${responsavel}`, 'success');
   if (state.currentRoute === 'deadlines') renderDeadlines();
+  else if (state.currentRoute === 'process') renderProcessDetail();
   _atualizarBadgePublicacoes().catch(() => {});
 }
 
@@ -22097,6 +22165,7 @@ async function djenImportSelected(modal) {
   if (state.currentRoute === 'dashboard') renderDashboard();
   else if (state.currentRoute === 'deadlines') renderDeadlines();
   else if (state.currentRoute === 'processes') renderProcessList();
+  else if (state.currentRoute === 'process') renderProcessDetail();
   // Importar deu ciência → atualiza o badge de pendentes
   _atualizarBadgePublicacoes().catch(() => {});
 }
@@ -22541,8 +22610,27 @@ async function djenRunSearch() {
   try {
     const pubs = await djenFetchAll(oabs, fmtDate(inicio), fmtDate(fim), progressCb, nomesBusca);
     const classified = await djenClassify(pubs);
+    // Auto-importa TODAS como "não tratada" (não abre mais o modal de seleção).
+    // O advogado tria na caixa de intimações: ciência / agendar prazo / descartar.
+    const res = await _djenPersistComoNaoTratada(classified);
+    await DB.setSetting('djenLastFetch', Date.now());
     modal.remove();
-    await djenShowResultsModal(classified, oabs, fmtDate(inicio), fmtDate(fim));
+    const jaVistas = classified.duplicates.length;
+    if (res.novas === 0) {
+      toast('Consulta DJEN concluída',
+        jaVistas > 0
+          ? `Nenhuma publicação nova — ${jaVistas} já estava(m) na caixa.`
+          : 'Nenhuma publicação encontrada no período.',
+        'info');
+    } else {
+      toast('Publicações importadas',
+        `${res.novas} nova(s) na caixa de intimações · ${res.vinculadas} vinculada(s) a processo · ${res.orfas} órfã(s)${jaVistas > 0 ? ` · ${jaVistas} já vista(s)` : ''}`,
+        'success');
+    }
+    // Leva pra Publicações (caixa de intimações) pra triar as não tratadas.
+    if (state.currentRoute === 'deadlines') renderDeadlines();
+    else navigate('deadlines');
+    _atualizarBadgePublicacoes().catch(() => {});
   } catch(err) {
     modal.remove();
     djenShowError(err);

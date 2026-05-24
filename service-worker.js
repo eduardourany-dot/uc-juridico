@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.74.1 (fix: "prazo agendado" só quando há deadline real (status imported sem prazo mostrava label errado) + botão Agendar prazo na tratada sem prazo)
-const CACHE_NAME = 'uc-juridico-v6-74-1';
+// Service Worker — UC Jurídico v6.75.0 (busca DJEN auto-importa tudo como "não tratada" direto na caixa (sem modal de seleção) + publicação fica visível na aba do processo mesmo sem prazo agendado)
+const CACHE_NAME = 'uc-juridico-v6-75-0';
 const APP_SHELL = [
   './',
   './index.html',
