@@ -7366,10 +7366,44 @@ const FERIADOS_NACIONAIS_FIXOS = [
   { md: '12-25', desc: 'Natal' }
 ];
 
+// Feriados municipais recorrentes POR COMARCA — suspendem prazo SOMENTE na
+// comarca correspondente (#28). Aplicados apenas quando a comarca é detectada
+// no órgão/vara da publicação (inferirComarca). NUNCA aplicados a todo o
+// estado — senão suspenderiam prazo indevidamente em outra comarca.
+const FERIADOS_MUNICIPAIS = {
+  goiania:  [{ md: '10-24', desc: 'Aniversário de Goiânia' }],
+  anapolis: [{ md: '07-31', desc: 'Emancipação de Anápolis' }]
+};
+
+// Suspensões/feriados forenses cadastrados manualmente (portarias TJGO/TRT).
+// Carregado de settings('feriadosLocais') no boot via setFeriadosLocais.
+// Cada item: { data:'YYYY-MM-DD', desc, tribunal? }. tribunal vazio = aplica
+// a todos. Estas são autoritativas (o advogado cadastra a partir da portaria).
+let _feriadosLocais = [];
+function setFeriadosLocais(arr) {
+  _feriadosLocais = Array.isArray(arr) ? arr : [];
+  _feriadosCache.clear(); // recomputa com as novas datas
+}
+
+// Detecta a comarca a partir do texto do órgão/vara (best-effort). Só retorna
+// uma comarca quando o nome aparece explícito — default '' (sem feriado
+// municipal), que é o lado seguro (não suspende prazo por engano).
+function inferirComarca(str) {
+  if (!str) return '';
+  const t = String(str).toLowerCase();
+  if (t.includes('goiânia') || t.includes('goiania')) return 'goiania';
+  if (t.includes('anápolis') || t.includes('anapolis')) return 'anapolis';
+  return '';
+}
+
 const _feriadosCache = new Map();
 
-function feriadosDoAno(year) {
-  if (_feriadosCache.has(year)) return _feriadosCache.get(year);
+// Feriados do ano, considerando tribunal (suspensões manuais com escopo) e
+// comarca (feriados municipais). Cache por chave year|tribunal|comarca. Sem
+// tribunal/comarca → só nacional+forense (comportamento legado preservado).
+function feriadosDoAno(year, tribunal, comarca) {
+  const key = `${year}|${tribunal || ''}|${comarca || ''}`;
+  if (_feriadosCache.has(key)) return _feriadosCache.get(key);
   const map = new Map();
   for (const f of FERIADOS_NACIONAIS_FIXOS) {
     map.set(`${year}-${f.md}`, { desc: f.desc, tipo: 'nacional' });
@@ -7379,15 +7413,28 @@ function feriadosDoAno(year) {
   map.set(ymdKey(_addDays(easter, -47)), { desc: 'Carnaval (terça)',   tipo: 'forense' });
   map.set(ymdKey(_addDays(easter,  -2)), { desc: 'Sexta-Feira Santa',   tipo: 'forense' });
   map.set(ymdKey(_addDays(easter,  60)), { desc: 'Corpus Christi',      tipo: 'forense' });
-  _feriadosCache.set(year, map);
+  // Municipais — só da comarca detectada (nunca estaduais).
+  if (comarca && FERIADOS_MUNICIPAIS[comarca]) {
+    for (const f of FERIADOS_MUNICIPAIS[comarca]) {
+      map.set(`${year}-${f.md}`, { desc: f.desc, tipo: 'municipal' });
+    }
+  }
+  // Suspensões manuais (portarias) — aplica se sem escopo de tribunal OU casa.
+  for (const f of _feriadosLocais) {
+    if (!f || !f.data) continue;
+    if (f.tribunal && tribunal && f.tribunal !== tribunal) continue;
+    if (!String(f.data).startsWith(String(year))) continue;
+    map.set(f.data, { desc: f.desc || 'Suspensão (portaria)', tipo: 'manual' });
+  }
+  _feriadosCache.set(key, map);
   return map;
 }
 
-function isFeriado(d) {
-  return feriadosDoAno(d.getFullYear()).has(ymdKey(d));
+function isFeriado(d, tribunal, comarca) {
+  return feriadosDoAno(d.getFullYear(), tribunal, comarca).has(ymdKey(d));
 }
-function getFeriado(d) {
-  return feriadosDoAno(d.getFullYear()).get(ymdKey(d)) || null;
+function getFeriado(d, tribunal, comarca) {
+  return feriadosDoAno(d.getFullYear(), tribunal, comarca).get(ymdKey(d)) || null;
 }
 // Recesso forense: 20/12 a 20/01 inclusive (Lei 5.010/66 art. 62 + CPC art. 220)
 function isRecessoForense(d) {
@@ -7398,25 +7445,25 @@ function isFimDeSemana(d) {
   const w = d.getDay();
   return w === 0 || w === 6;
 }
-function isDiaUtil(d, _tribunal) {
+function isDiaUtil(d, tribunal, comarca) {
   if (isFimDeSemana(d)) return false;
-  if (isFeriado(d))     return false;
+  if (isFeriado(d, tribunal, comarca)) return false;
   if (isRecessoForense(d)) return false;
   return true;
 }
 
-function proximoDiaUtil(d, tribunal) {
+function proximoDiaUtil(d, tribunal, comarca) {
   let r = new Date(d); r.setHours(12, 0, 0, 0);
-  while (!isDiaUtil(r, tribunal)) r = _addDays(r, 1);
+  while (!isDiaUtil(r, tribunal, comarca)) r = _addDays(r, 1);
   return r;
 }
 
-function adicionarDiasUteis(start, dias, tribunal) {
+function adicionarDiasUteis(start, dias, tribunal, comarca) {
   let r = new Date(start); r.setHours(12, 0, 0, 0);
   let added = 0;
   while (added < dias) {
     r = _addDays(r, 1);
-    if (isDiaUtil(r, tribunal)) added++;
+    if (isDiaUtil(r, tribunal, comarca)) added++;
   }
   return r;
 }
@@ -7462,10 +7509,11 @@ function calcularDataFatal(opts) {
   const prazoDias = opts.emDobro ? opts.prazoDias * 2 : opts.prazoDias;
   const unidade = opts.unidade || 'UTEIS';
   const tribunal = opts.tribunal || 'NACIONAL';
+  const comarca = opts.comarca || '';
 
   // Marco inicial = 1º dia útil seguinte à publicação. É o termo a quo da
   // contagem — INCLUÍDO como dia 1 do prazo (STJ AgInt REsp 1.876.495/SP).
-  const marcoInicial = proximoDiaUtil(_addDays(dataPublicacao, 1), tribunal);
+  const marcoInicial = proximoDiaUtil(_addDays(dataPublicacao, 1), tribunal, comarca);
 
   const exclusoes = [];
   let dataFatal;
@@ -7474,7 +7522,7 @@ function calcularDataFatal(opts) {
     // dias corridos: marco = dia 1; prazo N termina em marco + (N-1).
     dataFatal = _addDays(marcoInicial, prazoDias - 1);
     // se cair em dia não útil, prorroga (art. 224 §1º CPC)
-    while (!isDiaUtil(dataFatal, tribunal)) dataFatal = _addDays(dataFatal, 1);
+    while (!isDiaUtil(dataFatal, tribunal, comarca)) dataFatal = _addDays(dataFatal, 1);
   } else {
     // dias úteis: marco já é dia 1 (sempre útil — proximoDiaUtil garante).
     // Contar prazoDias-1 dias úteis adicionais a partir do dia seguinte.
@@ -7482,10 +7530,10 @@ function calcularDataFatal(opts) {
     let contados = 1; // marco conta como dia 1
     while (contados < prazoDias) {
       dataFatal = _addDays(dataFatal, 1);
-      if (isDiaUtil(dataFatal, tribunal)) {
+      if (isDiaUtil(dataFatal, tribunal, comarca)) {
         contados++;
       } else {
-        const f = getFeriado(dataFatal);
+        const f = getFeriado(dataFatal, tribunal, comarca);
         if (f) exclusoes.push({ data: ymdKey(dataFatal), desc: f.desc });
         else if (isRecessoForense(dataFatal)) exclusoes.push({ data: ymdKey(dataFatal), desc: 'Recesso forense' });
       }
@@ -7494,7 +7542,7 @@ function calcularDataFatal(opts) {
 
   return {
     dataPublicacao, marcoInicial, dataFatal,
-    prazoDias, unidade, tribunal, emDobro: !!opts.emDobro,
+    prazoDias, unidade, tribunal, comarca, emDobro: !!opts.emDobro,
     exclusoes
   };
 }
@@ -17192,6 +17240,44 @@ async function quickPhotoOcr() {
 // === PAGE: SETTINGS =================================================
 // ====================================================================
 
+// #28 — cadastro de suspensões de prazo por portaria (admin, aba DJEN).
+async function _feriadosLocaisAddFlow() {
+  const r = await showModal('Adicionar suspensão de prazo', [
+    { label: 'Data (em que NÃO corre prazo)', name: 'data', type: 'date' },
+    { label: 'Descrição', name: 'desc', placeholder: 'Ex: Portaria TJGO nº XX — recesso de meio de ano' },
+    { label: 'Aplica a', name: 'tribunal', type: 'select', default: '',
+      options: [
+        { value: '', label: 'Todos os tribunais' },
+        { value: 'TJGO', label: 'TJGO' }, { value: 'TJDFT', label: 'TJDFT' },
+        { value: 'TRF1', label: 'TRF1' }, { value: 'TST', label: 'TST' },
+        { value: 'STJ', label: 'STJ' }, { value: 'STF', label: 'STF' }
+      ] }
+  ], { confirmLabel: 'Adicionar', intro: 'Cadastre a partir da portaria oficial. A engine de cálculo passa a tratar esta data como dia não útil no escopo escolhido.' });
+  if (!r) return;
+  const [data, desc, tribunal] = r;
+  if (!data) { toast('Informe a data', '', 'error'); return; }
+  const arr = (await DB.getSetting('feriadosLocais', [])) || [];
+  if (arr.some(f => f.data === data && (f.tribunal || '') === (tribunal || ''))) {
+    toast('Já cadastrada', 'Essa data já está na lista pro mesmo escopo.', 'info'); return;
+  }
+  arr.push({ data, desc: (desc || '').trim() || 'Suspensão (portaria)', tribunal: tribunal || '' });
+  await DB.setSetting('feriadosLocais', arr);
+  setFeriadosLocais(arr);
+  toast('Suspensão cadastrada', 'A engine de prazos já considera essa data.', 'success');
+  renderSettings();
+}
+
+async function _feriadosLocaisRemove(data, tribunal) {
+  const ok = await confirmDialog('Remover suspensão?', 'A data volta a ser contada como dia útil no cálculo de prazo (se for útil).', false);
+  if (!ok) return;
+  const arr = (await DB.getSetting('feriadosLocais', [])) || [];
+  const novo = arr.filter(f => !(f.data === data && (f.tribunal || '') === (tribunal || '')));
+  await DB.setSetting('feriadosLocais', novo);
+  setFeriadosLocais(novo);
+  toast('Suspensão removida', '', 'success');
+  renderSettings();
+}
+
 async function renderSettings() {
   const prompts = await DB.getAllPrompts();
   const defaultPromptId = await DB.getSetting('defaultPromptId');
@@ -17465,6 +17551,26 @@ function renderSettingsTab(tab, prompts, defaultPromptId) {
         </p>
         <input type="url" id="djenWorkerInput" class="input" value="${escapeHtml(workerUrl)}" placeholder="https://uc-djen.SEU-USUARIO.workers.dev" style="margin-bottom: 8px;">
         <button class="btn btn-outline btn-sm" id="djenSaveSettings" style="margin-top: 10px;">Salvar configurações</button>
+      </div>
+
+      <div class="card mb-3">
+        <h4 class="font-serif font-semibold smallcaps mb-2" style="color: var(--uc-black);">📅 Feriados e suspensões de prazo</h4>
+        <p class="help-text" style="margin-bottom: 10px;">
+          O cálculo de prazo já considera <strong>feriados nacionais</strong>, <strong>forenses</strong> (Carnaval, Sexta-feira Santa, Corpus Christi) e o <strong>recesso de 20/12 a 20/01</strong>. Os feriados municipais de <strong>Goiânia (24/10)</strong> e <strong>Anápolis (31/07)</strong> entram automaticamente <em>quando a comarca aparece no órgão da publicação</em> — não são aplicados a outras comarcas do TJGO. Cadastre abaixo as <strong>suspensões por portaria</strong> (TJGO/TRT, ponto facultativo forense, etc.) — datas específicas em que não corre prazo.
+        </p>
+        <button class="btn btn-primary btn-sm" onclick="_feriadosLocaisAddFlow()" style="margin-bottom: 10px;">+ Adicionar suspensão</button>
+        ${(_feriadosLocais || []).length === 0
+          ? '<p class="help-text">Nenhuma suspensão por portaria cadastrada.</p>'
+          : (_feriadosLocais || []).slice().sort((a, b) => String(a.data).localeCompare(String(b.data))).map(f => `
+              <div class="card" style="background: var(--uc-cream); margin-bottom: 6px; padding: 8px 10px;">
+                <div class="flex justify-between items-center">
+                  <div>
+                    <strong>${escapeHtml(formatDate(f.data))}</strong>
+                    <span style="color: var(--uc-warm-gray); font-size: 13px; margin-left: 8px;">${escapeHtml(f.desc || 'Suspensão')} · ${escapeHtml(f.tribunal || 'todos os tribunais')}</span>
+                  </div>
+                  <button class="btn btn-ghost btn-sm" onclick="_feriadosLocaisRemove('${escapeHtml(f.data)}','${escapeHtml(f.tribunal || '')}')">🗑</button>
+                </div>
+              </div>`).join('')}
       </div>
 
       <div class="card">
@@ -20702,14 +20808,15 @@ function normalizeCnjForCompare(raw) {
 // Cálculo de prazo DJEN usando a engine de Sprint 2.
 // Publicação = primeiro dia útil após disponibilização (art. 4º Lei 11.419/2006).
 // Marco inicial e exclusões (feriados/recesso) ficam embutidos em calcularDataFatal.
-function calcDjenDeadline(dataDisponibilizacao, daysAllowed = 15, tribunal = 'NACIONAL', unidade = 'UTEIS', emDobro = false) {
+function calcDjenDeadline(dataDisponibilizacao, daysAllowed = 15, tribunal = 'NACIONAL', unidade = 'UTEIS', emDobro = false, comarca = '') {
   const dispo = new Date(dataDisponibilizacao + 'T12:00:00');
-  const publication = proximoDiaUtil(_addDays(dispo, 1), tribunal);
+  const publication = proximoDiaUtil(_addDays(dispo, 1), tribunal, comarca);
   const calc = calcularDataFatal({
     dataPublicacao: publication,
     prazoDias: daysAllowed,
     unidade,
     tribunal,
+    comarca,
     emDobro
   });
   return {
@@ -20718,6 +20825,7 @@ function calcDjenDeadline(dataDisponibilizacao, daysAllowed = 15, tribunal = 'NA
     deadline: calc.dataFatal,
     diario: gerarDiarioCalculo(calc),
     tribunal,
+    comarca,
     unidade,
     emDobro,
     exclusoes: calc.exclusoes
@@ -22191,11 +22299,13 @@ async function djenImportSelected(modal) {
     if (processId && dataDispo && cfg.recursos && cfg.recursos.length > 0) {
       const proc = pub._proc || await DB.getProcess(processId);
       const tribunal = inferirTribunal(proc?.court || pub.tribunal || pub.nomeOrgao);
+      // Comarca detectada no órgão/vara — habilita feriado municipal (#28).
+      const comarca = inferirComarca(pub.nomeOrgao || pub.orgao || proc?.court || '');
       const existingDeadlines = await DB.getDeadlinesByProcess(processId);
       let calcAlgum = null; // pra reusar calc.publication no event abaixo
 
       for (const r of cfg.recursos) {
-        const calc = calcDjenDeadline(dataDispo, r.prazo, tribunal, r.unidade, r.emDobro);
+        const calc = calcDjenDeadline(dataDispo, r.prazo, tribunal, r.unidade, r.emDobro, comarca);
         if (!calcAlgum) calcAlgum = calc;
         // tipoEscolhido único: pra atos personalizados, inclui o nome — assim
         // dois personalizados distintos no mesmo pub não colidem no dedup.
@@ -23566,6 +23676,11 @@ async function bootApp() {
   applyTheme(state.settings.theme);
   _updateThemeQuickToggleLabel();
   _iniciarRefreshSino();
+
+  // Feriados/suspensões locais (#28) — carrega na engine de prazos pra que o
+  // cálculo de data fatal respeite as portarias cadastradas. Falha não bloqueia boot.
+  try { setFeriadosLocais(await DB.getSetting('feriadosLocais', [])); }
+  catch (e) { console.warn('[feriados] load falhou', e); }
 
   // Lembretes via Web Notifications (Sprint 3 Fase B.1).
   // Roda 1x agora (após state estar carregado abaixo) + a cada 15 min.

@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.76.0 (#39: botão "Vincular a processo" nas publicações órfãs — vincula a um processo já cadastrado (pré-seleciona CNJ idêntico) e sai de órfã)
-const CACHE_NAME = 'uc-juridico-v6-76-0';
+// Service Worker — UC Jurídico v6.77.0 (#28: feriados locais — municipais Goiânia 24/10 e Anápolis 31/07 gatilhados POR COMARCA detectada no órgão + cadastro manual de suspensões por portaria (Config→DJEN), respeitados no cálculo de prazo)
+const CACHE_NAME = 'uc-juridico-v6-77-0';
 const APP_SHELL = [
   './',
   './index.html',
