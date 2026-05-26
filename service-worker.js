@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.75.5 (fix: extrator de partes da publicação órfã agora limpa HTML/entidades antes (sumiu "T&Uacute × ... &nbsp") + valida o nome pra não exibir lixo)
-const CACHE_NAME = 'uc-juridico-v6-75-5';
+// Service Worker — UC Jurídico v6.76.0 (#39: botão "Vincular a processo" nas publicações órfãs — vincula a um processo já cadastrado (pré-seleciona CNJ idêntico) e sai de órfã)
+const CACHE_NAME = 'uc-juridico-v6-76-0';
 const APP_SHELL = [
   './',
   './index.html',

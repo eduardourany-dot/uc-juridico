@@ -21834,6 +21834,11 @@ function _intimacaoCard(p, procById, hashesComPrazo) {
   const corBorda = descartada ? 'var(--uc-warm-gray)' : (tratada ? 'var(--uc-green)' : 'var(--uc-amber)');
   const opac = descartada ? 'opacity:.7;' : '';
 
+  // Publicação órfã (sem processo cadastrado) → permite vincular a um existente.
+  const vincularBtn = (!proc && !descartada)
+    ? `<button class="btn btn-outline btn-sm" onclick="_intimacaoVincularProcesso('${p.hash}')" title="Vincular esta publicação a um processo já cadastrado">🔗 Vincular a processo</button>`
+    : '';
+
   // Ações conforme o estado.
   let acoes = '';
   if (descartada) {
@@ -21847,12 +21852,14 @@ function _intimacaoCard(p, procById, hashesComPrazo) {
     acoes = `
       <span style="font-size:11px;color:var(--uc-green);align-self:center;">✓ ${rotuloTrat}${p.responsavel ? ' · ' + escapeHtml(p.responsavel.split(' ')[0]) : ''}</span>
       ${!temPrazo ? `<button class="btn btn-secondary btn-sm" onclick="_intimacaoAgendarPrazo('${p.hash}')" title="Agendar prazo agora">📅 Agendar prazo</button>` : ''}
+      ${vincularBtn}
       ${p.texto ? `<button class="btn btn-ghost btn-sm" onclick="djenShowFullPublicacaoFromDb('${p.hash}')">Ver íntegra</button>` : ''}`;
   } else {
     acoes = `
       <button class="btn btn-primary btn-sm" onclick="_intimacaoCienciaFlow('${p.hash}')">✓ Dar ciência</button>
       <button class="btn btn-secondary btn-sm" onclick="_intimacaoAgendarPrazo('${p.hash}')">📅 Agendar prazo</button>
       <button class="btn btn-outline btn-sm" onclick="_intimacaoCompromisso('${p.hash}')" title="Criar audiência/compromisso na agenda a partir desta intimação">📌 Compromisso</button>
+      ${vincularBtn}
       <button class="btn btn-ghost btn-sm" onclick="djenDescartarIntimacao('${p.hash}')" title="Descartar (irrelevante/duplicada)">🗑 Descartar</button>
       ${p.texto ? `<button class="btn btn-ghost btn-sm" onclick="djenShowFullPublicacaoFromDb('${p.hash}')">Ver íntegra</button>` : ''}`;
   }
@@ -22038,6 +22045,53 @@ async function _intimacaoAgendarPrazo(hash) {
   const hoje = new Date(); const ini = new Date(hoje); ini.setDate(hoje.getDate() - 7);
   const fmt = d => d.toISOString().slice(0, 10);
   djenShowResultsModal(classified, [], fmt(ini), fmt(hoje));
+}
+
+// Vincula uma publicação órfã (sem processo cadastrado) a um processo já
+// existente — pós-importação (#39). Útil quando o processo foi cadastrado
+// depois da publicação chegar, ou quando o CNJ não casou automaticamente.
+// Pré-seleciona um processo com o MESMO CNJ se existir.
+async function _intimacaoVincularProcesso(hash) {
+  const [todas, processos] = await Promise.all([
+    DB.getAllDjenPublications(), DB.getAllProcesses()
+  ]);
+  const pub = (todas || []).find(p => p.hash === hash);
+  if (!pub) { toast('Intimação não encontrada', '', 'error'); return; }
+  if (!processos || processos.length === 0) {
+    toast('Nenhum processo cadastrado',
+      'Cadastre o processo primeiro (ou reimporte a publicação criando o processo).', 'info');
+    return;
+  }
+  // Pré-seleção: processo com CNJ idêntico (cadastrado depois da importação).
+  const cnjPub = normalizeCnjForCompare(pub.cnj || '');
+  const match = cnjPub ? processos.find(p => normalizeCnjForCompare(p.cnj) === cnjPub) : null;
+  const outros = processos
+    .filter(p => !match || p.id !== match.id)
+    .sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
+  const opts = [
+    { value: '', label: '— escolher processo —' },
+    ...(match ? [{ value: match.id, label: '★ ' + (match.cnj ? match.cnj + ' · ' : '') + (match.name || '—') + ' (CNJ idêntico)' }] : []),
+    ...outros.map(p => ({ value: p.id, label: (p.cnj ? p.cnj + ' · ' : '') + (p.name || '—') + (p.client ? ' · ' + p.client : '') }))
+  ];
+  const r = await showModal('Vincular publicação a um processo', [
+    { label: 'Processo', name: 'processoId', type: 'select', default: match ? match.id : '', options: opts }
+  ], {
+    confirmLabel: 'Vincular',
+    intro: `Publicação <strong>${escapeHtml(normalizeCnj(pub.cnj) || pub.cnj || '(sem CNJ)')}</strong>${match ? ' · ★ encontrei um processo com CNJ idêntico' : ' — escolha o processo correspondente'}. Ao vincular, ela deixa de ser órfã e passa a aparecer no processo.`
+  });
+  if (!r) return;
+  const [processoId] = r;
+  if (!processoId) { toast('Escolha um processo', '', 'error'); return; }
+  pub.processId = processoId;
+  pub.matched = true;
+  pub.updatedAt = Date.now();
+  await DB.saveDjenPublication(pub);
+  // Enriquece o processo com partes/advogados extraídos do texto.
+  if (pub.texto) { try { await djenEnrichProcessFromPublication(processoId, pub); } catch (e) { console.warn('[DJEN] enrich falhou', e); } }
+  toast('Publicação vinculada', 'Saiu de órfã — agora aparece no processo.', 'success');
+  if (state.currentRoute === 'deadlines') renderDeadlines();
+  else if (state.currentRoute === 'process') renderProcessDetail();
+  _atualizarBadgePublicacoes().catch(() => {});
 }
 
 async function djenImportSelected(modal) {
