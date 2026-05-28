@@ -445,8 +445,9 @@ function cron_djenAutoCheck() {
     Logger.log('[DJEN cron] ERRO: ' + e.message + '\n' + (e.stack || ''));
     // Email alerta pro admin
     try {
+      // Co-titularidade (#40): alerta vai pros dois admins.
       MailApp.sendEmail({
-        to: 'eduardourany@uranydecastro.com.br',
+        to: 'eduardourany@uranydecastro.com.br,ucjuridico@uranydecastro.com.br',
         subject: '[UC Jurídico] Cron DJEN falhou',
         body: 'O cron djenAutoCheckCron falhou:\n\n' + e.message + '\n\n' + (e.stack || '')
       });

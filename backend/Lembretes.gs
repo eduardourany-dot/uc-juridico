@@ -1190,7 +1190,9 @@ function cron_lembretesDeCompromissos() {
 // morte do outro e alerta por e-mail. (O caminho reverso — Cloud Function
 // vigiando este cron via push — está em functions/index.js.)
 
-const CRON_ALERT_EMAIL = 'eduardourany@uranydecastro.com.br';
+// Co-titularidade (#40): alertas vão pros DOIS — se uma conta falhar, a outra
+// recebe. MailApp.sendEmail aceita lista separada por vírgula em "to".
+const CRON_ALERT_EMAIL = 'eduardourany@uranydecastro.com.br,ucjuridico@uranydecastro.com.br';
 const CRON_ALERT_COOLDOWN_MS = 24 * 60 * 60 * 1000; // re-alerta no máx 1x/dia
 
 // Início (00:00) do último dia útil ANTERIOR a hoje (pula sáb/dom).
