@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.77.0 (#28: feriados locais — municipais Goiânia 24/10 e Anápolis 31/07 gatilhados POR COMARCA detectada no órgão + cadastro manual de suspensões por portaria (Config→DJEN), respeitados no cálculo de prazo)
-const CACHE_NAME = 'uc-juridico-v6-77-0';
+// Service Worker — UC Jurídico v6.77.1 (#40 parte 1: api.js + firestore.rules aceitam ucjuridico@uranydecastro.com.br como bootstrap admin co-titular, sem remover eduardourany@; aguarda criação da conta Workspace pros passos de IAM/Apps Script)
+const CACHE_NAME = 'uc-juridico-v6-77-1';
 const APP_SHELL = [
   './',
   './index.html',

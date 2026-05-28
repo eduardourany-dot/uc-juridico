@@ -210,7 +210,14 @@ async function _handleRedirectReturn() {
 // Roda em paralelo ao onAuthStateChanged que também processa retornos válidos.
 _handleRedirectReturn();
 
-const BOOTSTRAP_ADMIN_EMAIL = 'eduardourany@uranydecastro.com.br';
+// Bootstrap admins — auto-criáveis como admin no 1º login. Aceita ambos pra
+// permitir co-titularidade (#40): tanto o fundador quanto a conta de serviço
+// do escritório (ucjuridico@) podem fazer bootstrap. Manter sincronizado com
+// firestore.rules (mesmo array).
+const BOOTSTRAP_ADMIN_EMAILS = [
+  'eduardourany@uranydecastro.com.br',
+  'ucjuridico@uranydecastro.com.br'
+];
 
 async function checkAllowlistAndProceed(user) {
   const email = (user.email || '').toLowerCase();
@@ -228,7 +235,7 @@ async function checkAllowlistAndProceed(user) {
   }
 
   // Bootstrap: o admin do escritório se autocria no primeiro login.
-  if (!snap.exists() && email === BOOTSTRAP_ADMIN_EMAIL) {
+  if (!snap.exists() && BOOTSTRAP_ADMIN_EMAILS.includes(email)) {
     try {
       await setDoc(doc(db, 'users', email), {
         email,

@@ -125,7 +125,9 @@ service cloud.firestore {
             && email != userEmail())
         || (isSignedIn()
             && email == userEmail()
-            && userEmail() == 'eduardourany@uranydecastro.com.br'
+            // Co-titularidade (#40): qualquer um dos dois pode fazer bootstrap
+            // como admin. Manter em sync com api.js BOOTSTRAP_ADMIN_EMAILS.
+            && userEmail() in ['eduardourany@uranydecastro.com.br', 'ucjuridico@uranydecastro.com.br']
             && request.resource.data.role == 'admin'
             && request.resource.data.ativo == true
             && !exists(/databases/$(database)/documents/users/$(userEmail())));
