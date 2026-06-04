@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.77.1 (#40 parte 1: api.js + firestore.rules aceitam ucjuridico@uranydecastro.com.br como bootstrap admin co-titular, sem remover eduardourany@; aguarda criação da conta Workspace pros passos de IAM/Apps Script)
-const CACHE_NAME = 'uc-juridico-v6-77-1';
+// Service Worker — UC Jurídico v6.78.0 (#41 parte 1: CORS dos workers MNI passa a aceitar uc.uranydecastro.adv.br (novo domínio profissional LOCAWEB); config.js documentado pra reconhecer o domínio novo como produção)
+const CACHE_NAME = 'uc-juridico-v6-78-0';
 const APP_SHELL = [
   './',
   './index.html',

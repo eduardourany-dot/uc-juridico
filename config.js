@@ -6,8 +6,13 @@
 // Ambiente escolhido automaticamente pelo hostname:
 //   - localhost / 127.0.0.1            → staging (banco isolado)
 //   - *.pages.dev                      → staging (Cloudflare Pages = sandbox compartilhável)
-//   - eduardourany-dot.github.io       → produção
+//   - eduardourany-dot.github.io       → produção (legado — GitHub Pages)
+//   - uc.uranydecastro.adv.br          → produção (LOCAWEB — domínio profissional do escritório)
 //   - qualquer URL com ?staging        → força staging (escape hatch)
+//
+// Detecção: lista de "isStaging" abaixo. Qualquer hostname FORA dessa lista
+// (incluindo novos domínios próprios) cai em produção automaticamente, sem
+// edição de código — quem protege os dados são as Security Rules.
 //
 // Banner visual no topo do app indica quando staging está ativo.
 

@@ -13,7 +13,7 @@
 //   Copiar URL gerada (ex: https://uc-mni-tjgo.SEU-USER.workers.dev).
 //
 // Configurar variável de ambiente (Settings → Variables):
-//   ALLOWED_ORIGINS = http://localhost:8000,https://eduardourany-dot.github.io
+//   ALLOWED_ORIGINS = http://localhost:8000,https://uc.uranydecastro.adv.br,https://eduardourany-dot.github.io
 //   (deixa só localhost pra POC — a gente abre depois)
 //
 // Uso (frontend):

@@ -28,7 +28,7 @@ export default async function handler(req) {
   // ALLOWED_ORIGINS configurada via Vercel Dashboard → Environment Variables.
   const env = {
     ALLOWED_ORIGINS: process.env.ALLOWED_ORIGINS
-      || 'https://uc-juridico-sandbox.pages.dev,https://eduardourany-dot.github.io,http://localhost:8000'
+      || 'https://uc.uranydecastro.adv.br,https://uc-juridico-sandbox.pages.dev,https://eduardourany-dot.github.io,http://localhost:8000'
   };
   return handleMniRequest(req, env);
 }

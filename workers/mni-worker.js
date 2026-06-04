@@ -113,7 +113,7 @@
 //   Nome: uc-mni
 //   Colar este arquivo, Save and deploy.
 // Variáveis (Settings → Variables):
-//   ALLOWED_ORIGINS = http://localhost:8000,https://eduardourany-dot.github.io
+//   ALLOWED_ORIGINS = http://localhost:8000,https://uc.uranydecastro.adv.br,https://eduardourany-dot.github.io
 //
 // Endpoints (POST JSON):
 //   { tribunal: "TJGO", operacao: "consultarProcesso", cnj, cpf, senha, debug?, grau? (1|2) }
