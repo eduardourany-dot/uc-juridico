@@ -118,7 +118,13 @@ service cloud.firestore {
     // Bootstrap: o dono do escritório pode se criar como admin se ainda
     // não existir nenhum doc dele.
     match /users/{email} {
-      allow read: if isSignedIn();
+      // Read: admin lê tudo (tela de Acessos lista todos os users);
+      // qualquer outro signedIn lê APENAS o próprio doc (necessário pro
+      // bootstrap de role no checkAllowlistAndProceed). Antes era aberto a
+      // todo signedIn — cliente externo podia listar a allowlist inteira
+      // (e-mails de funcionários, roles) via DevTools, mesmo com requireAdmin_
+      // no client (bypass-able).
+      allow read: if isAdmin() || (isSignedIn() && email == userEmail());
       allow create: if isAdmin()
         || (canWrite()
             && request.resource.data.role == 'cliente'

@@ -9,9 +9,14 @@ Thumbs.db
 
 # ─── Credenciais — NUNCA commitar ────────────────────────────────
 # Service accounts do Google (Firebase Admin, Cloud Functions, etc.)
-**/service-account*.json
-**/firebase-adminsdk-*.json
-**/google-credentials*.json
+# Wildcard nos 2 lados pra cobrir prefixos (ex: staging-service-account.json,
+# dev-firebase-adminsdk.json) — o padrão antigo só com sufixo deixava
+# variantes com prefixo passarem (auditoria #24).
+**/*service-account*.json
+**/*firebase-adminsdk*.json
+**/*google-credentials*.json
+**/*-key.json
+**/*-secret.json
 
 # Certificados ICP-Brasil / TLS / chaves privadas
 *.p12

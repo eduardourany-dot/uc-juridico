@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.79.0 (#27 parte 1: entrada manual rápida de publicação — botão "+ Cadastrar manualmente" na Caixa de Intimações pra registrar intimação quando DJEN falhar ou vier por outro canal (carga, malote))
-const CACHE_NAME = 'uc-juridico-v6-79-0';
+// Service Worker — UC Jurídico v6.79.1 (auditoria de segurança: rule users/ fechada (antes qualquer signedIn lia allowlist inteira, agora só admin OU próprio doc) + .gitignore mais robusto cobrindo prefixos de service-account/firebase-adminsdk)
+const CACHE_NAME = 'uc-juridico-v6-79-1';
 const APP_SHELL = [
   './',
   './index.html',
