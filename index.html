@@ -20990,14 +20990,14 @@ async function djenClassify(publications) {
 // repesquisar não duplica nem reabre intimações já tratadas.
 async function _djenPersistComoNaoTratada(classified) {
   const pubs = [...(classified.matched || []), ...(classified.unmatched || [])];
-  let novas = 0, vinculadas = 0, orfas = 0;
+  let novas = 0, vinculadas = 0, orfas = 0, truncadas = 0, falhas = 0;
   for (const pub of pubs) {
     // Defensivo: re-checa no DB (a classificação pode ter ficado em cache).
     if (await DB.hasDjenPublication(pub.hash)) continue;
     const processId = pub._proc?.id || null;
     const dataDispo = pub.data_disponibilizacao || pub.data_publicacao
       || pub.dataDisponibilizacao || '';
-    await DB.saveDjenPublication({
+    const doc = {
       hash: pub.hash,
       cnj: pub._cnjNormalized || normalizeCnjForCompare(pub.numero_processo || pub.numeroProcesso || ''),
       processId,
@@ -21014,7 +21014,38 @@ async function _djenPersistComoNaoTratada(classified) {
       fetchedAt: Date.now(),
       source: 'djen-busca'
       // SEM cienteEm / responsavel — só vira "tratada" após ciência/prazo
-    });
+    };
+    // Persiste resiliente: Firestore tem limite de 1 MB por doc. Publicações
+    // gigantes (STJ com HTML/tabela cheia) podem estourar. Re-tenta sem `raw`
+    // (cópia bruta da API) e com texto truncado. Se mesmo assim não couber,
+    // pula essa pub (não quebra o lote inteiro).
+    let saved = false;
+    try {
+      await DB.saveDjenPublication(doc);
+      saved = true;
+    } catch (e) {
+      if (/exceeds the maximum allowed size|too large|payload size/i.test(e.message || '')) {
+        console.warn('[DJEN] pub > 1MB — retry sem raw + texto truncado:', pub.hash);
+        const enxuto = { ...doc };
+        delete enxuto.raw;
+        if (enxuto.texto && enxuto.texto.length > 200000) {
+          enxuto.texto = enxuto.texto.slice(0, 200000) + '\n\n[...texto truncado por limite de tamanho do banco — abra a íntegra no diário oficial...]';
+        }
+        try {
+          await DB.saveDjenPublication(enxuto);
+          saved = true;
+          truncadas++;
+        } catch (e2) {
+          console.warn('[DJEN] truncamento insuficiente, pulando pub:', pub.hash, e2.message);
+          falhas++;
+        }
+      } else {
+        // Erro de outro tipo: loga e segue (não quebra o lote).
+        console.warn('[DJEN] falha ao salvar pub:', pub.hash, e.message);
+        falhas++;
+      }
+    }
+    if (!saved) continue;
     novas++;
     if (processId) {
       vinculadas++;
@@ -21022,7 +21053,7 @@ async function _djenPersistComoNaoTratada(classified) {
       if (pub.texto) { try { await djenEnrichProcessFromPublication(processId, pub); } catch (e) { console.warn('[DJEN] enrich falhou', e); } }
     } else orfas++;
   }
-  return { novas, vinculadas, orfas };
+  return { novas, vinculadas, orfas, truncadas, falhas };
 }
 
 // Render the main DJEN modal with results
@@ -22841,7 +22872,7 @@ async function djenRunSearch() {
         'info');
     } else {
       toast('Publicações importadas',
-        `${res.novas} nova(s) na caixa de intimações · ${res.vinculadas} vinculada(s) a processo · ${res.orfas} órfã(s)${jaVistas > 0 ? ` · ${jaVistas} já vista(s)` : ''}`,
+        `${res.novas} nova(s) na caixa de intimações · ${res.vinculadas} vinculada(s) a processo · ${res.orfas} órfã(s)${jaVistas > 0 ? ` · ${jaVistas} já vista(s)` : ''}${res.truncadas > 0 ? ` · ${res.truncadas} truncada(s) (texto longo)` : ''}${res.falhas > 0 ? ` · ${res.falhas} falha(s)` : ''}`,
         'success');
     }
     // Leva pra Publicações (caixa de intimações) pra triar as não tratadas.

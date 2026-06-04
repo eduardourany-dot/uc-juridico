@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.78.0 (#41 parte 1: CORS dos workers MNI passa a aceitar uc.uranydecastro.adv.br (novo domínio profissional LOCAWEB); config.js documentado pra reconhecer o domínio novo como produção)
-const CACHE_NAME = 'uc-juridico-v6-78-0';
+// Service Worker — UC Jurídico v6.78.1 (fix: busca DJEN agora é resiliente a publicações > 1MB (limite do Firestore) — re-tenta sem `raw` + texto truncado, e se falhar pula a pub sem quebrar o lote; toast reporta truncadas/falhas)
+const CACHE_NAME = 'uc-juridico-v6-78-1';
 const APP_SHELL = [
   './',
   './index.html',
