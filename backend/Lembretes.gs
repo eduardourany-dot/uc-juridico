@@ -365,7 +365,7 @@ function _montarEmailLembrete(marco, prazo, processo) {
   const dl = (typeof prazo.deadlineDate === 'string')
     ? prazo.deadlineDate.slice(0,10)
     : new Date(prazo.deadlineDate).toISOString().slice(0,10);
-  const url = 'https://eduardourany-dot.github.io/uc-juridico/#process/' + processo._docId;
+  const url = 'https://uc.uranydecastro.adv.br/#process/' + processo._docId;
 
   const titulo = labels[marco] || marco;
   const cor = cores[marco] || '#6b6b68';
@@ -555,7 +555,7 @@ function cron_lembretesDePrazo() {
           const title = MARCO_LABELS[marco] || ('Prazo ' + marco);
           const body = (d.description || d.type || 'Prazo') + ' · vence ' +
             (typeof d.deadlineDate === 'string' ? d.deadlineDate.slice(0,10) : new Date(d.deadlineDate).toISOString().slice(0,10));
-          const url = 'https://eduardourany-dot.github.io/uc-juridico/#process/' + proc._docId;
+          const url = 'https://uc.uranydecastro.adv.br/#process/' + proc._docId;
           const requireInteraction = ['T-1','T-0','T+1'].indexOf(marco) >= 0 ? 'true' : 'false';
           const r = enviarFcmPush(tokenInfo.token, title, body, {
             tag: 'prazo-' + d._docId + '-' + marco,
@@ -734,7 +734,7 @@ function _montarEmailParcela(marco, honorario, parcela, processosCobertos) {
         <tr><td style="padding: 6px 0; color: #6b6b68;">Processo(s):</td><td style="padding: 6px 0; font-size: 12px;">${_escapeEmail(procsLabel)}</td></tr>
         ${honorario.observacoes ? `<tr><td style="padding: 6px 0; color: #6b6b68; vertical-align: top;">Obs:</td><td style="padding: 6px 0; color: #6b6b68; font-size: 12px;">${_escapeEmail(honorario.observacoes)}</td></tr>` : ''}
       </table>
-      <a href="https://eduardourany-dot.github.io/uc-juridico/#cliente/${_escapeEmail(honorario.clienteId || '')}" style="display: inline-block; background: #8a6f3d; color: white; padding: 12px 24px; text-decoration: none; border-radius: 4px; font-weight: 600; font-size: 14px;">Abrir cliente no UC Jurídico →</a>
+      <a href="https://uc.uranydecastro.adv.br/#cliente/${_escapeEmail(honorario.clienteId || '')}" style="display: inline-block; background: #8a6f3d; color: white; padding: 12px 24px; text-decoration: none; border-radius: 4px; font-weight: 600; font-size: 14px;">Abrir cliente no UC Jurídico →</a>
       <p style="color: #6b6b68; font-size: 12px; margin-top: 28px; padding-top: 16px; border-top: 1px solid #e8e3d4;">
         Lembrete automático sobre parcela de honorário. Confirme o pagamento ou marque a parcela como paga no app pra parar de receber este lembrete.
       </p>
@@ -827,7 +827,7 @@ function cron_lembretesDeParcelas() {
             const title = PARCELA_MARCO_LABELS[marco] || ('Parcela ' + marco);
             const body = (h.clienteNome || '—') + ' · parcela ' + parc.numero + '/' + parcelas.length +
               ' · R$ ' + Number(parc.valor || 0).toFixed(2).replace('.', ',');
-            const url = 'https://eduardourany-dot.github.io/uc-juridico/#cliente/' + (h.clienteId || '');
+            const url = 'https://uc.uranydecastro.adv.br/#cliente/' + (h.clienteId || '');
             const requireInteraction = ['T-1','T-0','T+1'].indexOf(marco) >= 0 ? 'true' : 'false';
             const r = enviarFcmPush(tokenInfo.token, title, body, {
               tag: 'parcela-' + h.id + '-' + parc.numero + '-' + marco,
@@ -1005,7 +1005,7 @@ function _montarEmailCompromisso(marco, c, proc, cli) {
         ${proc ? `<tr><td style="padding: 6px 0; color: #6b6b68;">Processo:</td><td style="padding: 6px 0; font-size: 12px;">${_escapeEmail((proc.cnj || proc.name || '—'))}</td></tr>` : ''}
         ${c.observacoes ? `<tr><td style="padding: 6px 0; color: #6b6b68; vertical-align: top;">Obs:</td><td style="padding: 6px 0; color: #6b6b68; font-size: 12px; white-space: pre-wrap;">${_escapeEmail(c.observacoes)}</td></tr>` : ''}
       </table>
-      <a href="https://eduardourany-dot.github.io/uc-juridico/#agenda" style="display: inline-block; background: #8a6f3d; color: white; padding: 12px 24px; text-decoration: none; border-radius: 4px; font-weight: 600; font-size: 14px;">Abrir Agenda no UC Jurídico →</a>
+      <a href="https://uc.uranydecastro.adv.br/#agenda" style="display: inline-block; background: #8a6f3d; color: white; padding: 12px 24px; text-decoration: none; border-radius: 4px; font-weight: 600; font-size: 14px;">Abrir Agenda no UC Jurídico →</a>
       <p style="color: #6b6b68; font-size: 12px; margin-top: 28px; padding-top: 16px; border-top: 1px solid #e8e3d4;">
         Lembrete automático de compromisso. Marque como realizado, cancelado ou adiado no app pra parar de receber este lembrete.
       </p>
@@ -1105,7 +1105,7 @@ function cron_lembretesDeCompromissos() {
           const tipoLabel = COMPROMISSO_TIPO_LABELS[c.tipo] || 'Compromisso';
           const titReal = c.titulo || tipoLabel;
           const body = titReal + ' · ' + horaFmt + (c.local ? ' · ' + c.local : '');
-          const url = 'https://eduardourany-dot.github.io/uc-juridico/#agenda';
+          const url = 'https://uc.uranydecastro.adv.br/#agenda';
           const r = enviarFcmPush(tokenInfo.token, title, body, {
             tag: 'compromisso-' + c._docId + '-' + marco,
             url: url,
@@ -1337,7 +1337,7 @@ function _testarFcmEnvio() {
     return;
   }
   const r = enviarFcmPush(token, '🧪 Teste UC Jurídico', 'Push de teste do backend', {
-    url: 'https://eduardourany-dot.github.io/uc-juridico/'
+    url: 'https://uc.uranydecastro.adv.br/'
   });
   Logger.log(JSON.stringify(r, null, 2));
 }
