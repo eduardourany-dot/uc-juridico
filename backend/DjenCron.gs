@@ -340,13 +340,18 @@ function djenAutoCheckCron(opts) {
 
   // ---- 7. Atualiza state -------------------------------------------
   if (!dryRun) {
+    // lastPubAt = "última vez que o cron capturou pub nova". Só atualiza se
+    // efetivamente houve captura — preserva valor antigo caso contrário, pra
+    // o dead-man's switch detectar janelas longas de silêncio (#27 parte 2).
+    var update = {
+      lastRun: tNow,
+      lastDataFim: fim,
+      lastNovas: novasVinculadas,
+      lastOrfas: novasOrfas
+    };
+    if ((novasVinculadas + novasOrfas) > 0) update.lastPubAt = tNow;
     _firestoreSet('settings/djenCron', {
-      value: Object.assign({}, cfg, {
-        lastRun: tNow,
-        lastDataFim: fim,
-        lastNovas: novasVinculadas,
-        lastOrfas: novasOrfas
-      }),
+      value: Object.assign({}, cfg, update),
       updatedAt: tNow
     });
   }

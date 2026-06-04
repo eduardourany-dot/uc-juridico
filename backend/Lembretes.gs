@@ -1223,6 +1223,68 @@ function _gravarHeartbeatLembretes(resumo) {
   }
 }
 
+// Vigia se a captura DJEN está PRODUTIVA — não basta o cron estar vivo, ele
+// precisa estar trazendo pubs (#27 parte 2: alerta de silêncio). Se a última
+// pub capturada (settings/djenCron.lastPubAt) for mais antiga que ALERT_SILENCIO_DIAS
+// E o cron está rodando normal (heartbeat OK) → alerta. Detecta:
+//   - DJEN API caiu silenciosamente (sem erro, mas vazio)
+//   - Bug no proxy Cloudflare retornando vazio
+//   - Geo-bloqueio CloudFront sem erro visível
+//   - Cron rodando mas filtros errados (todas as OABs desativadas, etc.)
+// Falso positivo aceitável: férias forenses longas. Tunar threshold se incomodar.
+const ALERT_SILENCIO_DIAS = 7;
+function _vigiarCapturaDjen() {
+  try {
+    const agora = Date.now();
+    const doc = _firestoreGet('settings/djenCron');
+    if (!doc || !doc.value) return;
+    const v = doc.value;
+    const lastRun = v.lastRun || 0;
+    const lastPubAt = v.lastPubAt || 0;
+    // Grace period: se cron não rodou ainda, ou rodou há pouco (sistema novo)
+    // → _vigiarCronDjen cuida da parte "cron parado". Aqui não alerta.
+    if (!lastRun) return;
+    const limiteMs = ALERT_SILENCIO_DIAS * 24 * 60 * 60 * 1000;
+    // Se nunca capturou pub MAS o cron está vivo há mais do que o threshold,
+    // alerta. (lastPubAt==0 = nunca capturou no histórico desta versão.)
+    if (lastPubAt && (agora - lastPubAt) < limiteMs) return;
+    // Se o cron está parado, deixa o _vigiarCronDjen alertar (alerta dele é
+    // mais específico — "cron parado" é causa raiz, "captura zero" é sintoma).
+    if (_cronEstaStale(lastRun, agora)) return;
+    // Anti-spam (chave separada do alerta do cron parado)
+    const alertDoc = _firestoreGet('settings/cronAlertas');
+    const alertVal = (alertDoc && alertDoc.value) || {};
+    if (agora - (alertVal.capturaLastAlert || 0) < CRON_ALERT_COOLDOWN_MS) return;
+
+    const diasSemPub = lastPubAt ? Math.round((agora - lastPubAt) / (24 * 60 * 60 * 1000)) : null;
+    const ultimaPub = lastPubAt ? new Date(lastPubAt).toLocaleString('pt-BR') : 'nunca registrada';
+    const ultimoRun = new Date(lastRun).toLocaleString('pt-BR');
+    const html = '<div style="font-family:Arial,sans-serif;max-width:560px">' +
+      '<h2 style="color:#b87f1c;margin:0 0 8px">&#9888; UC Jur&iacute;dico — DJEN sem captura</h2>' +
+      '<p>O cron DJEN <b>est&aacute; rodando normalmente</b> ' +
+      '(&uacute;ltima execu&ccedil;&atilde;o: ' + ultimoRun + '), ' +
+      'mas <b>n&atilde;o trouxe nenhuma publica&ccedil;&atilde;o nova</b> ' +
+      (diasSemPub != null ? ('h&aacute; ' + diasSemPub + ' dias (&uacute;ltima pub capturada: ' + ultimaPub + ').') : 'desde a instala&ccedil;&atilde;o do monitor.') + '</p>' +
+      '<p><b>Causas poss&iacute;veis:</b></p>' +
+      '<ul style="margin:6px 0 12px 18px;padding:0">' +
+      '<li>API do CNJ (comunicaapi) com problema silencioso ou geo-bloqueio</li>' +
+      '<li>Proxy Cloudflare retornando vazio</li>' +
+      '<li>Todas as OABs desativadas em Configura&ccedil;&otilde;es &rarr; DJEN</li>' +
+      '<li>F&eacute;rias forenses prolongadas (falso positivo)</li>' +
+      '</ul>' +
+      '<p><b>O que fazer:</b> abrir o UC Jur&iacute;dico &rarr; Publica&ccedil;&otilde;es &rarr; bot&atilde;o "&#128276; Pesquisar agora" pra confirmar manualmente se h&aacute; pubs vindo. ' +
+      'Se nada vier, contatar o admin pra investigar o proxy/API.</p>' +
+      '<p style="color:#888;font-size:12px;margin-top:16px">Alerta autom&aacute;tico do dead-man\'s switch &middot; UC Jur&iacute;dico</p></div>';
+    enviarEmail(CRON_ALERT_EMAIL, "⚠ UC Jurídico — DJEN sem captura há " + (diasSemPub || '?') + " dias", html);
+
+    alertVal.capturaLastAlert = agora;
+    _firestoreUpdate('settings/cronAlertas', { value: alertVal, updatedAt: agora });
+    Logger.log('[deadman] ALERTA captura DJEN parada enviado (lastPubAt=' + ultimaPub + ')');
+  } catch (e) {
+    Logger.log('[deadman] vigiar captura DJEN falhou: ' + e.message);
+  }
+}
+
 // Vigia o cron do DJEN. Se stale, manda e-mail de alerta (com cooldown).
 function _vigiarCronDjen() {
   try {
@@ -1278,11 +1340,13 @@ function cron_lembretesUnificado() {
   try { resCompromissos = cron_lembretesDeCompromissos(); }
   catch (e) { Logger.log('cron_lembretesDeCompromissos erro: ' + e.message); }
 
-  // Dead-man's switch: registra que ESTE cron rodou + vigia o cron do DJEN.
+  // Dead-man's switch: registra que ESTE cron rodou + vigia o cron do DJEN
+  // (parado) + vigia a captura DJEN (rodando mas sem trazer pub — #27 parte 2).
   _gravarHeartbeatLembretes(JSON.stringify({
     prazos: resPrazos, parcelas: resParcelas, compromissos: resCompromissos
   }));
   _vigiarCronDjen();
+  _vigiarCapturaDjen();
 
   Logger.log('=== cron_lembretesUnificado concluído ===');
   return { prazos: resPrazos, parcelas: resParcelas, compromissos: resCompromissos };
