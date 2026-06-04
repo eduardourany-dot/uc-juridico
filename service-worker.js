@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.78.1 (fix: busca DJEN agora é resiliente a publicações > 1MB (limite do Firestore) — re-tenta sem `raw` + texto truncado, e se falhar pula a pub sem quebrar o lote; toast reporta truncadas/falhas)
-const CACHE_NAME = 'uc-juridico-v6-78-1';
+// Service Worker — UC Jurídico v6.79.0 (#27 parte 1: entrada manual rápida de publicação — botão "+ Cadastrar manualmente" na Caixa de Intimações pra registrar intimação quando DJEN falhar ou vier por outro canal (carga, malote))
+const CACHE_NAME = 'uc-juridico-v6-79-0';
 const APP_SHELL = [
   './',
   './index.html',

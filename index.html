@@ -21940,7 +21940,10 @@ function _secaoIntimacoesHtml(todas, procById, hashesComPrazo) {
 
   return `
     <div class="card mb-3" style="padding:12px;">
-      <h3 class="font-serif font-semibold smallcaps mb-2" style="color: var(--uc-black);">📬 Caixa de intimações</h3>
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:6px;">
+        <h3 class="font-serif font-semibold smallcaps" style="color: var(--uc-black);margin:0;">📬 Caixa de intimações</h3>
+        <button class="btn btn-outline btn-sm" onclick="_intimacaoCadastrarManualFlow()" title="Cadastrar publicação manualmente — usar quando o DJEN falhar, ou pra intimação que veio por carga/malote/outro canal">+ Cadastrar manualmente</button>
+      </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
         ${chip('pendentes', 'Não tratadas', cNaoTratadas, 'var(--uc-amber)')}
         ${chip('tratadas', 'Tratadas (' + cTratadasHoje + ' hoje)', totalCientes, 'var(--uc-green)')}
@@ -22190,6 +22193,85 @@ async function _intimacaoAgendarPrazo(hash) {
 // existente — pós-importação (#39). Útil quando o processo foi cadastrado
 // depois da publicação chegar, ou quando o CNJ não casou automaticamente.
 // Pré-seleciona um processo com o MESMO CNJ se existir.
+// #27 — entrada manual rápida: rede de segurança quando o DJEN falha, ou pra
+// registrar intimação vinda por outro canal (carga, malote, comunicação interna).
+// Auto-vincula ao processo se o CNJ bater; senão entra como órfã (vincula
+// depois pelo botão "🔗 Vincular a processo" #39).
+async function _intimacaoCadastrarManualFlow() {
+  const processos = await DB.getAllProcesses();
+  const hoje = new Date().toISOString().slice(0, 10);
+  const r = await showModal('Cadastrar publicação manualmente', [
+    { label: 'CNJ do processo (obrigatório)', name: 'cnj', placeholder: '0000000-00.0000.0.00.0000' },
+    { label: 'Tribunal (obrigatório)', name: 'tribunal', placeholder: 'TJGO, TJDFT, TRT10, STJ…' },
+    { label: 'Órgão / Vara', name: 'orgao', placeholder: '11ª Vara Cível de Goiânia' },
+    { label: 'Data de disponibilização (obrigatório)', name: 'dataDispo', type: 'date', default: hoje },
+    { label: 'Tipo', name: 'tipo', type: 'select', default: 'Intimação',
+      options: [
+        { value: 'Intimação', label: 'Intimação' },
+        { value: 'Citação', label: 'Citação' },
+        { value: 'Notificação', label: 'Notificação' },
+        { value: 'Decisão', label: 'Decisão' },
+        { value: 'Sentença', label: 'Sentença' },
+        { value: 'Despacho', label: 'Despacho' },
+        { value: 'Acórdão', label: 'Acórdão' },
+        { value: 'Outros', label: 'Outros' }
+      ] },
+    { label: 'Texto / resumo da publicação', name: 'texto', type: 'textarea', rows: 5,
+      placeholder: 'Cole o texto da publicação ou um resumo do que ela trata.' },
+    { label: 'Link (opcional)', name: 'link', placeholder: 'URL do diário oficial, se tiver' }
+  ], {
+    confirmLabel: 'Cadastrar',
+    intro: 'Use esta entrada manual quando o DJEN falhar ou quando a intimação vier por outro canal (carga, malote, comunicação interna). A publicação entra na caixa como "não tratada" — você decide ciência e prazo depois.'
+  });
+  if (!r) return;
+  const [cnj, tribunal, orgao, dataDispo, tipo, texto, link] = r;
+  if (!cnj || !cnj.trim()) { toast('CNJ é obrigatório', '', 'error'); return; }
+  if (!tribunal || !tribunal.trim()) { toast('Tribunal é obrigatório', '', 'error'); return; }
+  if (!dataDispo) { toast('Data de disponibilização é obrigatória', '', 'error'); return; }
+
+  // Auto-vincula a processo se o CNJ bater
+  const cnjNorm = normalizeCnjForCompare(cnj);
+  const proc = processos.find(p => normalizeCnjForCompare(p.cnj) === cnjNorm);
+  const processId = proc ? proc.id : null;
+
+  // Hash artificial (não vem da API DJEN): prefixo 'manual_' + timestamp + uid
+  const hash = 'manual_' + Date.now().toString(36) + '_' + uid().slice(0, 8);
+  const me = (window.UC_Auth?.getUser?.() || {}).email || '';
+
+  await DB.saveDjenPublication({
+    hash,
+    cnj: cnjNorm,
+    processId,
+    matched: !!processId,
+    tribunal: tribunal.trim().toUpperCase(),
+    orgao: (orgao || '').trim(),
+    tipo: tipo || 'Intimação',
+    dataDisponibilizacao: dataDispo,
+    texto: (texto || '').trim(),
+    link: (link || '').trim(),
+    oab: {},
+    raw: { source: 'manual', cadastradoPor: me, cadastradoEm: Date.now() },
+    status: 'pending',           // entra como "não tratada"
+    fetchedAt: Date.now(),
+    source: 'manual',
+    cadastradoManualmente: true,
+    cadastradoPor: me
+  });
+
+  // Enriquece o processo se vinculou (partes/advogados do texto)
+  if (processId && texto) {
+    try { await djenEnrichProcessFromPublication(processId, { texto }); }
+    catch (e) { console.warn('[manual] enrich falhou', e); }
+  }
+
+  toast('Publicação cadastrada',
+    proc ? `Vinculada ao processo ${proc.cnj || proc.name || ''}` : 'Entrou como órfã — você pode vincular depois via "🔗 Vincular a processo".',
+    'success');
+  if (state.currentRoute === 'deadlines') renderDeadlines();
+  else if (state.currentRoute === 'process') renderProcessDetail();
+  _atualizarBadgePublicacoes().catch(() => {});
+}
+
 async function _intimacaoVincularProcesso(hash) {
   const [todas, processos] = await Promise.all([
     DB.getAllDjenPublications(), DB.getAllProcesses()
