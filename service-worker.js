@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.81.0 (#31: botão "📤 Protocolar" volta no detalhe do processo, MAS só pra tribunais validados em sistemas PJe/Projudi/e-SAJ — e-Proc/eSTF/eSTJ ficam de fora (MNI não viável). Cobre TJGO (Projudi) + ~9 PJe/e-SAJ validados)
-const CACHE_NAME = 'uc-juridico-v6-81-0';
+// Service Worker — UC Jurídico v6.81.1 (#31 fix: gate do botão Protocolar agora usa parser de CNJ como fallback quando o campo court está vazio ou genérico — antes processos cadastrados só com CNJ resolviam pra "NACIONAL" e o botão sumia mesmo em TJGO)
+const CACHE_NAME = 'uc-juridico-v6-81-1';
 const APP_SHELL = [
   './',
   './index.html',

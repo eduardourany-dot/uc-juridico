@@ -3872,7 +3872,7 @@ async function renderProcessDetail() {
         ${_isClienteMode() ? '' : `<button class="btn btn-secondary btn-sm" onclick="generateProcessFiche()">Gerar ficha</button>`}
         ${_isClienteMode() ? '' : `<button class="btn btn-secondary btn-sm" onclick="setProcessTab('analysis')" title="Abre análise IA do processo">🧠 Análise IA</button>`}
         ${_isClienteMode() ? '' : `<button class="btn btn-primary btn-sm" onclick="gerarPeticaoEscolhaFlow()" title="Gerar petição — escolha entre modelo cadastrado ou geração via IA">📝 Gerar petição</button>`}
-        ${(!_isClienteMode() && p.cnj && _mniSuportaProtocolar(inferirTribunal(p.court || p.cnj || ''))) ? `<button class="btn btn-primary btn-sm" onclick="mniProtocolarFlow('${p.id}')" title="Protocolar petição/manifestação direto no tribunal via SOAP/MNI — disponível pra tribunais validados (PJe / Projudi / e-SAJ)" style="background:linear-gradient(135deg,#b87f1c 0%,#c9a14c 100%);">📤 Protocolar</button>` : ''}
+        ${(!_isClienteMode() && p.cnj && _mniSuportaProtocolar(_tribunalDoProcesso(p))) ? `<button class="btn btn-primary btn-sm" onclick="mniProtocolarFlow('${p.id}')" title="Protocolar petição/manifestação direto no tribunal via SOAP/MNI — disponível pra tribunais validados (PJe / Projudi / e-SAJ)" style="background:linear-gradient(135deg,#b87f1c 0%,#c9a14c 100%);">📤 Protocolar</button>` : ''}
       </div>
     </div>
 
@@ -18438,6 +18438,46 @@ const MNI_TRIBUNAIS_FALLBACK = {
 // Conservador a propósito: melhor esconder o botão do que mostrar e ele
 // quebrar no SOAP.
 const _MNI_SISTEMAS_PROTOCOLAVEIS = new Set(['pje', 'projudi', 'esaj']);
+
+// Parser do CNJ → código do tribunal (TJGO, TRT18, TRF1, etc.). Necessário
+// porque inferirTribunal(court) só lê o texto do campo court — se o processo
+// foi cadastrado só com CNJ (sem nome do tribunal no court), inferirTribunal
+// devolve 'NACIONAL' e o gate fecha o botão por engano.
+// CNJ tem 20 dígitos: NNNNNNN DD AAAA J TR OOOO
+//   J  = justiça (1=STF, 3=STJ, 4=Federal/TRF, 5=Trabalho/TST/TRT, 8=Estadual/TJ)
+//   TR = região/tribunal
+const _CNJ_TJ_MAP = {
+  '01':'TJAC','02':'TJAL','03':'TJAP','04':'TJAM','05':'TJBA',
+  '06':'TJCE','07':'TJDF','08':'TJES','09':'TJGO','10':'TJMA',
+  '11':'TJMT','12':'TJMS','13':'TJMG','14':'TJPA','15':'TJPB',
+  '16':'TJPR','17':'TJPE','18':'TJPI','19':'TJRJ','20':'TJRN',
+  '21':'TJRS','22':'TJRO','23':'TJRR','24':'TJSC','25':'TJSE',
+  '26':'TJSP','27':'TJTO'
+};
+function _inferirTribunalDoCnj(cnj) {
+  const d = String(cnj || '').replace(/\D/g, '');
+  if (d.length !== 20) return '';
+  const j  = d.charAt(13);
+  const tr = d.substr(14, 2);
+  if (j === '1') return 'STF';
+  if (j === '3') return 'STJ';
+  if (j === '4') return 'TRF' + parseInt(tr, 10);
+  if (j === '5') return tr === '00' ? 'TST' : 'TRT' + parseInt(tr, 10);
+  if (j === '8') return _CNJ_TJ_MAP[tr] || '';
+  return '';
+}
+
+// Combina court (nome textual) + CNJ (parser determinístico). Usa o que
+// resolver primeiro; o parser de CNJ é mais confiável quando o court está
+// vazio ou genérico (ex: "VARA DO TRABALHO" sem mencionar TRTxx).
+function _tribunalDoProcesso(p) {
+  if (!p) return 'NACIONAL';
+  let t = inferirTribunal(p.court || '');
+  if (t && t !== 'NACIONAL') return t;
+  const tCnj = _inferirTribunalDoCnj(p.cnj || '');
+  return tCnj || 'NACIONAL';
+}
+
 function _mniSuportaProtocolar(codigoTribunal) {
   if (!codigoTribunal) return false;
   const registro = (typeof state !== 'undefined' && state._mniCache?.tribunais) || MNI_TRIBUNAIS_FALLBACK;
