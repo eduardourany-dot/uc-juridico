@@ -1223,6 +1223,163 @@ function applyTheme(theme) {
 // === PAGE: DASHBOARD ================================================
 // ====================================================================
 
+// #30 — Torre de Prazos: visão consolidada do escritório
+// Calcula contadores por janela de urgência (perdidos, vencidos, hoje,
+// amanhã, 2-3 dias, 4-7 dias) e por advogado. Retorna estrutura usada
+// pelo _torreRenderHTML.
+function _torreCalcular(deadlines, processes, today, djenPubs) {
+  const procsById = {};
+  processes.forEach(p => { procsById[p.id] = p; });
+  const t = today.getTime();
+  const amanhaT = t + 86400000;
+
+  // Janelas vazias
+  const win = {
+    perdidos: { count: 0, label: 'Perdidos', cor: 'var(--uc-red)', icone: '✗' },
+    vencidos: { count: 0, label: 'Vencidos', cor: 'var(--uc-red)', icone: '⚠' },
+    hoje:     { count: 0, label: 'Hoje',     cor: 'var(--uc-red)', icone: '🚨' },
+    amanha:   { count: 0, label: 'Amanhã',   cor: 'var(--uc-amber)', icone: '⏰' },
+    em2a3:    { count: 0, label: '2-3 dias', cor: 'var(--uc-amber)', icone: '📅' },
+    em4a7:    { count: 0, label: '4-7 dias', cor: 'var(--uc-green)', icone: '📅' }
+  };
+
+  // Por advogado (titular do processo do prazo) — mesma estrutura
+  const advMap = {};
+  const _zerar = () => ({ perdidos: 0, vencidos: 0, hoje: 0, amanha: 0, em2a3: 0, em4a7: 0, total: 0 });
+
+  for (const d of (deadlines || [])) {
+    if (!d) continue;
+    const proc = d.processId ? procsById[d.processId] : null;
+    const adv = (proc?.advogadoResponsavel || 'Sem titular').trim() || 'Sem titular';
+    // PERDIDOS: status terminal mas ainda não reconhecido
+    if (d.status === STATUS_PRAZO.PERDIDO && !d.perdidoCienteEm) {
+      win.perdidos.count++;
+      advMap[adv] = advMap[adv] || _zerar();
+      advMap[adv].perdidos++;
+      advMap[adv].total++;
+      continue;
+    }
+    // Pra próximas janelas, considera só ativo
+    if (prazoEstaResolvido(d)) continue;
+    if (!d.deadlineDate) continue;
+    const dl = new Date(d.deadlineDate); dl.setHours(0, 0, 0, 0);
+    const days = Math.round((dl.getTime() - t) / 86400000);
+    let bucket = null;
+    if (days < 0) bucket = 'vencidos';
+    else if (days === 0) bucket = 'hoje';
+    else if (days === 1) bucket = 'amanha';
+    else if (days >= 2 && days <= 3) bucket = 'em2a3';
+    else if (days >= 4 && days <= 7) bucket = 'em4a7';
+    if (!bucket) continue;
+    win[bucket].count++;
+    advMap[adv] = advMap[adv] || _zerar();
+    advMap[adv][bucket]++;
+    advMap[adv].total++;
+  }
+
+  // Lista de advogados ordenada por total desc
+  const advogados = Object.keys(advMap).map(nome => ({ nome, ...advMap[nome] }))
+    .sort((a, b) => b.total - a.total);
+
+  // Caixa de intimações pendentes
+  const intimacoesPend = (djenPubs || []).filter(p => p.status === 'pending' && !p.cienteEm).length;
+
+  const totalUrgenteEscritorio = win.perdidos.count + win.vencidos.count + win.hoje.count
+                                + win.amanha.count + win.em2a3.count + win.em4a7.count;
+  return { win, advogados, intimacoesPend, totalUrgenteEscritorio };
+}
+
+// HTML da Torre. isAdmin → mostra matriz por advogado completa.
+function _torreRenderHTML(torre, isAdmin, meuNome) {
+  const w = torre.win;
+  // Bloco "contador grande" reutilizável
+  const blocoContador = (key) => `
+    <button onclick="navigate('deadlines')" title="${escapeHtml(w[key].label)} — abrir Publicações"
+            style="flex:1;min-width:108px;cursor:pointer;border:1px solid var(--uc-line);
+                   background:${w[key].count > 0 ? 'rgba(168,71,45,0.04)' : '#fff'};
+                   border-left:3px solid ${w[key].cor};border-radius:6px;padding:10px 12px;text-align:left;">
+      <div style="display:flex;align-items:baseline;gap:6px;">
+        <span style="font-size:24px;font-weight:700;color:${w[key].cor};">${w[key].count}</span>
+        <span style="font-size:12px;color:var(--uc-warm-gray);">${w[key].icone}</span>
+      </div>
+      <div style="font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--uc-warm-gray);font-weight:600;margin-top:2px;">${escapeHtml(w[key].label)}</div>
+    </button>`;
+
+  // Linha da matriz por advogado
+  const linhaAdv = (a) => {
+    const eu = meuNome && a.nome === meuNome;
+    const _cel = (n, urgente) => `<td style="text-align:center;padding:6px 8px;${n > 0 && urgente ? 'color:var(--uc-red);font-weight:700;' : 'color:var(--uc-graphite);'}">${n}</td>`;
+    return `
+      <tr style="border-bottom:1px solid var(--uc-line-soft);${eu ? 'background:var(--uc-cream);' : ''}">
+        <td style="padding:6px 10px;font-size:12px;">
+          <strong style="color:var(--uc-black);">${escapeHtml(a.nome)}</strong>${eu ? ' <span class="badge" style="font-size:9px;background:var(--uc-gold);color:#fff;">você</span>' : ''}
+        </td>
+        ${_cel(a.perdidos, true)}
+        ${_cel(a.vencidos, true)}
+        ${_cel(a.hoje, true)}
+        ${_cel(a.amanha, a.amanha > 0)}
+        ${_cel(a.em2a3, false)}
+        ${_cel(a.em4a7, false)}
+        <td style="text-align:center;padding:6px 8px;font-weight:600;color:var(--uc-black);">${a.total}</td>
+      </tr>`;
+  };
+
+  return `
+    <div class="card mb-6" style="padding:14px;border-left:3px solid var(--uc-gold);">
+      <div class="flex justify-between items-center mb-3" style="flex-wrap:wrap;gap:8px;">
+        <h2 class="font-serif text-lg font-semibold smallcaps" style="color:var(--uc-black);margin:0;">
+          🏰 Torre de prazos${isAdmin ? ' · escritório' : ''}
+          ${torre.totalUrgenteEscritorio > 0 ? `<span class="badge badge-amber" style="font-size:10px;margin-left:8px;">${torre.totalUrgenteEscritorio} em janela</span>` : '<span class="badge badge-green" style="font-size:10px;margin-left:8px;">tudo em dia</span>'}
+        </h2>
+        <div class="flex gap-2" style="flex-wrap:wrap;">
+          <button class="btn btn-secondary btn-sm" onclick="djenRunSearch()" title="Buscar publicações novas no DJEN">🔔 Pesquisar DJ</button>
+          <button class="btn btn-outline btn-sm" onclick="_intimacaoCadastrarManualFlow()" title="Cadastrar publicação manualmente">+ Pub. manual</button>
+        </div>
+      </div>
+
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">
+        ${blocoContador('perdidos')}
+        ${blocoContador('vencidos')}
+        ${blocoContador('hoje')}
+        ${blocoContador('amanha')}
+        ${blocoContador('em2a3')}
+        ${blocoContador('em4a7')}
+      </div>
+
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 10px;background:var(--uc-cream);border-radius:6px;flex-wrap:wrap;cursor:pointer;" onclick="navigate('deadlines')" title="Abrir Publicações">
+        <div style="font-size:13px;">
+          📬 <strong style="color:var(--uc-black);">Caixa de intimações:</strong>
+          <span style="color:${torre.intimacoesPend > 0 ? 'var(--uc-amber)' : 'var(--uc-green)'};font-weight:600;">${torre.intimacoesPend}</span>
+          <span style="color:var(--uc-warm-gray);">pendentes de ciência</span>
+        </div>
+        <span style="color:var(--uc-gold);font-size:12px;">Abrir →</span>
+      </div>
+
+      ${(isAdmin && torre.advogados.length > 0) ? `
+        <div style="margin-top:14px;overflow-x:auto;">
+          <table style="width:100%;border-collapse:collapse;font-size:12px;">
+            <thead>
+              <tr style="background:var(--uc-paper-warm,#f5f3ec);border-bottom:1px solid var(--uc-line);">
+                <th style="text-align:left;padding:8px 10px;color:var(--uc-warm-gray);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.04em;">Por titular</th>
+                <th style="text-align:center;padding:8px 6px;color:var(--uc-red);font-weight:600;font-size:11px;text-transform:uppercase;">Perd</th>
+                <th style="text-align:center;padding:8px 6px;color:var(--uc-red);font-weight:600;font-size:11px;text-transform:uppercase;">Venc</th>
+                <th style="text-align:center;padding:8px 6px;color:var(--uc-red);font-weight:600;font-size:11px;text-transform:uppercase;">Hoje</th>
+                <th style="text-align:center;padding:8px 6px;color:var(--uc-amber);font-weight:600;font-size:11px;text-transform:uppercase;">Amnh</th>
+                <th style="text-align:center;padding:8px 6px;color:var(--uc-warm-gray);font-weight:600;font-size:11px;text-transform:uppercase;">2-3d</th>
+                <th style="text-align:center;padding:8px 6px;color:var(--uc-warm-gray);font-weight:600;font-size:11px;text-transform:uppercase;">4-7d</th>
+                <th style="text-align:center;padding:8px 6px;color:var(--uc-black);font-weight:600;font-size:11px;text-transform:uppercase;">Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${torre.advogados.map(linhaAdv).join('')}
+            </tbody>
+          </table>
+        </div>
+      ` : ''}
+    </div>
+  `;
+}
+
 async function renderDashboard() {
   const processes = await DB.getAllProcesses();
   const deadlines = await DB.getAllDeadlines();
@@ -1232,6 +1389,9 @@ async function renderDashboard() {
   try { comunicacoesAll = DB.getAllComunicacoes ? await DB.getAllComunicacoes() : []; } catch (e) { /* ok */ }
   let honorariosAll = [];
   try { honorariosAll = await DB.getAllHonorarios(); } catch (e) { /* ok */ }
+  // #30 Torre de prazos: precisa das pubs DJEN pra contar intimações pendentes.
+  let djenPubsAll = [];
+  try { djenPubsAll = await DB.getAllDjenPublications(); } catch (e) { /* ok */ }
   const activeDeadlines = deadlines.filter(d => prazoEstaAtivo(d));
   const today = new Date(); today.setHours(0,0,0,0);
   const urgentDeadlines = activeDeadlines.filter(d => {
@@ -1322,6 +1482,17 @@ async function renderDashboard() {
   const totalTarefas = prazosVencidos.length + prazosHoje.length + prazosAmanha.length
     + compsHoje.length + compsAmanha.length + followUpsVencidos.length + parcelasProximas.length;
 
+  // #30 Torre de prazos — visão consolidada (não-cliente). Admin/sócio vê
+  // matriz por advogado; advogado individual vê só os contadores agregados.
+  const _meRole = window.UC_Auth?.getUser?.()?.role;
+  const _souAdmin = _meRole === 'admin';
+  const _verTorre = !_isClienteMode();
+  let _torreHTML = '';
+  if (_verTorre) {
+    const torre = _torreCalcular(deadlines, processes, today, djenPubsAll);
+    _torreHTML = _torreRenderHTML(torre, _souAdmin, meuNome);
+  }
+
   $('appContent').innerHTML = `
     <div class="page-header">
       <div>
@@ -1340,6 +1511,8 @@ async function renderDashboard() {
         <button class="btn btn-secondary btn-sm" onclick="exportBackup()">Fazer backup</button>
       </div>
     ` : ''}
+
+    ${_torreHTML}
 
     ${(meuNome && !_isClienteMode()) ? `
       <div class="card mb-6" style="border-left: 3px solid ${prazosVencidos.length > 0 || compsHoje.length > 0 ? 'var(--uc-red)' : 'var(--uc-gold)'};">

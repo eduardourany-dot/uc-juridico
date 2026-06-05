@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.79.1 (auditoria de segurança: rule users/ fechada (antes qualquer signedIn lia allowlist inteira, agora só admin OU próprio doc) + .gitignore mais robusto cobrindo prefixos de service-account/firebase-adminsdk)
-const CACHE_NAME = 'uc-juridico-v6-79-1';
+// Service Worker — UC Jurídico v6.80.0 (#30: Torre de Prazos na tela inicial — contadores grandes clicáveis por janela de urgência (Perd/Venc/Hoje/Amnh/2-3d/4-7d), matriz por advogado titular (admin), caixa de intimações pendentes em destaque, atalhos pra "Pesquisar DJ" e "Pub. manual")
+const CACHE_NAME = 'uc-juridico-v6-80-0';
 const APP_SHELL = [
   './',
   './index.html',
