@@ -315,7 +315,39 @@ window.UC_Auth = {
 // RemoteDB — Firestore
 // ============================================================
 
+// Cache em memória pra getAll_ — reduz drasticamente requests redundantes
+// ao Firestore quando o user navega entre páginas. TTL 5min equilibra
+// fresh data vs performance. Invalidação automática em upsert_/softDelete_
+// pra evitar staleness — depois de salvar, próximo getAll re-busca.
+//
+// Antes (sem cache): cada renderDashboard baixava 7 coleções = 20-35 MB.
+// Com cache: só na 1ª vez ou após save. Navegação subsequente = instant.
+//
+// Debug: window.UC_DB_DEBUG.cacheStats(), cacheSizes(), cacheClear().
+const _COL_CACHE = new Map(); // key: `${collection}|${includeDeleted}` → { ts, data }
+const _COL_CACHE_TTL_MS = 5 * 60 * 1000;
+const _COL_CACHE_STATS = { hits: 0, misses: 0, invalidates: 0 };
+
+function _colCacheKey(collectionName, includeDeleted) {
+  return collectionName + '|' + (includeDeleted ? '1' : '0');
+}
+
+function _colCacheInvalidate(collectionName) {
+  // Remove ambas as variantes (com e sem deletados) — qualquer write
+  // potencialmente invalida as duas.
+  const k0 = collectionName + '|0', k1 = collectionName + '|1';
+  if (_COL_CACHE.has(k0)) { _COL_CACHE.delete(k0); _COL_CACHE_STATS.invalidates++; }
+  if (_COL_CACHE.has(k1)) { _COL_CACHE.delete(k1); _COL_CACHE_STATS.invalidates++; }
+}
+
 async function getAll_(collectionName, includeDeleted = false) {
+  const key = _colCacheKey(collectionName, includeDeleted);
+  const cached = _COL_CACHE.get(key);
+  if (cached && (Date.now() - cached.ts) < _COL_CACHE_TTL_MS) {
+    _COL_CACHE_STATS.hits++;
+    return cached.data;
+  }
+  _COL_CACHE_STATS.misses++;
   const snap = await getDocs(collection(db, collectionName));
   const out = [];
   snap.forEach(d => {
@@ -323,7 +355,25 @@ async function getAll_(collectionName, includeDeleted = false) {
     if (!includeDeleted && v.deletedAt) return;
     out.push(v);
   });
+  _COL_CACHE.set(key, { ts: Date.now(), data: out });
   return out;
+}
+
+// API de debug exposta no console — útil pra confirmar que o cache está
+// funcionando e diagnosticar problemas de staleness.
+if (typeof window !== 'undefined') {
+  window.UC_DB_DEBUG = {
+    cacheStats: () => ({ ..._COL_CACHE_STATS, hitRate: _COL_CACHE_STATS.hits + _COL_CACHE_STATS.misses > 0 ? (_COL_CACHE_STATS.hits / (_COL_CACHE_STATS.hits + _COL_CACHE_STATS.misses) * 100).toFixed(1) + '%' : '—' }),
+    cacheSizes: () => {
+      const out = {};
+      for (const [k, v] of _COL_CACHE) {
+        out[k] = { docs: v.data.length, idadeS: Math.round((Date.now() - v.ts) / 1000) };
+      }
+      return out;
+    },
+    cacheClear: () => { _COL_CACHE.clear(); console.log('[UC_DB] cache limpo'); },
+    cacheInvalidate: (col) => { _colCacheInvalidate(col); console.log('[UC_DB] invalidado:', col); }
+  };
 }
 
 async function getById_(collectionName, id) {
@@ -347,6 +397,7 @@ async function upsert_(collectionName, record, idField = 'id') {
     record.escritorio_id = (currentUserDoc && currentUserDoc.escritorioId) || 'UC';
   }
   await setDoc(doc(db, collectionName, String(id)), record, { merge: true });
+  _colCacheInvalidate(collectionName); // próximo getAll_ re-busca
   return record;
 }
 
@@ -356,6 +407,7 @@ async function softDelete_(collectionName, id) {
     updatedAt: Date.now(),
     updatedBy: (currentUser && currentUser.email) || null
   });
+  _colCacheInvalidate(collectionName);
 }
 
 async function cascadeSoftDelete_(collectionName, fieldName, fieldValue) {
@@ -371,6 +423,7 @@ async function cascadeSoftDelete_(collectionName, fieldName, fieldValue) {
     }
   });
   await batch.commit();
+  _colCacheInvalidate(collectionName); // próximo getAll_ re-busca essa coleção
 }
 
 // PDFs via Apps Script (Drive). Usa o Google ID token capturado no sign-in.

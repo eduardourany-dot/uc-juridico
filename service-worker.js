@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.82.0 (#23: Export Excel completo — agora gera workbook com 4 abas (Processos, Prazos, Financeiro, Clientes), cada uma com cabeçalho congelado + autofilter + largura ajustada. Substitui o export antigo que tinha só a aba Processos)
-const CACHE_NAME = 'uc-juridico-v6-82-0';
+// Service Worker — UC Jurídico v6.83.0 (perf: cache em memória TTL 5min em DB.getAll_ — reduz drasticamente requests Firestore quando user navega entre páginas. Antes cada navegação baixava 20-35MB; agora só 1ª vez ou após save. Invalidação automática em upsert/softDelete/cascadeSoftDelete; debug via window.UC_DB_DEBUG)
+const CACHE_NAME = 'uc-juridico-v6-83-0';
 const APP_SHELL = [
   './',
   './index.html',
