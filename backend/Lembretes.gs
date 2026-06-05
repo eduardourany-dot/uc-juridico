@@ -1223,6 +1223,53 @@ function _gravarHeartbeatLembretes(resumo) {
   }
 }
 
+// Vigia o cron de backup diário (Backup.gs). Detecta se settings/lastBackup
+// está sem update há mais de BACKUP_STALE_HORAS — significa que ou (a) o
+// cron não rodou, ou (b) rodou e falhou silenciosamente. Em (b) o próprio
+// Backup.gs já envia alerta; isto aqui pega o caso (a). Cooldown 24h.
+const BACKUP_STALE_HORAS = 36;  // tolera 1 dia + 12h de folga (cobre fim de semana etc)
+function _vigiarCronBackup() {
+  try {
+    const agora = Date.now();
+    const doc = _firestoreGet('settings/lastBackup');
+    // Grace period: nunca rodou antes — não alerta (sistema novo)
+    if (!doc || !doc.value || !doc.value.timestamp) {
+      Logger.log('[deadman] backup ainda não inicializado (settings/lastBackup vazio) — pulando');
+      return;
+    }
+    const lastBackup = doc.value.timestamp;
+    const horasSemBackup = (agora - lastBackup) / 3600000;
+    if (horasSemBackup < BACKUP_STALE_HORAS) return;
+
+    // Anti-spam: chave separada
+    const alertDoc = _firestoreGet('settings/cronAlertas');
+    const alertVal = (alertDoc && alertDoc.value) || {};
+    if (agora - (alertVal.backupLastAlert || 0) < CRON_ALERT_COOLDOWN_MS) return;
+
+    const ultima = new Date(lastBackup).toLocaleString('pt-BR');
+    const html = '<div style="font-family:Arial,sans-serif;max-width:520px">' +
+      '<h2 style="color:#a8472d;margin:0 0 8px">&#9888; UC Jur&iacute;dico — backup di&aacute;rio parado</h2>' +
+      '<p>O cron <b>cron_backupDiario</b> n&atilde;o registra execu&ccedil;&atilde;o ' +
+      'bem-sucedida h&aacute; <b>' + horasSemBackup.toFixed(1) + 'h</b> ' +
+      '(&uacute;ltimo backup: ' + ultima + ').</p>' +
+      '<p><b>Dados podem estar sem prote&ccedil;&atilde;o de recupera&ccedil;&atilde;o.</b></p>' +
+      '<p><b>O que fazer:</b></p>' +
+      '<ul style="margin:6px 0 12px 18px;padding:0">' +
+      '<li>Verificar trigger time-driven de <code>cron_backupDiario</code> no Apps Script.</li>' +
+      '<li>Rodar <code>executarBackupAgora()</code> manualmente no editor pra ver se h&aacute; erro.</li>' +
+      '<li>Conferir cota do Drive / Apps Script.</li>' +
+      '</ul>' +
+      '<p style="color:#888;font-size:12px;margin-top:16px">Alerta autom&aacute;tico do dead-man\'s switch &middot; UC Jur&iacute;dico</p></div>';
+    enviarEmail(CRON_ALERT_EMAIL, "⚠ UC Jurídico — backup diário parado há " + Math.round(horasSemBackup) + "h", html);
+
+    alertVal.backupLastAlert = agora;
+    _firestoreUpdate('settings/cronAlertas', { value: alertVal, updatedAt: agora });
+    Logger.log('[deadman] ALERTA backup parado enviado (último=' + ultima + ')');
+  } catch (e) {
+    Logger.log('[deadman] vigiar backup falhou: ' + e.message);
+  }
+}
+
 // Vigia se a captura DJEN está PRODUTIVA — não basta o cron estar vivo, ele
 // precisa estar trazendo pubs (#27 parte 2: alerta de silêncio). Se a última
 // pub capturada (settings/djenCron.lastPubAt) for mais antiga que ALERT_SILENCIO_DIAS
@@ -1340,13 +1387,16 @@ function cron_lembretesUnificado() {
   try { resCompromissos = cron_lembretesDeCompromissos(); }
   catch (e) { Logger.log('cron_lembretesDeCompromissos erro: ' + e.message); }
 
-  // Dead-man's switch: registra que ESTE cron rodou + vigia o cron do DJEN
-  // (parado) + vigia a captura DJEN (rodando mas sem trazer pub — #27 parte 2).
+  // Dead-man's switch: registra que ESTE cron rodou + vigia outros crons.
+  // - _vigiarCronDjen     : DJEN parou de rodar
+  // - _vigiarCapturaDjen  : DJEN rodando mas sem trazer pub (#27 parte 2)
+  // - _vigiarCronBackup   : backup diário parado (#29)
   _gravarHeartbeatLembretes(JSON.stringify({
     prazos: resPrazos, parcelas: resParcelas, compromissos: resCompromissos
   }));
   _vigiarCronDjen();
   _vigiarCapturaDjen();
+  _vigiarCronBackup();
 
   Logger.log('=== cron_lembretesUnificado concluído ===');
   return { prazos: resPrazos, parcelas: resParcelas, compromissos: resCompromissos };

@@ -1,22 +1,30 @@
 /**
- * Backup.gs — UC Jurídico v6.28+ (Sprint Backup)
+ * Backup.gs — UC Jurídico (#29: backup automático diário pro Drive)
  *
- * Backup semanal automático de todas as coleções Firestore para o Drive
+ * Backup diário automático de todas as coleções Firestore para o Drive
  * do escritório. Reusa helpers _firestoreList / _getGoogleAccessToken do
  * Lembretes.gs (mesmo projeto Apps Script = escopo global compartilhado).
  *
  * Pré-requisitos (Script Properties):
  *   - FCM_SERVICE_ACCOUNT_JSON  → já configurado pra Lembretes
  *   - BACKUP_DRIVE_FOLDER_ID    → ID da pasta Drive onde salvar (criar
- *                                  pasta privada do escritório)
+ *                                  pasta privada do escritório, idealmente
+ *                                  no Drive da ucjuridico@ pra resiliência)
  *
  * Trigger time-driven recomendado:
- *   - Função: cron_backupSemanal
- *   - Frequência: semanal (todo domingo, 03:00)
+ *   - Função: cron_backupDiario
+ *   - Frequência: diária, das 03:00 às 04:00 (madrugada, baixo uso)
+ *
+ * Em caso de falha, envia e-mail pros admins via CRON_ALERT_EMAIL (definido
+ * em Lembretes.gs — vai pros 2 titulares).
+ *
+ * O dead-man's switch (_vigiarCronBackup em Lembretes.gs) detecta se um
+ * backup não roda há mais de 36h e dispara alerta separado.
  *
  * Funções de teste:
- *   _testarBackupConfig()  — valida pasta Drive + access token
- *   executarBackupAgora()  — roda sem trigger (use no console)
+ *   _testarBackupConfig()      — valida pasta Drive + access token
+ *   executarBackupAgora()      — roda sem trigger (use no console)
+ *   _listarBackupsExistentes() — lista backups na pasta
  */
 
 // Lista cravada das coleções a fazer backup. Adicionar aqui quando
@@ -44,14 +52,73 @@ const COLECOES_BACKUP = [
 ];
 
 // Quantos backups manter na pasta. Os mais antigos são apagados.
-const BACKUP_KEEP = 12;  // ~3 meses semanais
+const BACKUP_KEEP = 30;  // ~1 mês de diários — cobre janelas de descoberta tardia de corrupção/erro
 
 /**
  * Cron principal — varre todas as coleções, faz bundle JSON, salva no
  * Drive, rotaciona, registra metadata em settings/lastBackup.
+ *
+ * Trigger time-driven recomendado: diariamente entre 03:00 e 04:00.
  */
-function cron_backupSemanal() {
-  Logger.log('=== cron_backupSemanal iniciando ===');
+function cron_backupDiario() {
+  Logger.log('=== cron_backupDiario iniciando ===');
+  // try/catch global — qualquer FALHA TOTAL (throw) vira e-mail pros admins
+  let r;
+  try {
+    r = _executarBackup();
+  } catch (e) {
+    Logger.log('❌ FALHA TOTAL do cron_backupDiario: ' + e.message + '\n' + (e.stack || ''));
+    _alertarFalhaBackup(e.message + (e.stack ? '\n\n' + e.stack : ''));
+    return { ok: false, error: e.message };
+  }
+  // Falhas "controladas" (return {ok:false}) — também alerta.
+  if (!r || !r.ok) {
+    const msg = (r && r.error) || 'erro desconhecido';
+    Logger.log('❌ Backup retornou erro: ' + msg);
+    _alertarFalhaBackup(msg);
+  }
+  return r;
+}
+
+// Alias do nome antigo, pra não quebrar triggers existentes em prod que
+// ainda apontem pra cron_backupSemanal. Pode ser removido depois que
+// migrar o trigger pra cron_backupDiario.
+function cron_backupSemanal() { return cron_backupDiario(); }
+
+/**
+ * Envia e-mail aos admins quando o backup falha. CRON_ALERT_EMAIL vem de
+ * Lembretes.gs (mesma escopo Apps Script) — vai pros 2 titulares.
+ * Falha silenciosa: se o e-mail falhar, só loga (não quer cascata).
+ */
+function _alertarFalhaBackup(motivo) {
+  try {
+    if (typeof CRON_ALERT_EMAIL === 'undefined' || !CRON_ALERT_EMAIL) {
+      Logger.log('CRON_ALERT_EMAIL não definido — alerta não enviado');
+      return;
+    }
+    const html = '<div style="font-family:Arial,sans-serif;max-width:520px">' +
+      '<h2 style="color:#a8472d;margin:0 0 8px">&#9888; UC Jur&iacute;dico — Backup di&aacute;rio FALHOU</h2>' +
+      '<p>O cron <b>cron_backupDiario</b> n&atilde;o conseguiu gerar o backup do Firestore hoje.</p>' +
+      '<p><b>Motivo:</b></p>' +
+      '<pre style="background:#f4f1ea;padding:10px;border-left:3px solid #a8472d;font-size:12px;white-space:pre-wrap;word-break:break-word;border-radius:4px">' +
+      String(motivo).replace(/</g, '&lt;').replace(/>/g, '&gt;').slice(0, 2000) +
+      '</pre>' +
+      '<p><b>O que fazer:</b></p>' +
+      '<ul style="margin:6px 0 12px 18px;padding:0">' +
+      '<li>Verifique se <code>BACKUP_DRIVE_FOLDER_ID</code> est&aacute; em Script Properties.</li>' +
+      '<li>Confirme que a pasta Drive ainda existe e que o Apps Script tem acesso.</li>' +
+      '<li>Rode <code>_testarBackupConfig()</code> no editor.</li>' +
+      '<li>Se persistir, contatar admin t&eacute;cnico — pode ser cota ou quebra de credencial.</li>' +
+      '</ul>' +
+      '<p style="color:#888;font-size:12px;margin-top:16px">Alerta autom&aacute;tico &middot; UC Jur&iacute;dico</p></div>';
+    enviarEmail(CRON_ALERT_EMAIL, '⚠ UC Jurídico — Backup diário FALHOU', html);
+    Logger.log('Alerta de falha enviado para: ' + CRON_ALERT_EMAIL);
+  } catch (e) {
+    Logger.log('Falha ao enviar alerta de backup: ' + e.message);
+  }
+}
+
+function _executarBackup() {
   const startMs = Date.now();
   const folderId = PropertiesService.getScriptProperties().getProperty('BACKUP_DRIVE_FOLDER_ID');
   if (!folderId) {
