@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.80.0 (#30: Torre de Prazos na tela inicial — contadores grandes clicáveis por janela de urgência (Perd/Venc/Hoje/Amnh/2-3d/4-7d), matriz por advogado titular (admin), caixa de intimações pendentes em destaque, atalhos pra "Pesquisar DJ" e "Pub. manual")
-const CACHE_NAME = 'uc-juridico-v6-80-0';
+// Service Worker — UC Jurídico v6.81.0 (#31: botão "📤 Protocolar" volta no detalhe do processo, MAS só pra tribunais validados em sistemas PJe/Projudi/e-SAJ — e-Proc/eSTF/eSTJ ficam de fora (MNI não viável). Cobre TJGO (Projudi) + ~9 PJe/e-SAJ validados)
+const CACHE_NAME = 'uc-juridico-v6-81-0';
 const APP_SHELL = [
   './',
   './index.html',
