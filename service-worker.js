@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.81.1 (#31 fix: gate do botão Protocolar agora usa parser de CNJ como fallback quando o campo court está vazio ou genérico — antes processos cadastrados só com CNJ resolviam pra "NACIONAL" e o botão sumia mesmo em TJGO)
-const CACHE_NAME = 'uc-juridico-v6-81-1';
+// Service Worker — UC Jurídico v6.82.0 (#23: Export Excel completo — agora gera workbook com 4 abas (Processos, Prazos, Financeiro, Clientes), cada uma com cabeçalho congelado + autofilter + largura ajustada. Substitui o export antigo que tinha só a aba Processos)
+const CACHE_NAME = 'uc-juridico-v6-82-0';
 const APP_SHELL = [
   './',
   './index.html',

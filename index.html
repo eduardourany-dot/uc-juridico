@@ -14703,78 +14703,248 @@ function _xlsxData(iso) {
 
 // Exporta a carteira de processos em .xlsx (aba "Processos"). Estrutura
 // multi-aba pronta pra crescer (Prazos, Financeiro, etc. no futuro).
+// #23 — Export Excel completo: workbook com 4 abas (Processos, Prazos,
+// Financeiro, Clientes). Mantém o nome _exportarCarteiraExcel pra não
+// quebrar o onclick existente; o conteúdo é mais rico que o nome sugere.
 async function _exportarCarteiraExcel(btn) {
   const origLabel = btn ? btn.innerHTML : null;
   if (btn) { btn.disabled = true; btn.innerHTML = '⏳ Gerando…'; }
   try {
     const XLSX = await _carregarSheetJS();
-    const [processos, clientes, prazos] = await Promise.all([
-      DB.getAllProcesses(), DB.getAllClientes(), DB.getAllDeadlines()
+    const [processos, clientes, prazos, honorarios, transacoes, categorias, comunicacoes] = await Promise.all([
+      DB.getAllProcesses(),
+      DB.getAllClientes(),
+      DB.getAllDeadlines(),
+      DB.getAllHonorarios().catch(() => []),
+      DB.getAllTransacoes().catch(() => []),
+      (DB.getAllCategoriasFin ? DB.getAllCategoriasFin().catch(() => []) : Promise.resolve([])),
+      (DB.getAllComunicacoes ? DB.getAllComunicacoes().catch(() => []) : Promise.resolve([]))
     ]);
     const ativos = processos.filter(p => !p.deletedAt);
-    if (ativos.length === 0) { toast('Carteira vazia', 'Nenhum processo pra exportar.', 'info'); return; }
-
-    const cliById = {};
-    clientes.forEach(c => { cliById[c.id] = c; });
-
-    // Indexa prazos ativos por processo (não-cumprido/perdido/cancelado)
-    const prazosPorProc = {};
-    prazos.forEach(d => {
-      if (['cumprido', 'perdido', 'cancelado'].includes(d.status)) return;
-      if (!d.processId || !d.deadlineDate) return;
-      (prazosPorProc[d.processId] = prazosPorProc[d.processId] || []).push(d);
-    });
-
-    const header = [
-      'CNJ', 'Título', 'Cliente', 'Polo Ativo', 'Polo Passivo', 'Tribunal',
-      'Classe', 'Assunto', 'Status', 'Responsável', 'Suplente',
-      'Valor da Causa (R$)', 'Ajuizamento', 'Órgão Julgador',
-      'Próximo Prazo', 'Descrição do Prazo', 'Prazos Ativos'
-    ];
-    const aoa = [header];
-    ativos.sort((a, b) => (a.name || '').localeCompare(b.name || '', 'pt-BR'));
-    for (const p of ativos) {
-      const cli = p.clienteId ? cliById[p.clienteId] : null;
-      const meusPrazos = (prazosPorProc[p.id] || []).slice()
-        .sort((a, b) => new Date(a.deadlineDate) - new Date(b.deadlineDate));
-      const prox = meusPrazos[0];
-      aoa.push([
-        p.cnj || '',
-        p.name || '',
-        cli?.nome || '',
-        _extrairPolo(p, 'ativo'),
-        _extrairPolo(p, 'passivo'),
-        p.tribunal || '',
-        (p.classe?.nome || p.classe || ''),
-        (p.assunto?.descricao || p.assunto || ''),
-        p.status || '',
-        p.advogadoResponsavel || '',
-        p.advogadoSuplente || '',
-        _parseValorNum(p.valorCausa),
-        _xlsxData(p.dataAjuizamento),
-        p.orgaoJulgador || p.serventia || '',
-        prox ? _xlsxData(prox.deadlineDate) : '',
-        prox ? (prox.description || prox.type || '') : '',
-        meusPrazos.length
-      ]);
+    if (ativos.length === 0 && (prazos || []).length === 0 && (honorarios || []).length === 0 && (transacoes || []).length === 0 && (clientes || []).length === 0) {
+      toast('Nada pra exportar', 'Carteira, prazos, financeiro e clientes estão vazios.', 'info'); return;
     }
 
-    const ws = XLSX.utils.aoa_to_sheet(aoa);
-    ws['!cols'] = [
-      { wch: 24 }, { wch: 36 }, { wch: 24 }, { wch: 28 }, { wch: 28 }, { wch: 8 },
-      { wch: 22 }, { wch: 22 }, { wch: 12 }, { wch: 20 }, { wch: 20 },
-      { wch: 16 }, { wch: 12 }, { wch: 30 }, { wch: 12 }, { wch: 32 }, { wch: 8 }
-    ];
-    ws['!autofilter'] = { ref: XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: aoa.length - 1, c: header.length - 1 } }) };
-
+    const cliById = {}; clientes.forEach(c => { cliById[c.id] = c; });
+    const procById = {}; processos.forEach(p => { procById[p.id] = p; });
+    const catById = {}; (categorias || []).forEach(c => { catById[c.id] = c; });
+    const hoje = new Date();
+    const hojeISO = hoje.toISOString().slice(0, 10);
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Processos');
+
+    // ===== ABA 1: Processos =====================================
+    {
+      const prazosAtivosPorProc = {};
+      prazos.forEach(d => {
+        if (['cumprido', 'perdido', 'cancelado'].includes(d.status)) return;
+        if (!d.processId || !d.deadlineDate) return;
+        (prazosAtivosPorProc[d.processId] = prazosAtivosPorProc[d.processId] || []).push(d);
+      });
+      const header = [
+        'CNJ', 'Título', 'Cliente', 'Polo Ativo', 'Polo Passivo', 'Tribunal',
+        'Classe', 'Assunto', 'Status', 'Responsável', 'Suplente',
+        'Valor da Causa (R$)', 'Ajuizamento', 'Órgão Julgador',
+        'Próximo Prazo', 'Descrição do Prazo', 'Prazos Ativos'
+      ];
+      const aoa = [header];
+      ativos.sort((a, b) => (a.name || '').localeCompare(b.name || '', 'pt-BR'));
+      for (const p of ativos) {
+        const cli = p.clienteId ? cliById[p.clienteId] : null;
+        const meusPrazos = (prazosAtivosPorProc[p.id] || []).slice()
+          .sort((a, b) => new Date(a.deadlineDate) - new Date(b.deadlineDate));
+        const prox = meusPrazos[0];
+        aoa.push([
+          p.cnj || '', p.name || '', cli?.nome || '',
+          _extrairPolo(p, 'ativo'), _extrairPolo(p, 'passivo'),
+          p.tribunal || '', (p.classe?.nome || p.classe || ''), (p.assunto?.descricao || p.assunto || ''),
+          p.status || '', p.advogadoResponsavel || '', p.advogadoSuplente || '',
+          _parseValorNum(p.valorCausa), _xlsxData(p.dataAjuizamento), p.orgaoJulgador || p.serventia || '',
+          prox ? _xlsxData(prox.deadlineDate) : '',
+          prox ? (prox.description || prox.type || '') : '',
+          meusPrazos.length
+        ]);
+      }
+      const ws = XLSX.utils.aoa_to_sheet(aoa);
+      ws['!cols'] = [
+        { wch: 24 }, { wch: 36 }, { wch: 24 }, { wch: 28 }, { wch: 28 }, { wch: 8 },
+        { wch: 22 }, { wch: 22 }, { wch: 12 }, { wch: 20 }, { wch: 20 },
+        { wch: 16 }, { wch: 12 }, { wch: 30 }, { wch: 12 }, { wch: 32 }, { wch: 8 }
+      ];
+      ws['!autofilter'] = { ref: XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: aoa.length - 1, c: header.length - 1 } }) };
+      ws['!freeze'] = { xSplit: 0, ySplit: 1 };
+      XLSX.utils.book_append_sheet(wb, ws, 'Processos');
+    }
+
+    // ===== ABA 2: Prazos =========================================
+    {
+      const header = [
+        'CNJ', 'Processo', 'Cliente', 'Descrição', 'Tipo', 'Tribunal',
+        'Data Fatal', 'Dias Restantes', 'Status', 'Responsável',
+        'Intimação', 'Dias do Prazo', 'Unidade', 'Em Dobro', 'Criado em'
+      ];
+      const aoa = [header];
+      const ord = (prazos || []).slice().sort((a, b) => {
+        const da = a.deadlineDate ? new Date(a.deadlineDate).getTime() : 0;
+        const db = b.deadlineDate ? new Date(b.deadlineDate).getTime() : 0;
+        return da - db;
+      });
+      const hojeMs = new Date(hoje.getFullYear(), hoje.getMonth(), hoje.getDate()).getTime();
+      for (const d of ord) {
+        const proc = d.processId ? procById[d.processId] : null;
+        const cli = proc?.clienteId ? cliById[proc.clienteId] : null;
+        let dias = '';
+        if (d.deadlineDate) {
+          const dl = new Date(d.deadlineDate); dl.setHours(0,0,0,0);
+          dias = Math.round((dl.getTime() - hojeMs) / 86400000);
+        }
+        aoa.push([
+          proc?.cnj || '',
+          proc?.name || '',
+          cli?.nome || '',
+          d.description || '',
+          d.type || '',
+          d.tribunal || proc?.tribunal || '',
+          _xlsxData(d.deadlineDate),
+          dias,
+          d.status || '',
+          proc?.advogadoResponsavel || '',
+          _xlsxData(d.intimationDate),
+          d.daysAllowed || '',
+          d.unidade || '',
+          d.emDobro ? 'Sim' : '',
+          _xlsxData(d.createdAt)
+        ]);
+      }
+      const ws = XLSX.utils.aoa_to_sheet(aoa);
+      ws['!cols'] = [
+        { wch: 24 }, { wch: 36 }, { wch: 24 }, { wch: 40 }, { wch: 16 }, { wch: 10 },
+        { wch: 12 }, { wch: 8 }, { wch: 12 }, { wch: 22 }, { wch: 12 }, { wch: 6 },
+        { wch: 10 }, { wch: 6 }, { wch: 12 }
+      ];
+      ws['!autofilter'] = { ref: XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: aoa.length - 1, c: header.length - 1 } }) };
+      ws['!freeze'] = { xSplit: 0, ySplit: 1 };
+      XLSX.utils.book_append_sheet(wb, ws, 'Prazos');
+    }
+
+    // ===== ABA 3: Financeiro =====================================
+    {
+      const header = [
+        'Tipo Movimento', 'Data', 'Vencimento/Data Pgto', 'Cliente', 'Processo',
+        'Descrição', 'Categoria', 'Valor (R$)', 'Status', 'Parcela', 'Origem', 'Forma Pgto'
+      ];
+      const aoa = [header];
+
+      // Parcelas de honorário (a receber + pagas)
+      (honorarios || []).forEach(h => {
+        const cli = h.clienteId ? cliById[h.clienteId] : null;
+        (h.parcelas || []).forEach(p => {
+          const dataPg = p.status === 'pago' ? (p.dataPagamento || p.dataPg || p.pagoEm) : '';
+          aoa.push([
+            p.status === 'pago' ? 'Honorário recebido' : 'Honorário a receber',
+            _xlsxData(p.vencimento),
+            _xlsxData(dataPg),
+            cli?.nome || h.clienteNome || '',
+            h.processoNome || '',
+            h.descricao || h.tipo || 'Honorário',
+            'Honorários',
+            Number(p.valor) || 0,
+            p.status || 'pendente',
+            (p.numero != null ? String(p.numero) : ''),
+            'Honorário',
+            p.formaPagamento || ''
+          ]);
+        });
+      });
+
+      // Transações livres (receita/despesa)
+      (transacoes || []).forEach(t => {
+        const cli = t.clienteId ? cliById[t.clienteId] : null;
+        const proc = t.processoId ? procById[t.processoId] : null;
+        const cat = t.categoriaId ? catById[t.categoriaId] : null;
+        aoa.push([
+          t.tipo === 'receita' ? 'Receita' : (t.tipo === 'despesa' ? 'Despesa' : (t.tipo || '')),
+          _xlsxData(t.data),
+          '', // vencimento N/A
+          cli?.nome || t.clienteNome || '',
+          proc?.name || '',
+          t.descricao || '',
+          cat?.nome || t.categoriaNome || '',
+          Number(t.valor) || 0,
+          t.status || '',
+          '',
+          'Transação avulsa',
+          t.formaPagamento || ''
+        ]);
+      });
+
+      const ws = XLSX.utils.aoa_to_sheet(aoa);
+      ws['!cols'] = [
+        { wch: 20 }, { wch: 12 }, { wch: 16 }, { wch: 24 }, { wch: 30 },
+        { wch: 32 }, { wch: 18 }, { wch: 14 }, { wch: 12 }, { wch: 8 }, { wch: 18 }, { wch: 16 }
+      ];
+      ws['!autofilter'] = { ref: XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: aoa.length - 1, c: header.length - 1 } }) };
+      ws['!freeze'] = { xSplit: 0, ySplit: 1 };
+      XLSX.utils.book_append_sheet(wb, ws, 'Financeiro');
+    }
+
+    // ===== ABA 4: Clientes =======================================
+    {
+      // Pré-calcula nº processos ativos por clienteId e última comunicação
+      const procsPorCli = {};
+      processos.forEach(p => {
+        if (!p.clienteId || p.deletedAt) return;
+        procsPorCli[p.clienteId] = (procsPorCli[p.clienteId] || 0) + 1;
+      });
+      const ultimaComPorCli = {};
+      (comunicacoes || []).forEach(c => {
+        if (!c.clienteId) return;
+        const data = c.data || c.createdAt;
+        if (!data) return;
+        const ms = new Date(data).getTime();
+        if (!ultimaComPorCli[c.clienteId] || ms > ultimaComPorCli[c.clienteId]) {
+          ultimaComPorCli[c.clienteId] = ms;
+        }
+      });
+
+      const header = [
+        'Nome', 'CPF/CNPJ', 'Tipo', 'Email', 'Telefone', 'Cidade', 'UF',
+        'Processos Ativos', 'Última Comunicação', 'Cadastrado em', 'Origem'
+      ];
+      const aoa = [header];
+      (clientes || []).slice()
+        .sort((a, b) => (a.nome || '').localeCompare(b.nome || '', 'pt-BR'))
+        .forEach(c => {
+          const ult = ultimaComPorCli[c.id];
+          aoa.push([
+            c.nome || '',
+            c.cpfCnpj || c.documento || '',
+            c.tipo || (((c.cpfCnpj || '').replace(/\D/g, '').length === 14) ? 'PJ' : 'PF'),
+            c.email || '',
+            c.telefone || c.celular || '',
+            c.endereco?.cidade || c.cidade || '',
+            c.endereco?.uf || c.uf || '',
+            procsPorCli[c.id] || 0,
+            ult ? _xlsxData(new Date(ult).toISOString()) : '',
+            _xlsxData(c.createdAt),
+            c.origem || ''
+          ]);
+        });
+      const ws = XLSX.utils.aoa_to_sheet(aoa);
+      ws['!cols'] = [
+        { wch: 30 }, { wch: 16 }, { wch: 4 }, { wch: 28 }, { wch: 16 },
+        { wch: 20 }, { wch: 4 }, { wch: 8 }, { wch: 14 }, { wch: 12 }, { wch: 16 }
+      ];
+      ws['!autofilter'] = { ref: XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: aoa.length - 1, c: header.length - 1 } }) };
+      ws['!freeze'] = { xSplit: 0, ySplit: 1 };
+      XLSX.utils.book_append_sheet(wb, ws, 'Clientes');
+    }
 
     const buf = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
-    const hoje = new Date().toISOString().slice(0, 10);
     downloadBlob(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }),
-      `carteira_processos_${hoje}.xlsx`);
-    toast('Excel exportado', `${ativos.length} processo(s) na aba "Processos"`, 'success');
+      `uc_juridico_relatorio_${hojeISO}.xlsx`);
+    toast('Excel exportado',
+      `${ativos.length} processo(s) · ${(prazos || []).length} prazo(s) · ${(honorarios || []).reduce((s,h) => s + (h.parcelas?.length||0), 0) + (transacoes || []).length} mov. financeiras · ${(clientes || []).length} cliente(s)`,
+      'success');
   } catch (e) {
     console.error('[Excel] erro', e);
     toast('Falha ao exportar Excel', String(e?.message || e), 'error');
