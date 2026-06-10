@@ -11801,6 +11801,42 @@ function _renderPrazoNaAgenda(d, procById, today) {
   `;
 }
 
+// Fase 3 — RSVP: ícone/rótulo por resposta do convidado no Google Calendar.
+const RSVP_META = {
+  accepted:    { icon: '✅', label: 'confirmou' },
+  declined:    { icon: '❌', label: 'recusou' },
+  tentative:   { icon: '❔', label: 'talvez' },
+  needsAction: { icon: '⏳', label: 'sem resposta' }
+};
+
+// Fase 3 — linha de RSVP no card: contadores por resposta + lista expandível
+// por convidado. Só aparece quando há reunião Google vinculada. O organizador
+// (conta do escritório) fica fora da contagem.
+function _rsvpResumoHtml(c) {
+  if (!c.googleEventId) return '';
+  const btn = `<a onclick="event.stopPropagation(); atualizarRsvpCompromisso('${c.id}')" style="cursor:pointer; color:var(--uc-gold);">🔄 atualizar respostas</a>`;
+  const convidados = ((c.rsvp && c.rsvp.convidados) || []).filter(a => !a.organizador);
+  if (!convidados.length) {
+    return `<div style="font-size: 12px; color: var(--uc-warm-gray); margin-bottom: 4px;">🙋 RSVP: ${c.rsvp ? 'sem convidados externos' : 'ainda não consultado'} · ${btn}</div>`;
+  }
+  const cont = {};
+  convidados.forEach(a => { const k = RSVP_META[a.resposta] ? a.resposta : 'needsAction'; cont[k] = (cont[k] || 0) + 1; });
+  const resumo = Object.keys(RSVP_META).filter(k => cont[k]).map(k => `${RSVP_META[k].icon} ${cont[k]}`).join(' · ');
+  const quando = c.rsvp?.atualizadoEm
+    ? new Date(c.rsvp.atualizadoEm).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+    : '';
+  const linhas = convidados.map(a => {
+    const m = RSVP_META[a.resposta] || RSVP_META.needsAction;
+    return `<div style="font-size: 12px; color: var(--uc-graphite); padding: 2px 0 2px 8px;">${m.icon} ${escapeHtml(a.nome || a.email)} — ${m.label}${a.comentario ? ' · “' + escapeHtml(a.comentario) + '”' : ''}</div>`;
+  }).join('');
+  return `
+    <details style="margin-bottom: 4px;">
+      <summary style="font-size: 12px; color: var(--uc-warm-gray); cursor: pointer;">🙋 RSVP: ${resumo}${quando ? ' · consultado ' + quando : ''}</summary>
+      ${linhas}
+      <div style="font-size: 12px; padding: 2px 0 0 8px;">${btn}</div>
+    </details>`;
+}
+
 function _renderCompromissoCard(c, procById, cliById) {
   const tipo = _agTipoMeta(c.tipo);
   const status = _agStatusMeta(c.status);
@@ -11828,6 +11864,7 @@ function _renderCompromissoCard(c, procById, cliById) {
           </div>
           ${c.local ? `<div style="font-size: 12px; color: var(--uc-warm-gray); margin-bottom: 4px;">📍 ${escapeHtml(c.local)}</div>` : ''}
           ${c.meetLink ? `<div style="font-size: 12px; margin-bottom: 4px;">📹 <a href="${escapeHtml(c.meetLink)}" target="_blank" rel="noopener" style="color:var(--uc-gold);">Entrar na reunião Google Meet</a></div>` : ''}
+          ${_rsvpResumoHtml(c)}
           ${c.djenHash ? `<div style="font-size: 12px; margin-bottom: 4px;">📰 <a onclick="event.stopPropagation(); djenShowFullPublicacaoFromDb('${c.djenHash}')" style="cursor:pointer; color:var(--uc-gold);">Ver publicação que gerou este prazo</a></div>` : ''}
           <div style="font-size: 12px; color: var(--uc-warm-gray);">
             ${c.responsavel ? '👤 ' + escapeHtml(c.responsavel.split(' ')[0]) : ''}
@@ -11927,20 +11964,24 @@ async function novoCompromissoFlow(opts) {
       help: 'Gera link Meet, envia convite por e-mail aos convidados e cria lembrete (1 dia + 30 min antes).' },
     { label: 'Convidados (e-mails, separados por vírgula)', name: 'convidadosEmails', type: 'textarea', rows: 2,
       default: convidadosIniciais,
-      placeholder: 'advogado@escritorio.com, cliente@email.com, perito@email.com' }
+      placeholder: 'advogado@escritorio.com, cliente@email.com, perito@email.com' },
+    { label: '🙋 Auto-convidar responsável + cliente', name: 'autoConvidar', type: 'checkbox', default: true,
+      help: 'Fase 3 — além dos e-mails acima, convida automaticamente você, o responsável e o cliente vinculado (selecionados nos campos acima, mesmo que troque na hora).' }
   ], {
     confirmLabel: 'Cadastrar',
     intro: 'Compromissos disparam push (T-1 dia anterior) e push+email (T-0 dia/horário) automaticamente. Marque "Google Meet" pra também gerar reunião + convite por e-mail.'
   });
   if (!r) return;
-  const [tipo, titulo, dataHoraInicio, dataHoraFim, local, processoId, clienteId, responsavel, status, observacoes, criarMeet, convidadosEmails] = r;
+  const [tipo, titulo, dataHoraInicio, dataHoraFim, local, processoId, clienteId, responsavel, status, observacoes, criarMeet, convidadosEmails, autoConvidar] = r;
   if (!titulo?.trim()) { toast('Título obrigatório', '', 'error'); return; }
   if (!dataHoraInicio) { toast('Data e hora de início obrigatórias', '', 'error'); return; }
 
   const compromissoId = uid();
   const inicioISO = new Date(dataHoraInicio).toISOString();
   const fimISO = dataHoraFim ? new Date(dataHoraFim).toISOString() : null;
-  const convidados = _parseEmails(convidadosEmails);
+  const convidados = autoConvidar
+    ? _autoConvidados(_parseEmails(convidadosEmails), responsavel, clienteId, clientes)
+    : _parseEmails(convidadosEmails);
 
   const compromisso = {
     id: compromissoId,
@@ -11981,6 +12022,20 @@ function _parseEmails(texto) {
   )];
 }
 
+// Fase 3 — convidados automáticos: criador + responsável (e-mail canônico
+// do escritório) + cliente vinculado, mesclados com os digitados, sem duplicar.
+// Usa os valores ESCOLHIDOS no modal (responsavel/clienteId), então cobre o
+// caso de trocar o cliente sem reescrever o campo de e-mails.
+function _autoConvidados(emailsDigitados, responsavel, clienteId, clientes) {
+  const re = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  const out = new Set(emailsDigitados || []);
+  const add = e => { e = String(e || '').trim().toLowerCase(); if (e && re.test(e)) out.add(e); };
+  add((window.UC_Auth?.getUser?.() || {}).email);
+  if (responsavel) add(advogadoEmailPorNome(responsavel));
+  if (clienteId) add((clientes || []).find(x => x.id === clienteId)?.email);
+  return [...out];
+}
+
 // Chama o Apps Script pra criar evento+Meet+convite e vincula ao compromisso.
 // emails: array de strings já validadas.
 async function _criarMeetParaCompromisso(compromisso, emails) {
@@ -12010,6 +12065,7 @@ async function _criarMeetParaCompromisso(compromisso, emails) {
     compromisso.meetLink = r.meetLink || null;
     compromisso.htmlLink = r.htmlLink || null;
     compromisso.convidados = emails || [];
+    compromisso.rsvp = null; // reunião nova — respostas ainda não consultadas (Fase 3)
     await DB.saveCompromisso(compromisso);
 
     _mostrarMeetCriado(compromisso, emails);
@@ -12093,10 +12149,12 @@ async function editarCompromisso(id) {
         : 'Gera link Meet, envia convite por e-mail e cria lembrete (1 dia + 30 min antes).' },
     { label: 'Convidados (e-mails, separados por vírgula)', name: 'convidadosEmails', type: 'textarea', rows: 2,
       default: (c.convidados || []).join(', '),
-      placeholder: 'advogado@escritorio.com, cliente@email.com' }
+      placeholder: 'advogado@escritorio.com, cliente@email.com' },
+    { label: '🙋 Auto-convidar responsável + cliente', name: 'autoConvidar', type: 'checkbox', default: true,
+      help: 'Fase 3 — além dos e-mails acima, convida automaticamente você, o responsável e o cliente vinculado.' }
   ], { confirmLabel: 'Salvar' });
   if (!r) return;
-  const [tipo, titulo, dataHoraInicio, dataHoraFim, local, processoId, clienteId, responsavel, status, observacoes, criarMeet, convidadosEmails] = r;
+  const [tipo, titulo, dataHoraInicio, dataHoraFim, local, processoId, clienteId, responsavel, status, observacoes, criarMeet, convidadosEmails, autoConvidar] = r;
   if (!titulo?.trim()) { toast('Título obrigatório', '', 'error'); return; }
   const tinhaMeet = !!c.googleEventId;
   Object.assign(c, {
@@ -12109,7 +12167,9 @@ async function editarCompromisso(id) {
     responsavel: responsavel || null,
     status: status || 'agendado',
     observacoes: (observacoes || '').trim() || null,
-    convidados: _parseEmails(convidadosEmails)
+    convidados: autoConvidar
+      ? _autoConvidados(_parseEmails(convidadosEmails), responsavel, clienteId || null, clientes)
+      : _parseEmails(convidadosEmails)
   });
   await DB.saveCompromisso(c);
   toast('Compromisso atualizado', '', 'success');
@@ -12187,7 +12247,7 @@ async function _sincronizarMeetEdicao(c) {
     });
     if (res?.limparVinculo) {
       // Evento foi deletado manualmente no Google → desvincula
-      c.googleEventId = null; c.meetLink = null; c.htmlLink = null;
+      c.googleEventId = null; c.meetLink = null; c.htmlLink = null; c.rsvp = null;
       await DB.saveCompromisso(c);
       toast('Reunião não encontrada no Google', 'O vínculo foi removido. Crie uma nova reunião se precisar.', 'info');
       return;
@@ -12209,13 +12269,48 @@ async function _sincronizarMeetEdicao(c) {
 async function _cancelarMeetDoCompromisso(c, silencioso) {
   try {
     await window.UC_RemoteDB.cancelarEventoCalendar(c.googleEventId);
-    c.googleEventId = null; c.meetLink = null; c.htmlLink = null;
+    c.googleEventId = null; c.meetLink = null; c.htmlLink = null; c.rsvp = null;
     await DB.saveCompromisso(c);
     if (!silencioso) toast('Reunião cancelada', 'Convidados foram notificados.', 'success');
   } catch (e) {
     console.error('[Meet] erro ao cancelar', e);
     toast('Falha ao cancelar reunião no Google', String(e?.message || e) + ' — cancele manualmente no Calendar.', 'error');
   }
+}
+
+// Fase 3 — consulta no Google as respostas dos convidados e guarda no
+// compromisso (cache local — o botão "🔄 atualizar respostas" força nova
+// consulta). Se o evento sumiu/foi cancelado no Google, desfaz o vínculo.
+async function atualizarRsvpCompromisso(id) {
+  const compromissos = await DB.getAllCompromissos();
+  const c = compromissos.find(x => x.id === id);
+  if (!c?.googleEventId) return;
+  try {
+    const r = await window.UC_RemoteDB.rsvpEventoCalendar(c.googleEventId);
+    if (r?.limparVinculo) {
+      c.googleEventId = null; c.meetLink = null; c.htmlLink = null; c.rsvp = null;
+      await DB.saveCompromisso(c);
+      toast('Reunião não encontrada no Google', 'O vínculo foi removido. Crie uma nova reunião se precisar.', 'info');
+    } else if (!r || r.ok === false) {
+      toast('RSVP não consultado', 'Erro: ' + (r?.erro || 'desconhecido'), 'error');
+      return;
+    } else {
+      c.rsvp = { convidados: r.convidados || [], atualizadoEm: Date.now() };
+      await DB.saveCompromisso(c);
+      const externos = (r.convidados || []).filter(a => !a.organizador);
+      const confirmados = externos.filter(a => a.resposta === 'accepted').length;
+      toast('RSVP atualizado', externos.length
+        ? confirmados + ' de ' + externos.length + ' convidado(s) confirmaram'
+        : 'Evento sem convidados externos', 'success');
+    }
+  } catch (e) {
+    console.error('[Meet] erro ao consultar RSVP', e);
+    toast('Falha ao consultar RSVP', String(e?.message || e), 'error');
+    return;
+  }
+  if (state.currentRoute === 'agenda') renderAgenda();
+  else if (state.currentRoute === 'process') renderProcessTabContent();
+  else if (state.currentRoute === 'clienteDetalhe') renderClienteDetalhe();
 }
 
 // ====================================================================

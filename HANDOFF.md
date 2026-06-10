@@ -109,7 +109,7 @@ git push origin sandbox
 
 | # | Prio | Tarefa | Estado |
 |---|---|---|---|
-| 22 | P3 | Meet Fase 3 — auto-convidados + RSVP | pendente |
+| 22 | P3 | Meet Fase 3 — auto-convidados + RSVP | ✅ implementado 10/06 — pendente recolar Calendar.gs+Codigo.gs no Apps Script e subir v6.84.0 na LOCAWEB |
 | 34 | P3 | Petição IA: fila de revisão do advogado | pendente |
 | 42 | Aux | `ucjuridico@` como membro em GitHub/CF/Vercel | ✅ concluído 10/06 — GitHub + Cloudflare ok; Vercel mantido solo (decisão B, ver `docs/RUNBOOK_42_cotitularidade.md`) |
 | 44 | P3 | Kanban de prazos — quadro visual de estado | pendente |
@@ -117,6 +117,22 @@ git push origin sandbox
 **P0 e P1 zerados.** Tudo crítico está em produção.
 
 > Backlog detalhado vive no sistema de tasks do Claude. Cada item tem descrição rica com escopo, esforço e ganchos com outras tarefas.
+
+---
+
+## 🎯 Onde paramos (sessão 10/06/2026)
+
+**Trabalhos da sessão:**
+
+1. **#42** — Co-titularidade `ucjuridico@` concluída: GitHub (collaborator `ucjuridico`, write — verificado via API) + Cloudflare (Administrator). Vercel ficou solo por decisão (opção B). Runbook: `docs/RUNBOOK_42_cotitularidade.md`.
+2. **#22** — Meet Fase 3 implementado (**v6.84.0**):
+   - **Auto-convidados**: ao criar/editar compromisso com Meet, convida automaticamente criador + responsável (e-mail canônico via `advogadoEmailPorNome`) + cliente vinculado, mesclando com os digitados. Checkbox de opt-out nos dois modais.
+   - **RSVP**: nova action `rsvpEventoCalendar` (Calendar.gs + switch do Codigo.gs + wrapper em api.js) lê `responseStatus` dos convidados. Card do compromisso ganhou linha "🙋 RSVP" com contadores ✅/❌/❔/⏳, lista expandível por convidado e botão "🔄 atualizar respostas" (cache em `compromisso.rsvp`). Vínculo é desfeito se o evento sumiu/foi cancelado no Google.
+
+**Pendente de ação manual (sessão 10/06):**
+
+- **Apps Script**: recolar do raw em `main` → `backend/Calendar.gs` e `backend/Codigo.gs` (nova action RSVP).
+- **LOCAWEB**: subir `v6.84.0` via FileZilla (`index.html`, `api.js`, `service-worker.js`).
 
 ---
 

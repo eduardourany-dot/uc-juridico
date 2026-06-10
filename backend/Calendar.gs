@@ -16,6 +16,8 @@
  *   criarEventoCalendar     POST  → cria evento+Meet+convite, retorna {eventId, meetLink, htmlLink}
  *   atualizarEventoCalendar POST  → patch (re-notifica convidados)
  *   cancelarEventoCalendar  POST  → remove (notifica cancelamento)
+ *   rsvpEventoCalendar      POST  → lê respostas dos convidados (Fase 3),
+ *                                   retorna {convidados:[{email, nome, organizador, resposta, comentario}]}
  *
  * Body esperado (criar/atualizar):
  *   {
@@ -224,6 +226,46 @@ function actionCancelarEventoCalendar_(ctx) {
     throw err;
   }
   return { ok: true };
+}
+
+// Fase 3 — RSVP: lê o evento e devolve a resposta de cada convidado.
+// resposta ∈ 'needsAction' | 'declined' | 'tentative' | 'accepted'.
+function actionRsvpEventoCalendar_(ctx) {
+  if (typeof Calendar === 'undefined') {
+    throw new Error('calendar_api_nao_habilitada');
+  }
+  var body = ctx.body || {};
+  var eventId = String(body.eventId || '').trim();
+  if (!eventId) throw new Error('eventId_obrigatorio');
+
+  var ev;
+  try {
+    ev = Calendar.Events.get(UC_CAL_ID, eventId);
+  } catch (err) {
+    if (_calIsNotFound_(err)) {
+      return { ok: false, erro: 'evento_nao_encontrado', limparVinculo: true };
+    }
+    throw err;
+  }
+  if (ev.status === 'cancelled') {
+    return { ok: false, erro: 'evento_cancelado', limparVinculo: true };
+  }
+
+  var lista = ev.attendees || [];
+  var convidados = [];
+  for (var i = 0; i < lista.length; i++) {
+    var a = lista[i] || {};
+    if (a.resource) continue; // salas/equipamentos não são convidados
+    convidados.push({
+      email: String(a.email || '').toLowerCase(),
+      nome: a.displayName || null,
+      organizador: !!a.organizer,
+      resposta: a.responseStatus || 'needsAction',
+      comentario: a.comment || null
+    });
+  }
+
+  return { ok: true, eventId: ev.id, status: ev.status, convidados: convidados };
 }
 
 // ------------------------------------------------------------

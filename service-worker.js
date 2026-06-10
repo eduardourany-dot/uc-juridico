@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.83.0 (perf: cache em memória TTL 5min em DB.getAll_ — reduz drasticamente requests Firestore quando user navega entre páginas. Antes cada navegação baixava 20-35MB; agora só 1ª vez ou após save. Invalidação automática em upsert/softDelete/cascadeSoftDelete; debug via window.UC_DB_DEBUG)
-const CACHE_NAME = 'uc-juridico-v6-83-0';
+// Service Worker — UC Jurídico v6.84.0 (feat #22: Meet Fase 3 — auto-convidados [criador + responsável + cliente vinculado, com opt-out nos modais] e RSVP [nova action rsvpEventoCalendar no Apps Script; card do compromisso mostra ✅/❌/❔/⏳ por convidado com botão de atualizar])
+const CACHE_NAME = 'uc-juridico-v6-84-0';
 const APP_SHELL = [
   './',
   './index.html',

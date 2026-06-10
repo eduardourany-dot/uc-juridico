@@ -710,6 +710,11 @@ const RemoteDB = {
   async cancelarEventoCalendar(eventId) {
     return await callAppsScript('cancelarEventoCalendar', null, { eventId });
   },
+  // Fase 3 — respostas dos convidados (RSVP)
+  // retorna: { ok, convidados:[{email, nome, organizador, resposta, comentario}] } | { ok:false, erro, limparVinculo? }
+  async rsvpEventoCalendar(eventId) {
+    return await callAppsScript('rsvpEventoCalendar', null, { eventId });
+  },
 
   // Jurisprudência
   async getJurisprudenceByProcess(pid) {

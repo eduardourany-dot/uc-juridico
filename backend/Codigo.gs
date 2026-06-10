@@ -84,6 +84,7 @@ function handle_(e, method) {
       case 'criarEventoCalendar':     return json_(actionCriarEventoCalendar_(ctx));
       case 'atualizarEventoCalendar': return json_(actionAtualizarEventoCalendar_(ctx));
       case 'cancelarEventoCalendar':  return json_(actionCancelarEventoCalendar_(ctx));
+      case 'rsvpEventoCalendar':      return json_(actionRsvpEventoCalendar_(ctx));
       default: return json_({ error: 'unknown_action', action: action }, 400);
     }
   } catch (err) {
