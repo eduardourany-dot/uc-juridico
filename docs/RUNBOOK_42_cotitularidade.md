@@ -4,8 +4,8 @@
 > Esta etapa estende o acesso da segunda titular — `ucjuridico@uranydecastro.com.br` — às
 > três plataformas restantes. Todos os passos são manuais (painel web); este runbook é o roteiro.
 >
-> **Estado em 10/06/2026:** nenhuma das três plataformas tem `ucjuridico@` como membro.
-> No GitHub, o único colaborador do repo é `eduardourany-dot` (admin) — verificado via API.
+> **✅ CONCLUÍDO em 10/06/2026:** GitHub e Cloudflare feitos. Vercel: decisão **B** —
+> mantém solo no plano Hobby, sem co-titularidade (contingência via recuperação de conta).
 
 ---
 
@@ -67,8 +67,8 @@ Opções, em ordem de recomendação:
 
 ## 4. Checklist de conclusão
 
-- [ ] Conta GitHub de `ucjuridico@` criada, com 2FA
-- [ ] Convite aceito no repo `uc-juridico` (aparece em Collaborators)
-- [ ] Membro Cloudflare aceito, com 2FA, enxergando os 3 workers + Pages
-- [ ] Decisão tomada sobre o Vercel (A, B ou C) e registrada no HANDOFF
-- [ ] Atualizar a linha #42 do backlog no `HANDOFF.md` para **concluído**
+- [x] Conta GitHub de `ucjuridico@` criada, com 2FA
+- [x] Convite aceito no repo `uc-juridico` (aparece em Collaborators)
+- [x] Membro Cloudflare aceito, com 2FA, enxergando os 3 workers + Pages
+- [x] Decisão tomada sobre o Vercel: **opção B** (manter solo + contingência de recuperação)
+- [x] Atualizar a linha #42 do backlog no `HANDOFF.md` para **concluído**

@@ -111,7 +111,7 @@ git push origin sandbox
 |---|---|---|---|
 | 22 | P3 | Meet Fase 3 — auto-convidados + RSVP | pendente |
 | 34 | P3 | Petição IA: fila de revisão do advogado | pendente |
-| 42 | Aux | `ucjuridico@` como membro em GitHub/CF/Vercel | em andamento — runbook em `docs/RUNBOOK_42_cotitularidade.md`, aguardando passos manuais + decisão Vercel |
+| 42 | Aux | `ucjuridico@` como membro em GitHub/CF/Vercel | ✅ concluído 10/06 — GitHub + Cloudflare ok; Vercel mantido solo (decisão B, ver `docs/RUNBOOK_42_cotitularidade.md`) |
 | 44 | P3 | Kanban de prazos — quadro visual de estado | pendente |
 
 **P0 e P1 zerados.** Tudo crítico está em produção.
