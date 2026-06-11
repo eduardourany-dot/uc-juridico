@@ -8,8 +8,8 @@
 
 | Item | Valor |
 |---|---|
-| **Versão em prod** | `v6.83.0` |
-| **Último commit (main + sandbox)** | `2428ab5` — perf: cache em memória TTL 5min em DB.getAll_ |
+| **Versão em prod** | `v6.84.0` (LOCAWEB + GitHub Pages + Apps Script atualizados) |
+| **Último commit (main + sandbox)** | `343e698` — feat(#22): Meet Fase 3 — auto-convidados + RSVP |
 | **Branch ativo de trabalho** | `sandbox` |
 | **Working tree** | Limpo (sem mudanças não-commitadas) |
 | **Repositório** | https://github.com/eduardourany-dot/uc-juridico |
@@ -28,7 +28,7 @@
 - **Cloud Functions**: `djenAutoCheckCron` + `djenAutoCheckHttp`
 - **Workers**: 3 Cloudflare (uc-djen-proxy, uc-mni-tjgo, uc-datajud) + 1 Vercel (uc-mni-vercel)
 - **Hospedagem**: GitHub Pages (legado) + LOCAWEB (`uc.uranydecastro.adv.br`)
-- **Co-titularidade**: `eduardourany@uranydecastro.com.br` + `ucjuridico@uranydecastro.com.br` (segunda titular em Firebase IAM, Apps Script, allowlist e alertas)
+- **Co-titularidade**: `eduardourany@uranydecastro.com.br` + `ucjuridico@uranydecastro.com.br` (segunda titular em Firebase IAM, Apps Script, allowlist, alertas, GitHub e Cloudflare — Vercel solo por decisão, ver `docs/RUNBOOK_42_cotitularidade.md`)
 
 ---
 
@@ -109,7 +109,7 @@ git push origin sandbox
 
 | # | Prio | Tarefa | Estado |
 |---|---|---|---|
-| 22 | P3 | Meet Fase 3 — auto-convidados + RSVP | ✅ implementado 10/06 — pendente recolar Calendar.gs+Codigo.gs no Apps Script e subir v6.84.0 na LOCAWEB |
+| 22 | P3 | Meet Fase 3 — auto-convidados + RSVP | ✅ concluído 10/06 — v6.84.0 em produção (Apps Script + LOCAWEB atualizados) |
 | 34 | P3 | Petição IA: fila de revisão do advogado | pendente |
 | 42 | Aux | `ucjuridico@` como membro em GitHub/CF/Vercel | ✅ concluído 10/06 — GitHub + Cloudflare ok; Vercel mantido solo (decisão B, ver `docs/RUNBOOK_42_cotitularidade.md`) |
 | 44 | P3 | Kanban de prazos — quadro visual de estado | pendente |
@@ -129,10 +129,7 @@ git push origin sandbox
    - **Auto-convidados**: ao criar/editar compromisso com Meet, convida automaticamente criador + responsável (e-mail canônico via `advogadoEmailPorNome`) + cliente vinculado, mesclando com os digitados. Checkbox de opt-out nos dois modais.
    - **RSVP**: nova action `rsvpEventoCalendar` (Calendar.gs + switch do Codigo.gs + wrapper em api.js) lê `responseStatus` dos convidados. Card do compromisso ganhou linha "🙋 RSVP" com contadores ✅/❌/❔/⏳, lista expandível por convidado e botão "🔄 atualizar respostas" (cache em `compromisso.rsvp`). Vínculo é desfeito se o evento sumiu/foi cancelado no Google.
 
-**Pendente de ação manual (sessão 10/06):**
-
-- **Apps Script**: recolar do raw em `main` → `backend/Calendar.gs` e `backend/Codigo.gs` (nova action RSVP).
-- **LOCAWEB**: subir `v6.84.0` via FileZilla (`index.html`, `api.js`, `service-worker.js`).
+**Ações manuais da sessão: ✅ todas concluídas** — Apps Script recolado (Calendar.gs + Codigo.gs) e v6.84.0 no ar na LOCAWEB.
 
 ---
 
