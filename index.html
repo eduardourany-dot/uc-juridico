@@ -7044,23 +7044,7 @@ async function renderDeadlines() {
   const warning = active.filter(d => d.days > 5 && d.days <= 14);
   const safe = active.filter(d => d.days > 14);
 
-  $('appContent').innerHTML = `
-    <div class="page-header">
-      <div>
-        <h1 class="page-title"><span class="smallcaps-prefix">Publicações</span></h1>
-        <p class="page-subtitle">${active.length} publicação(ões) com prazo ativo na carteira</p>
-      </div>
-      <div class="flex gap-2 flex-wrap">
-        <button class="btn ${state._prazosView !== 'kanban' ? 'btn-primary' : 'btn-outline'} btn-sm" onclick="state._prazosView='lista'; renderDeadlines();">📋 Lista</button>
-        <button class="btn ${state._prazosView === 'kanban' ? 'btn-primary' : 'btn-outline'} btn-sm" onclick="state._prazosView='kanban'; renderDeadlines();">🗂 Kanban</button>
-        <button class="btn btn-secondary btn-sm" onclick="djenRunSearch()" title="Buscar publicações novas no Diário de Justiça Eletrônico (CNJ)">🔔 Pesquisar DJ</button>
-        <button class="btn btn-outline btn-sm" onclick="exportDeadlinesCsv()">Exportar CSV</button>
-      </div>
-    </div>
-
-    ${secaoIntimacoes}
-
-    ${perdidos.length > 0 ? `
+  const secaoPerdidos = perdidos.length > 0 ? `
       <div id="secao-prazos-perdidos" class="card mb-4" style="border-left: 4px solid var(--uc-red); background: var(--uc-red-soft, #fde8e8);">
         <h3 class="font-serif font-semibold smallcaps mb-1" style="color: var(--uc-red);">✗ Prazos perdidos · ${perdidos.length}</h3>
         <p class="help-text" style="margin: 0 0 10px;">Resolva o alerta: <strong>Reconhecer</strong> tira do aviso (mantém no histórico) · <strong>Reabrir</strong> volta pra pendente (se foi marcado por engano).</p>
@@ -7082,8 +7066,9 @@ async function renderDeadlines() {
           </div>
         `).join('')}
       </div>
-    ` : ''}
+    ` : '';
 
+  const statsGrid = `
     <div class="grid gap-3 mb-6" style="grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));">
       <div class="stat-card" style="${expired.length > 0 ? 'background: var(--uc-red-soft); border-color: var(--uc-red);' : ''}">
         <div class="stat-label">Vencidos</div>
@@ -7104,10 +7089,9 @@ async function renderDeadlines() {
         <div class="stat-value">${safe.length}</div>
         <div class="stat-meta">+14 dias</div>
       </div>
-    </div>
+    </div>`;
 
-    ${state._prazosView === 'kanban' ? _renderKanbanPrazos(active, done, processes) : `
-    ${active.length === 0 ? `
+  const listaSecoes = active.length === 0 ? `
       <div class="card empty-state">
         <h3 class="empty-state-title">Nenhuma publicação ativa</h3>
         <p class="empty-state-msg">Você não tem publicações com prazo pendente. Adicione publicações a partir de cada processo na aba "Publicações".</p>
@@ -7117,8 +7101,34 @@ async function renderDeadlines() {
       ${urgent.length > 0 ? `<h3 class="font-serif text-lg font-semibold smallcaps mt-6 mb-3" style="color: var(--uc-red);">Urgentes · ${urgent.length}</h3>${urgent.sort((a,b) => a.days - b.days).map(d => renderGlobalDeadlineRow(d)).join('')}` : ''}
       ${warning.length > 0 ? `<h3 class="font-serif text-lg font-semibold smallcaps mt-6 mb-3" style="color: var(--uc-amber);">Atenção · ${warning.length}</h3>${warning.sort((a,b) => a.days - b.days).map(d => renderGlobalDeadlineRow(d)).join('')}` : ''}
       ${safe.length > 0 ? `<h3 class="font-serif text-lg font-semibold smallcaps mt-6 mb-3" style="color: var(--uc-green);">Próximos · ${safe.length}</h3>${safe.sort((a,b) => a.days - b.days).map(d => renderGlobalDeadlineRow(d)).join('')}` : ''}
-    `}`}
-  `;
+    `;
+
+  const header = `
+    <div class="page-header">
+      <div>
+        <h1 class="page-title"><span class="smallcaps-prefix">Publicações</span></h1>
+        <p class="page-subtitle">${active.length} publicação(ões) com prazo ativo na carteira</p>
+      </div>
+      <div class="flex gap-2 flex-wrap">
+        <button class="btn ${state._prazosView !== 'kanban' ? 'btn-primary' : 'btn-outline'} btn-sm" onclick="state._prazosView='lista'; renderDeadlines();">📋 Lista</button>
+        <button class="btn ${state._prazosView === 'kanban' ? 'btn-primary' : 'btn-outline'} btn-sm" onclick="state._prazosView='kanban'; renderDeadlines();">🗂 Kanban</button>
+        <button class="btn btn-secondary btn-sm" onclick="djenRunSearch()" title="Buscar publicações novas no Diário de Justiça Eletrônico (CNJ)">🔔 Pesquisar DJ</button>
+        <button class="btn btn-outline btn-sm" onclick="exportDeadlinesCsv()">Exportar CSV</button>
+      </div>
+    </div>`;
+
+  // Kanban primeiro (quadro é o foco da visão); na lista, a ordem clássica
+  // com a Caixa de intimações no topo é preservada.
+  $('appContent').innerHTML = state._prazosView === 'kanban'
+    ? `${header}
+       ${secaoPerdidos}
+       ${_renderKanbanPrazos(active, done, processes)}
+       <div style="margin-top: 20px;">${secaoIntimacoes}</div>`
+    : `${header}
+       ${secaoIntimacoes}
+       ${secaoPerdidos}
+       ${statsGrid}
+       ${listaSecoes}`;
 }
 
 // ====================================================================
@@ -7167,6 +7177,7 @@ function _renderKanbanPrazos(active, done, processes) {
     <p class="help-text" style="margin-top: 8px;">
       Régua de cobrança: lembretes contam pela <strong>fatal interna</strong> (fatal real − 2 dias úteis).
       A fatal real é limite absoluto — no dia dela, todos (responsável + suplente + sócio) recebem o alerta ⛔.
+      Prazos entram no quadro quando você <strong>agenda prazo</strong> a partir de uma intimação (caixa abaixo) ou cria pela aba Publicações do processo.
     </p>`;
 }
 

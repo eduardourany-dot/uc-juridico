@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.85.0 (feat #44: Kanban de prazos + máquina de estados — etapas atribuido→ciente→elaboracao→revisao→protocolado com trilha de eventos; fatal interna = fatal − 2 úteis vira a data de cobrança [marcos T-* sobre a interna + marco ⛔FATAL no dia da fatal real]; escalonamento sem-ACK 24h pro sócio no Lembretes.gs; ação "ajustar fatal" com evento recalculado {antes,depois,motivo} e re-agendamento de lembretes)
-const CACHE_NAME = 'uc-juridico-v6-85-0';
+// Service Worker — UC Jurídico v6.85.1 (fix #44 UX: no modo Kanban o quadro renderiza logo abaixo do cabeçalho — antes ficava escondido depois da Caixa de intimações; dica no rodapé do quadro explica que prazos entram via "Agendar prazo")
+const CACHE_NAME = 'uc-juridico-v6-85-1';
 const APP_SHELL = [
   './',
   './index.html',
