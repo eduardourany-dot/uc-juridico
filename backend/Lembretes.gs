@@ -45,7 +45,8 @@ const MARCO_LABELS = {
   'T-2': '⚠ Prazo em 2 dias',
   'T-1': '🚨 Prazo AMANHÃ',
   'T-0': '🚨🚨 Prazo HOJE',
-  'T+1': '✗ Prazo VENCEU'
+  'T+1': '✗ Prazo VENCEU',
+  'FATAL': '⛔ FATAL REAL HOJE — improrrogável'
 };
 
 // =====================================================================
@@ -317,7 +318,7 @@ function enviarFcmPush(token, title, body, data) {
 
 // Marcos em que email é enviado (push é enviado em TODOS os marcos sempre).
 // Email é redundância pros marcos críticos onde o push pode ser perdido.
-const EMAIL_MARCOS = ['T-1', 'T-0', 'T+1'];
+const EMAIL_MARCOS = ['T-1', 'T-0', 'T+1', 'FATAL'];
 
 /**
  * Abstração de provider. Hoje: Gmail (MailApp). Amanhã: SES, se precisar.
@@ -356,15 +357,20 @@ function _montarEmailLembrete(marco, prazo, processo) {
     'T-2': 'Prazo em 2 dias',
     'T-1': '🚨 PRAZO AMANHÃ',
     'T-0': '🚨🚨 PRAZO HOJE',
-    'T+1': '✗ PRAZO VENCIDO ONTEM'
+    'T+1': '✗ PRAZO VENCIDO ONTEM',
+    'FATAL': '⛔ FATAL REAL HOJE — IMPRORROGÁVEL'
   };
   const cores = {
     'T-7': '#4a7c4a', 'T-3': '#b87f1c', 'T-2': '#b87f1c',
-    'T-1': '#a8472d', 'T-0': '#a8472d', 'T+1': '#a8472d'
+    'T-1': '#a8472d', 'T-0': '#a8472d', 'T+1': '#a8472d', 'FATAL': '#7a1f1f'
   };
   const dl = (typeof prazo.deadlineDate === 'string')
     ? prazo.deadlineDate.slice(0,10)
     : new Date(prazo.deadlineDate).toISOString().slice(0,10);
+  // #44 — fatal interna (data de cobrança), quando o prazo tem
+  const dlInterna = (prazo.deadlineInternaDate && prazo.deadlineInternaDate !== prazo.deadlineDate)
+    ? String(prazo.deadlineInternaDate).slice(0,10)
+    : null;
   const url = 'https://uc.uranydecastro.adv.br/#process/' + processo._docId;
 
   const titulo = labels[marco] || marco;
@@ -379,7 +385,8 @@ function _montarEmailLembrete(marco, prazo, processo) {
       </div>
 
       <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px; font-size: 14px;">
-        <tr><td style="padding: 6px 0; color: #6b6b68; width: 130px;">Vencimento:</td><td style="padding: 6px 0; font-weight: 600; color: #1f1f1f;">${_escapeEmail(dl)}</td></tr>
+        ${dlInterna ? `<tr><td style="padding: 6px 0; color: #6b6b68; width: 130px;">Fatal interna:</td><td style="padding: 6px 0; font-weight: 600; color: #a8472d;">${_escapeEmail(dlInterna)} (data de cobrança)</td></tr>` : ''}
+        <tr><td style="padding: 6px 0; color: #6b6b68; width: 130px;">${dlInterna ? 'Fatal real:' : 'Vencimento:'}</td><td style="padding: 6px 0; font-weight: 600; color: #1f1f1f;">${_escapeEmail(dl)}${dlInterna ? ' — limite absoluto' : ''}</td></tr>
         ${processo.client ? `<tr><td style="padding: 6px 0; color: #6b6b68;">Cliente:</td><td style="padding: 6px 0;">${_escapeEmail(processo.client)}</td></tr>` : ''}
         ${(processo.cnj || processo.name) ? `<tr><td style="padding: 6px 0; color: #6b6b68;">Processo:</td><td style="padding: 6px 0;">${_escapeEmail(processo.cnj || processo.name)}</td></tr>` : ''}
         ${prazo.tribunal && prazo.tribunal !== 'NACIONAL' ? `<tr><td style="padding: 6px 0; color: #6b6b68;">Tribunal:</td><td style="padding: 6px 0;">${_escapeEmail(prazo.tribunal)}</td></tr>` : ''}
@@ -439,12 +446,31 @@ function _testarEmailEnvio() {
 /**
  * Replica a lógica de marcoDoPrazo do client. Faixas exclusivas.
  */
+// Normaliza data fatal (ISO com hora, date-only ou timestamp) pro
+// DIA-CALENDÁRIO à meia-noite no fuso do script (America/Sao_Paulo).
+// Corrige o off-by-one: datas gravadas ao meio-dia faziam ceil() empurrar
+// o T-0 pro dia seguinte ao vencimento.
+function _diaFatalLocal(v) {
+  if (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}/.test(v)) {
+    const parts = v.slice(0, 10).split('-');
+    return new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10)).getTime();
+  }
+  const d = new Date(v); d.setHours(0, 0, 0, 0); return d.getTime();
+}
+
 function _marcoDoPrazo(d, todayMs) {
   if (!d || !d.deadlineDate) return null;
   if (STATUS_TERMINAIS.indexOf(d.status) >= 0) return null;
   if (d.status === 'suspenso') return null;
-  const dl = typeof d.deadlineDate === 'number' ? d.deadlineDate : new Date(d.deadlineDate).getTime();
-  const days = Math.ceil((dl - todayMs) / 86400000);
+  // #44 — régua de cobrança roda sobre a FATAL INTERNA (fatal − 2 úteis)
+  // quando presente; o dia da fatal real vira o marco absoluto 'FATAL'.
+  const temInterna = !!(d.deadlineInternaDate && d.deadlineInternaDate !== d.deadlineDate);
+  if (temInterna) {
+    const daysReal = Math.round((_diaFatalLocal(d.deadlineDate) - todayMs) / 86400000);
+    if (daysReal <= 0) return 'FATAL';
+  }
+  const dl = _diaFatalLocal(temInterna ? d.deadlineInternaDate : d.deadlineDate);
+  const days = Math.round((dl - todayMs) / 86400000);
   if (days >= 4 && days <= 7) return 'T-7';
   if (days === 3) return 'T-3';
   if (days === 2) return 'T-2';
@@ -463,7 +489,7 @@ function _rotearDestinatarios(titular, suplente, socio, marco, titularAusente) {
   let lista = [];
   if (['T-7','T-3','T-2'].indexOf(marco) >= 0) lista = [principal];
   else if (marco === 'T-1') lista = [principal, cobertura];
-  else if (marco === 'T-0' || marco === 'T+1') lista = [principal, cobertura, socio];
+  else if (marco === 'T-0' || marco === 'T+1' || marco === 'FATAL') lista = [principal, cobertura, socio];
   else lista = [principal];
   // dedup + remove vazios
   const seen = {};
@@ -484,10 +510,13 @@ function cron_lembretesDePrazo() {
   const today = new Date(); today.setHours(0,0,0,0);
   const todayMs = today.getTime();
 
-  // Janela: 2 dias atrás (cobre T+1) até 8 dias à frente (cobre T-7).
-  // deadlineDate é ISO string — comparação lexicográfica = ordem cronológica.
+  // Janela: 2 dias atrás (cobre T+1) até 12 dias à frente. A query filtra
+  // pela fatal REAL, mas os marcos contam pela fatal INTERNA (real − 2 úteis,
+  // que com fim de semana/feriado pode ficar até ~4-5 dias-calendário antes);
+  // +12 garante T-7 sobre a interna. deadlineDate é ISO string — comparação
+  // lexicográfica = ordem cronológica.
   const janelaInicio = new Date(todayMs - 2 * 86400000).toISOString();
-  const janelaFim = new Date(todayMs + 8 * 86400000).toISOString();
+  const janelaFim = new Date(todayMs + 12 * 86400000).toISOString();
 
   const prazos = _firestoreQuery('prazos', [
     { field: 'deadlineDate', op: 'GREATER_THAN_OR_EQUAL', value: janelaInicio },
@@ -553,10 +582,14 @@ function cron_lembretesDePrazo() {
         processados++;
         try {
           const title = MARCO_LABELS[marco] || ('Prazo ' + marco);
-          const body = (d.description || d.type || 'Prazo') + ' · vence ' +
-            (typeof d.deadlineDate === 'string' ? d.deadlineDate.slice(0,10) : new Date(d.deadlineDate).toISOString().slice(0,10));
+          const dlRealStr = typeof d.deadlineDate === 'string' ? d.deadlineDate.slice(0,10) : new Date(d.deadlineDate).toISOString().slice(0,10);
+          const temInterna = !!(d.deadlineInternaDate && d.deadlineInternaDate !== d.deadlineDate);
+          const venc = temInterna
+            ? ('cobra ' + String(d.deadlineInternaDate).slice(0,10) + ' · fatal real ' + dlRealStr)
+            : ('vence ' + dlRealStr);
+          const body = (d.description || d.type || 'Prazo') + ' · ' + venc;
           const url = 'https://uc.uranydecastro.adv.br/#process/' + proc._docId;
-          const requireInteraction = ['T-1','T-0','T+1'].indexOf(marco) >= 0 ? 'true' : 'false';
+          const requireInteraction = ['T-1','T-0','T+1','FATAL'].indexOf(marco) >= 0 ? 'true' : 'false';
           const r = enviarFcmPush(tokenInfo.token, title, body, {
             tag: 'prazo-' + d._docId + '-' + marco,
             url: url,
@@ -617,6 +650,15 @@ function cron_lembretesDePrazo() {
     }
   }
 
+  // #44 — escalonamento por falta de ciência (ACK): prazo atribuído há mais
+  // de 24h sem o responsável dar ciência → cobra responsável + sócio.
+  let semAck = 0;
+  try {
+    semAck = _escalonarSemAck(fcmTokens, socio, processos);
+  } catch (e) {
+    Logger.log('escalonamento sem-ACK falhou: ' + e.message);
+  }
+
   // Persiste fcmTokens limpo se tirou algum
   if (tokensRemovidos) {
     try {
@@ -631,11 +673,134 @@ function cron_lembretesDePrazo() {
     ' processos_fetch=' + processIdsUnicos.length +
     ' processados=' + processados +
     ' enviados=' + enviados +
+    ' sem_ack_escalados=' + semAck +
     ' erros=' + erros +
     ' ignorados=' + ignorados +
     ' elapsed=' + elapsed + 'ms';
   Logger.log(summary);
-  return { prazos: prazos.length, processos_fetch: processIdsUnicos.length, processados, enviados, erros, ignorados, elapsed };
+  return { prazos: prazos.length, processos_fetch: processIdsUnicos.length, processados, enviados, semAck, erros, ignorados, elapsed };
+}
+
+// =====================================================================
+// #44 — Escalonamento por falta de ciência (ACK)
+// =====================================================================
+// Prazo na etapa 'atribuido' com atribuidoEm há mais de SEM_ACK_HORAS sem
+// cienteEm → push + email pro responsável ("dê ciência") e pro sócio
+// ("escalonamento"). Re-cobra a cada 24h até a ciência ser dada.
+// Prazos legados sem atribuidoEm são ignorados (sem cobrança retroativa).
+// Query usa filtro único de igualdade (índice automático do Firestore);
+// status/tempo são filtrados em código — universo pequeno.
+const SEM_ACK_HORAS = 24;
+
+function _escalonarSemAck(fcmTokens, socio, processosCache) {
+  const agora = Date.now();
+  let prazos;
+  try {
+    prazos = _firestoreQuery('prazos', [
+      { field: 'etapa', op: 'EQUAL', value: 'atribuido' }
+    ], 300);
+  } catch (e) {
+    Logger.log('sem-ACK query falhou: ' + e.message);
+    return 0;
+  }
+
+  let enviados = 0;
+  for (const d of prazos) {
+    if (d.status !== 'pendente') continue;
+    if (!d.atribuidoEm || d.cienteEm) continue;
+    const horas = (agora - d.atribuidoEm) / 3600000;
+    if (horas < SEM_ACK_HORAS) continue;
+
+    let proc = processosCache && processosCache[d.processId];
+    if (!proc) {
+      try { proc = _firestoreGet('processos/' + d.processId); } catch (e) { proc = null; }
+    }
+    if (!proc) continue;
+    const titular = proc.advogadoResponsavel || null;
+
+    const nomes = [];
+    if (titular) nomes.push(titular);
+    if (socio && nomes.indexOf(socio) < 0) nomes.push(socio);
+    if (!nomes.length) continue;
+
+    const notificado = d.notificado || {};
+    notificado.SEM_ACK = notificado.SEM_ACK || {};
+    let alterado = false;
+    const horasInt = Math.floor(horas);
+    const dlInterna = d.deadlineInternaDate ? String(d.deadlineInternaDate).slice(0,10) : null;
+    const dlReal = typeof d.deadlineDate === 'string' ? d.deadlineDate.slice(0,10) : '';
+
+    for (const nome of nomes) {
+      const email = NOME_EMAIL_MAP[nome];
+      if (!email) continue;
+      const ultimo = notificado.SEM_ACK[email];
+      if (ultimo && (agora - ultimo.at) < SEM_ACK_HORAS * 3600000) continue;
+
+      const ehEscalonamento = nome === socio && nome !== titular;
+      const title = ehEscalonamento ? '🔺 Escalonamento: prazo sem ciência' : '✋ Prazo aguardando sua ciência';
+      const body = (d.description || d.type || 'Prazo') +
+        ' · atribuído há ' + horasInt + 'h sem ciência' +
+        (ehEscalonamento && titular ? ' · responsável: ' + titular : '') +
+        (dlInterna ? ' · cobra ' + dlInterna : '') +
+        (dlReal ? ' · fatal ' + dlReal : '');
+      const url = 'https://uc.uranydecastro.adv.br/#process/' + (proc._docId || d.processId);
+
+      let pushOk = false, emailOk = false;
+      const tokenInfo = fcmTokens[email];
+      if (tokenInfo && tokenInfo.token) {
+        try {
+          const r = enviarFcmPush(tokenInfo.token, title, body, {
+            tag: 'prazo-semack-' + d._docId,
+            url: url,
+            requireInteraction: 'true',
+            processId: proc._docId || d.processId,
+            prazoId: d._docId
+          });
+          pushOk = !!r.ok;
+        } catch (e) {
+          Logger.log('sem-ACK push exceção pra ' + email + ': ' + e.message);
+        }
+      }
+      // Email sempre (escalonamento é crítico — não depende do push)
+      try {
+        const html =
+          '<div style="font-family: -apple-system, BlinkMacSystemFont, \'Segoe UI\', Roboto, sans-serif; max-width: 600px; margin: 0 auto; background: #fafaf7; padding: 24px; border-radius: 8px; border: 1px solid #e8e3d4;">' +
+            '<div style="border-left: 4px solid #a8472d; padding-left: 16px; margin-bottom: 20px;">' +
+              '<h1 style="margin: 0 0 6px; font-size: 20px; color: #a8472d; font-weight: 600;">' + _escapeEmail(title) + '</h1>' +
+              '<p style="margin: 0; color: #1f1f1f; font-size: 15px; font-weight: 500;">' + _escapeEmail(d.description || d.type || 'Prazo') + '</p>' +
+            '</div>' +
+            '<table style="width: 100%; border-collapse: collapse; margin-bottom: 20px; font-size: 14px;">' +
+              '<tr><td style="padding: 6px 0; color: #6b6b68; width: 150px;">Atribuído há:</td><td style="padding: 6px 0; font-weight: 600; color: #a8472d;">' + horasInt + ' horas, sem ciência</td></tr>' +
+              (titular ? '<tr><td style="padding: 6px 0; color: #6b6b68;">Responsável:</td><td style="padding: 6px 0;">' + _escapeEmail(titular) + '</td></tr>' : '') +
+              (dlInterna ? '<tr><td style="padding: 6px 0; color: #6b6b68;">Fatal interna:</td><td style="padding: 6px 0; font-weight: 600;">' + _escapeEmail(dlInterna) + '</td></tr>' : '') +
+              (dlReal ? '<tr><td style="padding: 6px 0; color: #6b6b68;">Fatal real:</td><td style="padding: 6px 0; font-weight: 600;">' + _escapeEmail(dlReal) + '</td></tr>' : '') +
+              ((proc.cnj || proc.name) ? '<tr><td style="padding: 6px 0; color: #6b6b68;">Processo:</td><td style="padding: 6px 0;">' + _escapeEmail(proc.cnj || proc.name) + '</td></tr>' : '') +
+            '</table>' +
+            '<a href="' + url + '" style="display: inline-block; background: #8a6f3d; color: white; padding: 12px 24px; text-decoration: none; border-radius: 4px; font-weight: 600; font-size: 14px;">Dar ciência no UC Jurídico →</a>' +
+            '<p style="color: #6b6b68; font-size: 12px; margin-top: 28px; padding-top: 16px; border-top: 1px solid #e8e3d4;">A cobrança se repete a cada 24h até a ciência ser registrada no Kanban de prazos.</p>' +
+          '</div>';
+        const r = enviarEmail(email, '[' + title.replace(/[🔺✋]/g, '').trim() + '] ' + (d.description || d.type || 'Prazo'), html);
+        emailOk = !!r.ok;
+      } catch (e) {
+        Logger.log('sem-ACK email exceção pra ' + email + ': ' + e.message);
+      }
+
+      if (pushOk || emailOk) {
+        notificado.SEM_ACK[email] = { at: agora, push: pushOk, email: emailOk };
+        alterado = true;
+        enviados++;
+      }
+    }
+
+    if (alterado) {
+      try {
+        _firestoreUpdate('prazos/' + d._docId, { notificado: notificado, updatedAt: Date.now() });
+      } catch (e) {
+        Logger.log('sem-ACK update prazo ' + d._docId + ' falhou: ' + e.message);
+      }
+    }
+  }
+  return enviados;
 }
 
 // =====================================================================

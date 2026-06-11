@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.84.0 (feat #22: Meet Fase 3 — auto-convidados [criador + responsável + cliente vinculado, com opt-out nos modais] e RSVP [nova action rsvpEventoCalendar no Apps Script; card do compromisso mostra ✅/❌/❔/⏳ por convidado com botão de atualizar])
-const CACHE_NAME = 'uc-juridico-v6-84-0';
+// Service Worker — UC Jurídico v6.85.0 (feat #44: Kanban de prazos + máquina de estados — etapas atribuido→ciente→elaboracao→revisao→protocolado com trilha de eventos; fatal interna = fatal − 2 úteis vira a data de cobrança [marcos T-* sobre a interna + marco ⛔FATAL no dia da fatal real]; escalonamento sem-ACK 24h pro sócio no Lembretes.gs; ação "ajustar fatal" com evento recalculado {antes,depois,motivo} e re-agendamento de lembretes)
+const CACHE_NAME = 'uc-juridico-v6-85-0';
 const APP_SHELL = [
   './',
   './index.html',

@@ -112,7 +112,7 @@ git push origin sandbox
 | 22 | P3 | Meet Fase 3 — auto-convidados + RSVP | ✅ concluído 10/06 — v6.84.0 em produção (Apps Script + LOCAWEB atualizados) |
 | 34 | P3 | Petição IA: fila de revisão do advogado | pendente |
 | 42 | Aux | `ucjuridico@` como membro em GitHub/CF/Vercel | ✅ concluído 10/06 — GitHub + Cloudflare ok; Vercel mantido solo (decisão B, ver `docs/RUNBOOK_42_cotitularidade.md`) |
-| 44 | P3 | Kanban de prazos + máquina de estados do prazo | pendente — escopo ampliado 10/06 (ver sessão 10/06 abaixo) |
+| 44 | P3 | Kanban de prazos + máquina de estados do prazo | ✅ implementado 10/06 (**v6.85.0**) — pendente recolar Lembretes.gs no Apps Script e subir LOCAWEB |
 
 **P0 e P1 zerados.** Tudo crítico está em produção.
 
@@ -130,6 +130,20 @@ git push origin sandbox
    - **RSVP**: nova action `rsvpEventoCalendar` (Calendar.gs + switch do Codigo.gs + wrapper em api.js) lê `responseStatus` dos convidados. Card do compromisso ganhou linha "🙋 RSVP" com contadores ✅/❌/❔/⏳, lista expandível por convidado e botão "🔄 atualizar respostas" (cache em `compromisso.rsvp`). Vínculo é desfeito se o evento sumiu/foi cancelado no Google.
 
 **Ações manuais da sessão: ✅ todas concluídas** — Apps Script recolado (Calendar.gs + Codigo.gs) e v6.84.0 no ar na LOCAWEB.
+
+3. **#44** — Kanban de prazos + máquina de estados implementado (**v6.85.0**):
+   - **Kanban**: toggle Lista⇄Kanban na tela Publicações. Colunas 📌 Atribuído → ✋ Ciente → ✍️ Em elaboração → 🔍 Em revisão → ✅ Protocolado (últimos 14 dias). Cards ordenados pela fatal interna, com ações contextuais por etapa (dar ciência / iniciar / enviar revisão / devolver com motivo / protocolar) e "📅 ajustar fatal".
+   - **Máquina de estados**: campo `etapa` no doc do prazo; transições validadas (`_transicaoEtapaValida` — avanço pode pular, retrocesso só revisão→elaboração); todos os movimentos geram evento no `logs[]` com ator. Protocolar continua exigindo nº de protocolo. Backfill idempotente no boot (`garantirCamposKanban`).
+   - **Fatal interna** (= fatal real − 2 dias úteis, `computarFatalInterna`): persistida em `deadlineInternaDate`; régua de cobrança T-7…T+1 roda sobre ela (client + Lembretes.gs); no dia da fatal real dispara o marco **⛔FATAL** pra responsável+suplente+sócio (push requireInteraction + e-mail). Janela da query do cron ampliada pra +12 dias.
+   - **Escalonamento sem-ACK**: `_escalonarSemAck` no Lembretes.gs — prazo atribuído há >24h sem ciência cobra responsável + sócio (push + e-mail), re-cobra a cada 24h até o ACK. Legados sem `atribuidoEm` não disparam (sem cobrança retroativa).
+   - **Ajustar data fatal**: modal com motivo obrigatório → evento `recalculado {antes, depois, motivo}`, recomputa fatal interna e limpa marcos notificados (re-agenda lembretes).
+   - **🐛 Fix de off-by-one nos marcos** (pré-existente): datas fatais gravadas ao meio-dia + `Math.ceil` faziam T-0 disparar um dia DEPOIS do vencimento. Corrigido com normalização pro dia-calendário (`_diaFatalLocal`) no client e no GAS. 24 casos de teste passando (interna, FATAL, legado, date-only, feriados).
+   - Obs.: os badges de dias da LISTA de publicações (Vencidos/Urgentes/etc.) ainda usam a contagem antiga (visual, conservador +1d) — candidato a ajuste fino futuro.
+
+**Pendente de ação manual (#44):**
+
+- **Apps Script**: recolar do raw em `main` → `backend/Lembretes.gs` (fatal interna + marco FATAL + sem-ACK).
+- **LOCAWEB**: subir `v6.85.0` via FileZilla (`index.html`, `service-worker.js` — `api.js` não mudou nesta versão).
 
 **Parecer sobre spec externa (Prazos em PostgreSQL):** avaliada uma spec de redesign do módulo Prazos (event sourcing + outbox em PostgreSQL, vinda de conversa antiga que assumia v4.2.2). **Decisão: descartada a adoção literal** — arquitetura incompatível com o stack (Firestore/Apps Script, sem banco relacional nem servidor pra triggers/workers) e ~70% do conteúdo funcional já existe na v6.84.0 (cálculo CPC 219/224 com diário auditável, feriados por comarca, marcos T-7…T+1 idempotentes, escalonamento com ausência, Torre de Prazos). **4 conceitos aproveitados → incorporados ao escopo do #44:**
 

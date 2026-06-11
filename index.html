@@ -5934,7 +5934,7 @@ function rotearDestinatarios({ titular, suplente, socio, marco, titularAusente }
     lista = [principal];
   } else if (marco === 'T-1') {
     lista = [principal, cobertura];
-  } else if (marco === 'T-0' || marco === 'T+1') {
+  } else if (marco === 'T-0' || marco === 'T+1' || marco === 'FATAL') {
     lista = [principal, cobertura, socio];
   } else {
     lista = [principal];
@@ -6707,9 +6707,12 @@ async function addDeadlineFlow() {
     diarioCalculo: diario,
     deadlineDate: deadlineDate.toISOString(),
     status: STATUS_PRAZO.PENDENTE,
+    etapa: 'atribuido',
+    atribuidoEm: proc?.advogadoResponsavel ? Date.now() : null,
     logs: [],
     createdAt: Date.now()
   };
+  d.deadlineInternaDate = computarFatalInterna(d);
   appendLogPrazo(d, 'criado', { origem: 'manual', deadlineDate: d.deadlineDate, prazoDias: d.daysAllowed, unidade: d.unidade, emDobro: d.emDobro });
   // Prevenção: se já existe prazo idêntico (mesmo processo, descrição, data) — pergunta
   const dupKey = deadlineDedupKey(d);
@@ -7048,6 +7051,8 @@ async function renderDeadlines() {
         <p class="page-subtitle">${active.length} publicação(ões) com prazo ativo na carteira</p>
       </div>
       <div class="flex gap-2 flex-wrap">
+        <button class="btn ${state._prazosView !== 'kanban' ? 'btn-primary' : 'btn-outline'} btn-sm" onclick="state._prazosView='lista'; renderDeadlines();">📋 Lista</button>
+        <button class="btn ${state._prazosView === 'kanban' ? 'btn-primary' : 'btn-outline'} btn-sm" onclick="state._prazosView='kanban'; renderDeadlines();">🗂 Kanban</button>
         <button class="btn btn-secondary btn-sm" onclick="djenRunSearch()" title="Buscar publicações novas no Diário de Justiça Eletrônico (CNJ)">🔔 Pesquisar DJ</button>
         <button class="btn btn-outline btn-sm" onclick="exportDeadlinesCsv()">Exportar CSV</button>
       </div>
@@ -7101,6 +7106,7 @@ async function renderDeadlines() {
       </div>
     </div>
 
+    ${state._prazosView === 'kanban' ? _renderKanbanPrazos(active, done, processes) : `
     ${active.length === 0 ? `
       <div class="card empty-state">
         <h3 class="empty-state-title">Nenhuma publicação ativa</h3>
@@ -7111,8 +7117,111 @@ async function renderDeadlines() {
       ${urgent.length > 0 ? `<h3 class="font-serif text-lg font-semibold smallcaps mt-6 mb-3" style="color: var(--uc-red);">Urgentes · ${urgent.length}</h3>${urgent.sort((a,b) => a.days - b.days).map(d => renderGlobalDeadlineRow(d)).join('')}` : ''}
       ${warning.length > 0 ? `<h3 class="font-serif text-lg font-semibold smallcaps mt-6 mb-3" style="color: var(--uc-amber);">Atenção · ${warning.length}</h3>${warning.sort((a,b) => a.days - b.days).map(d => renderGlobalDeadlineRow(d)).join('')}` : ''}
       ${safe.length > 0 ? `<h3 class="font-serif text-lg font-semibold smallcaps mt-6 mb-3" style="color: var(--uc-green);">Próximos · ${safe.length}</h3>${safe.sort((a,b) => a.days - b.days).map(d => renderGlobalDeadlineRow(d)).join('')}` : ''}
-    `}
+    `}`}
   `;
+}
+
+// ====================================================================
+// #44 — Kanban de prazos: colunas = etapas da máquina de estados.
+// Coluna final mostra protocolados dos últimos 14 dias (feedback de fluxo).
+// ====================================================================
+function _renderKanbanPrazos(active, done, processes) {
+  const procById = {};
+  (processes || []).forEach(p => { procById[p.id] = p; });
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+
+  const porEtapa = { atribuido: [], ciente: [], elaboracao: [], revisao: [] };
+  for (const d of active) {
+    const et = PRAZO_ETAPAS.indexOf(d.etapa) >= 0 ? d.etapa : 'atribuido';
+    porEtapa[et].push(d);
+  }
+  const corteMs = Date.now() - 14 * 86400000;
+  const protocolados = done
+    .filter(d => d.status === STATUS_PRAZO.CUMPRIDO && (d.cumprimento?.registradoEm || d.completedAt || 0) >= corteMs)
+    .sort((a, b) => (b.cumprimento?.registradoEm || b.completedAt || 0) - (a.cumprimento?.registradoEm || a.completedAt || 0));
+
+  const ordenarPorInterna = (a, b) =>
+    new Date(a.deadlineInternaDate || a.deadlineDate) - new Date(b.deadlineInternaDate || b.deadlineDate);
+
+  const coluna = (titulo, icon, cor, cards, vazio) => `
+    <div style="flex: 0 0 264px; max-width: 264px; display: flex; flex-direction: column; background: var(--uc-cream); border-radius: 8px; border-top: 3px solid ${cor};">
+      <div style="padding: 10px 12px 6px; font-weight: 600; font-size: 13px; color: var(--uc-black);">${icon} ${titulo} <span style="color: var(--uc-warm-gray); font-weight: 400;">· ${cards.length}</span></div>
+      <div style="padding: 0 8px 8px; overflow-y: auto; max-height: 64vh;">
+        ${cards.length ? cards.join('') : `<div style="font-size: 12px; color: var(--uc-warm-gray); padding: 8px 4px;">${vazio}</div>`}
+      </div>
+    </div>`;
+
+  return `
+    <div style="display: flex; gap: 10px; overflow-x: auto; padding-bottom: 8px; align-items: flex-start;">
+      ${coluna('Atribuído', '📌', ETAPA_META.atribuido.cor,
+        porEtapa.atribuido.sort(ordenarPorInterna).map(d => _kanbanCardPrazo(d, procById, today)), 'Nada aguardando ciência')}
+      ${coluna('Ciente', '✋', ETAPA_META.ciente.cor,
+        porEtapa.ciente.sort(ordenarPorInterna).map(d => _kanbanCardPrazo(d, procById, today)), 'Nenhum prazo nesta etapa')}
+      ${coluna('Em elaboração', '✍️', ETAPA_META.elaboracao.cor,
+        porEtapa.elaboracao.sort(ordenarPorInterna).map(d => _kanbanCardPrazo(d, procById, today)), 'Nenhuma peça em elaboração')}
+      ${coluna('Em revisão', '🔍', ETAPA_META.revisao.cor,
+        porEtapa.revisao.sort(ordenarPorInterna).map(d => _kanbanCardPrazo(d, procById, today)), 'Nada aguardando revisão')}
+      ${coluna('Protocolado', '✅', 'var(--uc-green, #4a7c4a)',
+        protocolados.map(d => _kanbanCardPrazo(d, procById, today)), 'Nenhum protocolo nos últimos 14 dias')}
+    </div>
+    <p class="help-text" style="margin-top: 8px;">
+      Régua de cobrança: lembretes contam pela <strong>fatal interna</strong> (fatal real − 2 dias úteis).
+      A fatal real é limite absoluto — no dia dela, todos (responsável + suplente + sócio) recebem o alerta ⛔.
+    </p>`;
+}
+
+function _kanbanCardPrazo(d, procById, today) {
+  const proc = procById[d.processId];
+  const resolvido = prazoEstaResolvido(d);
+  const interna = d.deadlineInternaDate || null;
+  const diasReal = Math.round((_diaFatalLocal(d.deadlineDate) - today) / 86400000);
+  const diasInterna = interna ? Math.round((_diaFatalLocal(interna) - today) / 86400000) : diasReal;
+  const corBadge = diasInterna < 0 ? 'badge-red' : diasInterna <= 2 ? 'badge-red' : diasInterna <= 5 ? 'badge-amber' : 'badge-green';
+  const badge = resolvido ? '' : `<span class="badge ${corBadge}" style="font-size: 10px;">${diasInterna < 0 ? 'interna há ' + Math.abs(diasInterna) + 'd' : diasInterna === 0 ? 'interna HOJE' : 'interna em ' + diasInterna + 'd'}</span>`;
+  const suspenso = d.status === STATUS_PRAZO.SUSPENSO;
+
+  const etapa = PRAZO_ETAPAS.indexOf(d.etapa) >= 0 ? d.etapa : 'atribuido';
+  let acoes = '';
+  if (resolvido) {
+    acoes = d.cumprimento?.numeroProtocolo
+      ? `<div style="font-size: 11px; color: var(--uc-green);">✓ protocolo ${escapeHtml(d.cumprimento.numeroProtocolo)} · ${formatDate(d.cumprimento.dataCumprimento)}</div>`
+      : '';
+  } else if (suspenso) {
+    acoes = `<button class="btn btn-outline btn-sm" style="padding: 2px 8px; font-size: 11px;" onclick="event.stopPropagation(); reabrirPrazo('${d.id}')">▶ Reabrir</button>`;
+  } else if (etapa === 'atribuido') {
+    acoes = `<button class="btn btn-secondary btn-sm" style="padding: 2px 8px; font-size: 11px;" onclick="event.stopPropagation(); darCienciaPrazo('${d.id}')">✋ Dar ciência</button>`;
+  } else if (etapa === 'ciente') {
+    acoes = `<button class="btn btn-secondary btn-sm" style="padding: 2px 8px; font-size: 11px;" onclick="event.stopPropagation(); mudarEtapaPrazo('${d.id}', 'elaboracao')">✍️ Iniciar elaboração</button>`;
+  } else if (etapa === 'elaboracao') {
+    acoes = `<button class="btn btn-secondary btn-sm" style="padding: 2px 8px; font-size: 11px;" onclick="event.stopPropagation(); mudarEtapaPrazo('${d.id}', 'revisao')">🔍 Enviar pra revisão</button>`;
+  } else if (etapa === 'revisao') {
+    acoes = `
+      <button class="btn btn-outline btn-sm" style="padding: 2px 8px; font-size: 11px;" onclick="event.stopPropagation(); devolverRevisaoPrazo('${d.id}')">↩ Devolver</button>
+      <button class="btn btn-primary btn-sm" style="padding: 2px 8px; font-size: 11px;" onclick="event.stopPropagation(); abrirModalCumprimento('${d.id}')">✓ Protocolar</button>`;
+  }
+  const ajustar = (!resolvido && !suspenso)
+    ? `<a onclick="event.stopPropagation(); ajustarDataFatalPrazo('${d.id}')" title="Ajustar data fatal (gera evento de recálculo auditado)" style="cursor:pointer; color:var(--uc-gold); font-size: 11px;">📅 ajustar fatal</a>`
+    : '';
+
+  return `
+    <div class="card" style="margin: 0 0 8px; padding: 10px; cursor: pointer; ${suspenso ? 'opacity:.65;' : ''}" onclick="navigate('process', { currentProcessId: '${d.processId}' })">
+      <div style="display: flex; justify-content: space-between; gap: 6px; align-items: flex-start;">
+        <strong style="font-size: 12.5px; color: var(--uc-black); line-height: 1.35;">${escapeHtml(d.description || d.type)}</strong>
+        ${badge}
+      </div>
+      <div style="font-size: 11px; color: var(--uc-warm-gray); margin-top: 4px;">
+        ${escapeHtml(proc?.name || d.processName || 'Processo removido')}${proc?.cnj ? ' · ' + escapeHtml(proc.cnj) : ''}
+      </div>
+      <div style="font-size: 11px; color: var(--uc-warm-gray); margin-top: 2px;">
+        ${proc?.advogadoResponsavel ? '👤 ' + escapeHtml(proc.advogadoResponsavel.split(' ')[0]) + ' · ' : ''}
+        ${interna ? `cobra ${formatDate(interna)} · ` : ''}fatal ${formatDate(d.deadlineDate)}
+        ${suspenso ? ' · ⏸ suspenso' : ''}
+      </div>
+      <div style="display: flex; gap: 4px; margin-top: 8px; align-items: center; flex-wrap: wrap;">
+        ${acoes}
+        ${ajustar}
+      </div>
+    </div>`;
 }
 
 function renderGlobalDeadlineRow(d) {
@@ -7994,7 +8103,13 @@ const LOG_EVENTO_LABEL = {
   cancelado:     '⊘ cancelado',
   auto_perdido:  '✗ perdido (auto)',
   perdido:       '✗ perdido',
-  status_alterado: '↻ alterado'
+  status_alterado: '↻ alterado',
+  ack_ciente:        '✋ ciência dada',
+  inicio_elaboracao: '✍️ elaboração iniciada',
+  enviado_revisao:   '🔍 enviado pra revisão',
+  devolvido_revisao: '↩ devolvido da revisão',
+  etapa_alterada:    '↻ etapa alterada',
+  recalculado:       '📅 data fatal recalculada'
 };
 
 function descreverLogEntry(entry) {
@@ -8004,7 +8119,174 @@ function descreverLogEntry(entry) {
   if (entry.payload?.motivo)          partes.push('"' + entry.payload.motivo + '"');
   if (entry.payload?.dataFatal)       partes.push('data fatal ' + entry.payload.dataFatal);
   if (entry.payload?.ate)             partes.push('até ' + entry.payload.ate);
+  if (entry.payload?.antes?.deadlineDate && entry.payload?.depois?.deadlineDate) {
+    partes.push(formatDate(entry.payload.antes.deadlineDate) + ' → ' + formatDate(entry.payload.depois.deadlineDate));
+  }
+  if (entry.ator && entry.ator !== 'sistema') partes.push('por ' + entry.ator);
   return partes.join(' · ');
+}
+
+// ====================================================================
+// #44 — Máquina de estados do prazo (etapas de trabalho) + fatal interna
+// ====================================================================
+// `status` continua sendo o ciclo de vida (pendente/cumprido/perdido/...);
+// `etapa` é o ESTÁGIO DE TRABALHO enquanto o prazo está aberto:
+//   atribuido → ciente → elaboracao → revisao → (cumprido = protocolado)
+// Protocolar segue passando por abrirModalCumprimento (protocolo obrigatório).
+const PRAZO_ETAPAS = ['atribuido', 'ciente', 'elaboracao', 'revisao'];
+const ETAPA_META = {
+  atribuido:  { label: 'Atribuído',     icon: '📌', cor: '#6b6b68' },
+  ciente:     { label: 'Ciente',        icon: '✋', cor: '#8a6f3d' },
+  elaboracao: { label: 'Em elaboração', icon: '✍️', cor: '#b87f1c' },
+  revisao:    { label: 'Em revisão',    icon: '🔍', cor: '#4a7c4a' }
+};
+
+// Subtrai N dias úteis (mesmo calendário do engine: feriados + recesso).
+function subtrairDiasUteis(date, dias, tribunal, comarca) {
+  let r = new Date(date); r.setHours(12, 0, 0, 0);
+  let removed = 0;
+  while (removed < dias) {
+    r = _addDays(r, -1);
+    if (isDiaUtil(r, tribunal, comarca)) removed++;
+  }
+  return r;
+}
+
+// Fatal interna = fatal real − 2 dias úteis. É a data que o sistema COBRA;
+// a fatal real é limite absoluto, nunca meta (#44).
+const FATAL_INTERNA_DIAS_UTEIS = 2;
+function computarFatalInterna(d) {
+  if (!d || !d.deadlineDate) return null;
+  return subtrairDiasUteis(new Date(d.deadlineDate), FATAL_INTERNA_DIAS_UTEIS,
+    d.tribunal || 'NACIONAL', d.comarca || '').toISOString();
+}
+
+// Backfill idempotente no boot: garante etapa + deadlineInternaDate nos
+// prazos abertos. Legados ganham etapa 'atribuido' SEM atribuidoEm — assim
+// o escalonamento por falta de ciência (24h) só vale pra atribuições novas,
+// sem disparar cobrança retroativa em massa.
+async function garantirCamposKanban() {
+  const all = await DB.getAllDeadlines();
+  let alterados = 0;
+  for (const d of all) {
+    if (prazoEstaResolvido(d)) continue;
+    let mudou = false;
+    if (!d.etapa || PRAZO_ETAPAS.indexOf(d.etapa) < 0) { d.etapa = 'atribuido'; mudou = true; }
+    if (!d.deadlineInternaDate && d.deadlineDate) {
+      d.deadlineInternaDate = computarFatalInterna(d);
+      mudou = true;
+    }
+    if (mudou) {
+      d.updatedAt = Date.now();
+      try { await DB.saveDeadline(d); alterados++; }
+      catch (e) { console.warn('garantirCamposKanban', d.id, e); }
+    }
+  }
+  if (alterados) console.log(`[kanban] ${alterados} prazo(s) migrado(s) (etapa/fatal interna)`);
+}
+
+// Transições válidas da etapa. Avançar pode pular etapas (ir direto pra
+// elaboração implica ciência); voltar só revisão → elaboração (devolução).
+function _transicaoEtapaValida(de, para) {
+  const i = PRAZO_ETAPAS.indexOf(de), j = PRAZO_ETAPAS.indexOf(para);
+  if (i < 0 || j < 0) return false;
+  if (j > i) return true;
+  return de === 'revisao' && para === 'elaboracao';
+}
+
+const ETAPA_EVENTO = {
+  ciente: 'ack_ciente',
+  elaboracao: 'inicio_elaboracao',
+  revisao: 'enviado_revisao'
+};
+
+async function mudarEtapaPrazo(id, novaEtapa, payloadExtra) {
+  const d = await _findPrazoForAction(id);
+  if (!d) { toast('Prazo não encontrado', '', 'error'); return; }
+  if (prazoEstaResolvido(d)) { toast('Prazo já resolvido', '', 'info'); return; }
+  const de = d.etapa || 'atribuido';
+  if (de === novaEtapa) return;
+  if (!_transicaoEtapaValida(de, novaEtapa)) {
+    toast('Transição inválida', `${ETAPA_META[de]?.label || de} → ${ETAPA_META[novaEtapa]?.label || novaEtapa}`, 'error');
+    return;
+  }
+  const me = (window.UC_Auth?.getUser?.() || {}).email || '';
+  const meuNome = defaultAdvogado(me) || me;
+
+  // ACK de ciência: registra quem deu. Se não for o responsável do processo,
+  // pede confirmação (sem trava dura — mas fica auditado no histórico).
+  if (de === 'atribuido' && !d.cienteEm) {
+    const proc = (state.processes || []).find(p => p.id === d.processId) || null;
+    const titular = proc?.advogadoResponsavel || null;
+    if (titular && meuNome !== titular) {
+      const ok = await confirmDialog('Dar ciência por outro responsável?',
+        `O responsável deste processo é <strong>${escapeHtml(titular)}</strong>. A ciência ficará registrada em nome de <strong>${escapeHtml(meuNome)}</strong>.`, false);
+      if (!ok) return;
+    }
+    d.cienteEm = Date.now();
+    d.cientePor = meuNome;
+  }
+
+  const evento = (novaEtapa === 'elaboracao' && de === 'revisao')
+    ? 'devolvido_revisao'
+    : (ETAPA_EVENTO[novaEtapa] || 'etapa_alterada');
+  d.etapa = novaEtapa;
+  d.etapaAtualizadaEm = Date.now();
+  d.updatedAt = Date.now();
+  appendLogPrazo(d, evento, Object.assign({ de, para: novaEtapa }, payloadExtra || {}), meuNome);
+  await DB.saveDeadline(d);
+  toast(`${ETAPA_META[novaEtapa].icon} ${ETAPA_META[novaEtapa].label}`, d.description || d.type || '', 'success');
+  _refreshAfterPrazoAction();
+}
+
+async function darCienciaPrazo(id) { return mudarEtapaPrazo(id, 'ciente'); }
+
+async function devolverRevisaoPrazo(id) {
+  const r = await showModal('Devolver para elaboração', [
+    { label: 'Motivo da devolução (obrigatório)', placeholder: 'Ex: revisar fundamentação do pedido liminar' }
+  ], { confirmLabel: 'Devolver' });
+  if (!r) return;
+  const [motivo] = r;
+  if (!motivo?.trim()) { toast('Motivo obrigatório', '', 'error'); return; }
+  return mudarEtapaPrazo(id, 'elaboracao', { motivo: motivo.trim() });
+}
+
+// #44 — Ajustar data fatal com auditoria: evento 'recalculado' {antes, depois,
+// motivo}, recomputa a fatal interna e re-agenda lembretes (limpa marcos já
+// disparados pra refazerem a régua nas novas datas). Nunca muda em silêncio.
+async function ajustarDataFatalPrazo(id) {
+  const d = await _findPrazoForAction(id);
+  if (!d) { toast('Prazo não encontrado', '', 'error'); return; }
+  if (prazoEstaResolvido(d)) { toast('Prazo já resolvido', '', 'error'); return; }
+  const atualISO = (d.deadlineDate || '').slice(0, 10);
+  const r = await showModal('Ajustar data fatal', [
+    { label: 'Nova data fatal', type: 'date', default: atualISO },
+    { label: 'Motivo (obrigatório)', placeholder: 'Ex: suspensão por portaria · erro de contagem · decisão judicial' }
+  ], { confirmLabel: 'Recalcular', intro: `Data fatal atual: <strong>${formatDate(d.deadlineDate)}</strong>. A alteração fica no histórico do prazo e os lembretes são re-agendados.` });
+  if (!r) return;
+  const [novaData, motivo] = r;
+  if (!novaData) { toast('Nova data obrigatória', '', 'error'); return; }
+  if (!motivo?.trim()) { toast('Motivo obrigatório', '', 'error'); return; }
+  const antes = { deadlineDate: d.deadlineDate, deadlineInternaDate: d.deadlineInternaDate || null };
+  d.deadlineDate = new Date(novaData + 'T12:00:00').toISOString();
+  d.deadlineInternaDate = computarFatalInterna(d);
+  // Re-agenda: limpa marcos de proximidade já notificados (T-* e FATAL) pra
+  // valerem contra as novas datas. SEM_ACK é preservado (independe da data).
+  if (d.notificado) {
+    for (const k of Object.keys(d.notificado)) {
+      if (/^T[-+]/.test(k) || k === 'FATAL') delete d.notificado[k];
+    }
+  }
+  const me = (window.UC_Auth?.getUser?.() || {}).email || '';
+  appendLogPrazo(d, 'recalculado', {
+    antes,
+    depois: { deadlineDate: d.deadlineDate, deadlineInternaDate: d.deadlineInternaDate },
+    motivo: motivo.trim()
+  }, defaultAdvogado(me) || me);
+  d.updatedAt = Date.now();
+  await DB.saveDeadline(d);
+  toast('Data fatal recalculada', `${formatDate(antes.deadlineDate)} → ${formatDate(d.deadlineDate)}`, 'success');
+  _refreshAfterPrazoAction();
 }
 
 // Auto-marca como "perdido" todo prazo pendente cuja data fatal já passou.
@@ -8156,14 +8438,31 @@ async function reabrirPrazoPerdido(id) {
 //   T-1  : 1 dia
 //   T-0  : hoje
 //   T+1  : 1 dia depois (auto_perdido pega depois mas notifica antes)
+// Normaliza uma data fatal (ISO com hora, date-only ou timestamp) pro
+// DIA-CALENDÁRIO à meia-noite local. Corrige o off-by-one dos marcos:
+// datas gravadas ao meio-dia faziam ceil() empurrar T-0 pro dia seguinte.
+function _diaFatalLocal(v) {
+  if (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}/.test(v)) {
+    return new Date(v.slice(0, 10) + 'T00:00:00');
+  }
+  const d = new Date(v); d.setHours(0, 0, 0, 0); return d;
+}
+
 function marcoDoPrazo(d, hoje) {
   if (!d || !d.deadlineDate) return null;
   if (!prazoEstaAtivo(d)) return null;
   if (d.status === STATUS_PRAZO.SUSPENSO) return null;
   const today = hoje ? new Date(hoje) : (() => { const t = new Date(); t.setHours(0,0,0,0); return t; })();
   if (hoje) today.setHours(0,0,0,0);
-  const dl = new Date(d.deadlineDate);
-  const days = Math.ceil((dl - today) / 86400000);
+  // #44 — a régua de cobrança roda sobre a FATAL INTERNA (fatal − 2 úteis)
+  // quando o prazo a tem; a fatal real vira o marco absoluto 'FATAL'.
+  const temInterna = !!(d.deadlineInternaDate && d.deadlineInternaDate !== d.deadlineDate);
+  if (temInterna) {
+    const daysReal = Math.round((_diaFatalLocal(d.deadlineDate) - today) / 86400000);
+    if (daysReal <= 0) return 'FATAL'; // dia da fatal real (auto_perdido pega depois)
+  }
+  const dl = _diaFatalLocal(temInterna ? d.deadlineInternaDate : d.deadlineDate);
+  const days = Math.round((dl - today) / 86400000);
   if (days >= 4 && days <= 7) return 'T-7';
   if (days === 3) return 'T-3';
   if (days === 2) return 'T-2';
@@ -8179,7 +8478,8 @@ const MARCO_LABELS = {
   'T-2': '⚠ Prazo em 2 dias',
   'T-1': '🚨 Prazo AMANHÃ',
   'T-0': '🚨🚨 Prazo HOJE',
-  'T+1': '✗ Prazo VENCEU'
+  'T+1': '✗ Prazo VENCEU',
+  'FATAL': '⛔ FATAL REAL HOJE — improrrogável'
 };
 
 // Verifica se o usuário/email já foi notificado pra este marco.
@@ -8265,13 +8565,16 @@ async function verificarLembretesPendentes() {
     // Dispara Notification
     try {
       const title = MARCO_LABELS[marco] || `Prazo · ${marco}`;
-      const dl = new Date(d.deadlineDate);
-      const body = `${d.description || d.type} · vence ${formatDate(dl)} · ${proc.client || proc.name}`;
+      const temInterna = !!(d.deadlineInternaDate && d.deadlineInternaDate !== d.deadlineDate);
+      const vencimento = temInterna
+        ? `fatal interna ${formatDate(d.deadlineInternaDate)} · fatal real ${formatDate(d.deadlineDate)}`
+        : `vence ${formatDate(new Date(d.deadlineDate))}`;
+      const body = `${d.description || d.type} · ${vencimento} · ${proc.client || proc.name}`;
       const noti = new Notification(title, {
         body,
         icon: 'icon-192.png',
         tag: `prazo-${d.id}-${marco}`,
-        requireInteraction: marco === 'T-1' || marco === 'T-0' || marco === 'T+1',
+        requireInteraction: ['T-1','T-0','T+1','FATAL'].includes(marco),
         data: { processId: proc.id, prazoId: d.id }
       });
       noti.onclick = () => {
@@ -22934,9 +23237,12 @@ async function djenImportSelected(modal) {
           emDobro: r.emDobro,
           deadlineDate: calc.deadline.toISOString(),
           status: STATUS_PRAZO.PENDENTE,
+          etapa: 'atribuido',
+          atribuidoEm: proc?.advogadoResponsavel ? Date.now() : null,
           logs: [],
           djenHash: pub.hash,
           tribunal,
+          comarca: comarca || null,
           diarioCalculo: calc.diario,
           // Trilha de auditoria: tipo escolhido pelo user (decisão atual)
           // + parser (sugestão original do sistema). Permite ver depois se
@@ -22954,6 +23260,7 @@ async function djenImportSelected(modal) {
           } : null,
           createdAt: Date.now()
         };
+        deadline.deadlineInternaDate = computarFatalInterna(deadline);
         appendLogPrazo(deadline, 'criado', { origem: 'djen', djenHash: pub.hash, tipoEscolhido: r.tipoAto, deadlineDate: deadline.deadlineDate, parserConfianca: parsed?.confianca, parserFonte: parsed?.fonte });
         await DB.saveDeadline(deadline);
         prazosCriados++;
@@ -24275,6 +24582,7 @@ async function bootApp() {
   // (princípio reitor §10.3 do briefing — fail-safe). Roda em background;
   // falha aqui não impede o boot.
   autoMarcarPerdidos().catch(err => console.warn('autoMarcarPerdidos:', err));
+  garantirCamposKanban().catch(err => console.warn('garantirCamposKanban:', err));
 
   // Load settings
   state.settings.theme = await DB.getSetting('theme', 'light');
