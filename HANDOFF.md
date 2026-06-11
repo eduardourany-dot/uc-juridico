@@ -112,7 +112,7 @@ git push origin sandbox
 | 22 | P3 | Meet Fase 3 — auto-convidados + RSVP | ✅ concluído 10/06 — v6.84.0 em produção (Apps Script + LOCAWEB atualizados) |
 | 34 | P3 | Petição IA: fila de revisão do advogado | pendente |
 | 42 | Aux | `ucjuridico@` como membro em GitHub/CF/Vercel | ✅ concluído 10/06 — GitHub + Cloudflare ok; Vercel mantido solo (decisão B, ver `docs/RUNBOOK_42_cotitularidade.md`) |
-| 44 | P3 | Kanban de prazos — quadro visual de estado | pendente |
+| 44 | P3 | Kanban de prazos + máquina de estados do prazo | pendente — escopo ampliado 10/06 (ver sessão 10/06 abaixo) |
 
 **P0 e P1 zerados.** Tudo crítico está em produção.
 
@@ -130,6 +130,13 @@ git push origin sandbox
    - **RSVP**: nova action `rsvpEventoCalendar` (Calendar.gs + switch do Codigo.gs + wrapper em api.js) lê `responseStatus` dos convidados. Card do compromisso ganhou linha "🙋 RSVP" com contadores ✅/❌/❔/⏳, lista expandível por convidado e botão "🔄 atualizar respostas" (cache em `compromisso.rsvp`). Vínculo é desfeito se o evento sumiu/foi cancelado no Google.
 
 **Ações manuais da sessão: ✅ todas concluídas** — Apps Script recolado (Calendar.gs + Codigo.gs) e v6.84.0 no ar na LOCAWEB.
+
+**Parecer sobre spec externa (Prazos em PostgreSQL):** avaliada uma spec de redesign do módulo Prazos (event sourcing + outbox em PostgreSQL, vinda de conversa antiga que assumia v4.2.2). **Decisão: descartada a adoção literal** — arquitetura incompatível com o stack (Firestore/Apps Script, sem banco relacional nem servidor pra triggers/workers) e ~70% do conteúdo funcional já existe na v6.84.0 (cálculo CPC 219/224 com diário auditável, feriados por comarca, marcos T-7…T+1 idempotentes, escalonamento com ausência, Torre de Prazos). **4 conceitos aproveitados → incorporados ao escopo do #44:**
+
+1. **Data fatal interna** = fatal − 2 dias úteis: cobrança passa a usar a interna; a fatal real é limite absoluto, nunca meta.
+2. **ACK de ciência + escalonamento por inatividade**: prazo atribuído sem ciência do responsável em 24h → escala pro sócio (hoje só escala por proximidade da fatal).
+3. **Máquina de estados** `ATRIBUIDO → CIENTE → EM_ELABORACAO → EM_REVISAO → PROTOCOLADO` = as colunas do Kanban.
+4. **Trilha de eventos** `eventos[]` no doc do prazo (recálculo registra `{antes, depois, motivo}`; marcar PROTOCOLADO exige comprovante).
 
 ---
 
