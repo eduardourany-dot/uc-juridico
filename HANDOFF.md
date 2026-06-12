@@ -140,6 +140,13 @@ git push origin sandbox
    - **🐛 Fix de off-by-one nos marcos** (pré-existente): datas fatais gravadas ao meio-dia + `Math.ceil` faziam T-0 disparar um dia DEPOIS do vencimento. Corrigido com normalização pro dia-calendário (`_diaFatalLocal`) no client e no GAS. 24 casos de teste passando (interna, FATAL, legado, date-only, feriados).
    - Obs.: os badges de dias da LISTA de publicações (Vencidos/Urgentes/etc.) ainda usam a contagem antiga (visual, conservador +1d) — candidato a ajuste fino futuro.
 
+4. **🤖 Auto-agendamento de prazos** (**v6.86.0**) — a pedido, sobre toda a caixa:
+   - Intimações não tratadas são **vinculadas automaticamente** ao processo da carteira (CNJ idêntico) e, quando o parser extrai prazo numérico do teor (confiança ≥50% — na prática regex 75–92% e keywords 70%), o **prazo é criado automaticamente** (fatal interna, etapa atribuido, cobrança imediata) e a intimação recebe ciência do sistema.
+   - **Fila de revisão 🤖** no topo de Publicações: Confirmar / Ajustar fatal (auditado) / Cancelar. Card no Kanban ganha badge 🤖 até revisar.
+   - **Guardas**: backlog com fatal já vencida é tratado SEM criar prazo (marca `prazo_expirado`, listado no relatório); órfãs sem CNJ na carteira e teores sem prazo extraível ficam na caixa pra triagem manual; dedup por (djenHash, tipo); idempotente.
+   - Roda no boot (silencioso) + botão "🤖 Auto-agendar" na caixa (com relatório modal). 8 casos de teste integrados (mock DB) + parse OK.
+   - Decisões do titular: confiança ≥50% · cobrança imediata sem esperar revisão · incluir todo o backlog (com a guarda de expiradas acima).
+
 **Pendente de ação manual (#44):**
 
 - **Apps Script**: recolar do raw em `main` → `backend/Lembretes.gs` (fatal interna + marco FATAL + sem-ACK).

@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.85.1 (fix #44 UX: no modo Kanban o quadro renderiza logo abaixo do cabeçalho — antes ficava escondido depois da Caixa de intimações; dica no rodapé do quadro explica que prazos entram via "Agendar prazo")
-const CACHE_NAME = 'uc-juridico-v6-85-1';
+// Service Worker — UC Jurídico v6.86.0 (feat: 🤖 auto-agendamento de prazos — intimações não tratadas são vinculadas aos processos por CNJ, parser extrai o prazo do teor (confiança ≥50% com prazo numérico) e cria o prazo automaticamente [fatal interna + etapa atribuido + cobrança imediata]; fila "🤖 aguardando revisão" no topo de Publicações com Confirmar/Ajustar fatal/Cancelar; backlog com fatal já vencida é tratado SEM criar prazo [marca prazo_expirado]; roda no boot [silencioso] e via botão 🤖 Auto-agendar na caixa)
+const CACHE_NAME = 'uc-juridico-v6-86-0';
 const APP_SHELL = [
   './',
   './index.html',

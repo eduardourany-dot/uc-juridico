@@ -7117,14 +7117,19 @@ async function renderDeadlines() {
       </div>
     </div>`;
 
+  // Fila de revisão dos prazos auto-agendados (🤖) — visível nas duas visões.
+  const secaoRevisaoAuto = _secaoRevisaoAutoHtml(deadlines, _procById);
+
   // Kanban primeiro (quadro é o foco da visão); na lista, a ordem clássica
   // com a Caixa de intimações no topo é preservada.
   $('appContent').innerHTML = state._prazosView === 'kanban'
     ? `${header}
+       ${secaoRevisaoAuto}
        ${secaoPerdidos}
        ${_renderKanbanPrazos(active, done, processes)}
        <div style="margin-top: 20px;">${secaoIntimacoes}</div>`
     : `${header}
+       ${secaoRevisaoAuto}
        ${secaoIntimacoes}
        ${secaoPerdidos}
        ${statsGrid}
@@ -7218,7 +7223,7 @@ function _kanbanCardPrazo(d, procById, today) {
     <div class="card" style="margin: 0 0 8px; padding: 10px; cursor: pointer; ${suspenso ? 'opacity:.65;' : ''}" onclick="navigate('process', { currentProcessId: '${d.processId}' })">
       <div style="display: flex; justify-content: space-between; gap: 6px; align-items: flex-start;">
         <strong style="font-size: 12.5px; color: var(--uc-black); line-height: 1.35;">${escapeHtml(d.description || d.type)}</strong>
-        ${badge}
+        <span style="display:flex;gap:3px;flex-shrink:0;">${d.autoAgendado && !d.autoAgendado.revisado ? '<span class="badge badge-amber" style="font-size: 9px;" title="Auto-agendado — aguardando revisão (fila 🤖 no topo)">🤖</span>' : ''}${badge}</span>
       </div>
       <div style="font-size: 11px; color: var(--uc-warm-gray); margin-top: 4px;">
         ${escapeHtml(proc?.name || d.processName || 'Processo removido')}${proc?.cnj ? ' · ' + escapeHtml(proc.cnj) : ''}
@@ -8105,6 +8110,250 @@ function appendLogPrazo(d, evento, payload, ator) {
   });
 }
 
+// ====================================================================
+// 🤖 Auto-agendamento de prazos a partir da caixa de intimações
+// ====================================================================
+// Pra cada intimação NÃO TRATADA (status 'pending', sem cienteEm):
+//   1. Vincula ao processo da carteira por CNJ idêntico (se ainda sem vínculo).
+//   2. Roda o parser no teor. Se extraiu prazo numérico (confiança ≥ 50%),
+//      calcula a data fatal e CRIA O PRAZO automaticamente — já com fatal
+//      interna, etapa 'atribuido' e flag de revisão pendente (fila 🤖).
+//   3. Dá ciência na intimação (ator 'sistema · auto'), tirando-a da caixa.
+// Guardas:
+//   - Fatal já vencida (backlog antigo): NÃO cria prazo — trata a intimação
+//     com marca 'prazo_expirado' e lista no relatório final pra conferência.
+//   - Órfã sem processo correspondente, sem teor ou sem prazo extraível:
+//     permanece na caixa pra triagem manual.
+//   - Idempotente: dedup por (djenHash, tipo) nos prazos já existentes.
+// Cobrança: prazo auto-agendado entra IMEDIATAMENTE na régua (fatal interna,
+// T-7…FATAL, sem-ACK) — revisão pendente não silencia lembrete.
+async function autoAgendarIntimacoes(opts) {
+  const silencioso = !!(opts && opts.silencioso);
+  const [pubs, processos, deadlines] = await Promise.all([
+    DB.getAllDjenPublications().catch(() => []),
+    DB.getAllProcesses(),
+    DB.getAllDeadlines()
+  ]);
+  const pendentes = pubs.filter(p => p.status === 'pending' && !p.cienteEm);
+  if (!pendentes.length) {
+    if (!silencioso) toast('Nada a processar', 'Não há intimações pendentes na caixa.', 'info');
+    return null;
+  }
+
+  const byCnj = new Map();
+  processos.forEach(p => {
+    const k = normalizeCnjForCompare(p.cnj || '');
+    if (k && !byCnj.has(k)) byCnj.set(k, p);
+  });
+  const procById = {};
+  processos.forEach(p => { procById[p.id] = p; });
+
+  const hoje = new Date(); hoje.setHours(0, 0, 0, 0);
+  const res = {
+    analisadas: pendentes.length, vinculadas: 0, prazosCriados: 0,
+    expiradas: 0, orfas: 0, semPrazo: 0, duplicadas: 0, erros: 0,
+    listaCriados: [], listaExpiradas: []
+  };
+
+  for (const pub of pendentes) {
+    try {
+      // 1. Resolve o processo (vínculo automático por CNJ idêntico)
+      let proc = pub.processId ? procById[pub.processId] : null;
+      if (!proc) {
+        const k = normalizeCnjForCompare(pub.cnj || '');
+        proc = k ? byCnj.get(k) : null;
+        if (proc) {
+          pub.processId = proc.id;
+          pub.matched = true;
+          res.vinculadas++;
+        }
+      }
+      if (!proc) { res.orfas++; continue; } // órfã de verdade — manual
+
+      // 2. Parser do teor
+      const parsed = parsearPublicacao(pub.texto || '');
+      const dataDispo = pub.dataDisponibilizacao || pub.data_disponibilizacao || null;
+      if (!parsed || !parsed.prazoDias || (parsed.confianca || 0) < 0.5 || !dataDispo) {
+        res.semPrazo++;
+        continue; // sem prazo extraível — fica na caixa pra triagem manual
+      }
+
+      const tribunal = inferirTribunal(proc.court || pub.tribunal || pub.orgao);
+      const comarca = inferirComarca(pub.orgao || proc.court || '');
+      const calc = calcDjenDeadline(String(dataDispo).slice(0, 10), parsed.prazoDias, tribunal, parsed.unidade || 'UTEIS', !!parsed.emDobro, comarca);
+      if (!calc || isNaN(new Date(calc.deadline).getTime())) { res.semPrazo++; continue; }
+
+      const cnjFmt = normalizeCnj(pub.cnj) || pub.cnj || '(sem CNJ)';
+      const responsavel = proc.advogadoResponsavel || null;
+      const trataPub = async (extra) => {
+        pub.cienteEm = Date.now();
+        pub.cientePor = 'sistema · auto-agendamento';
+        pub.responsavel = pub.responsavel || responsavel;
+        Object.assign(pub, extra || {});
+        pub.updatedAt = Date.now();
+        await DB.saveDjenPublication(pub);
+      };
+
+      // Dedup: prazo já existe pra essa publicação+tipo
+      if (deadlines.some(x => x.djenHash === pub.hash && x.tipoEscolhido === parsed.tipo)) {
+        res.duplicadas++;
+        await trataPub({ autoTriagem: 'duplicada', autoTriagemEm: Date.now() });
+        continue;
+      }
+
+      // 3a. Backlog antigo: fatal já passou → trata sem criar prazo
+      if (new Date(calc.deadline) < hoje) {
+        res.expiradas++;
+        res.listaExpiradas.push({ cnj: cnjFmt, label: parsed.label, fatal: calc.deadline });
+        await trataPub({ autoTriagem: 'prazo_expirado', autoTriagemEm: Date.now() });
+        continue;
+      }
+
+      // 3b. Cria o prazo automaticamente
+      const deadline = {
+        id: uid(),
+        processId: proc.id,
+        description: `[DJEN·🤖] ${parsed.label} · ${pub.orgao || ''}`.slice(0, 200),
+        type: 'djen',
+        intimationDate: calc.publication.toISOString(),
+        daysAllowed: parsed.prazoDias,
+        unidade: parsed.unidade || 'UTEIS',
+        emDobro: !!parsed.emDobro,
+        deadlineDate: calc.deadline.toISOString(),
+        status: STATUS_PRAZO.PENDENTE,
+        etapa: 'atribuido',
+        atribuidoEm: responsavel ? Date.now() : null,
+        logs: [],
+        djenHash: pub.hash,
+        tribunal,
+        comarca: comarca || null,
+        diarioCalculo: calc.diario,
+        tipoEscolhido: parsed.tipo,
+        tipoEscolhidoLabel: parsed.label,
+        tipoEscolhidoBaseLegal: parsed.baseLegal,
+        parser: {
+          tipo: parsed.tipo, label: parsed.label, baseLegal: parsed.baseLegal,
+          confianca: parsed.confianca, fonte: parsed.fonte,
+          requerRevisao: !!parsed.requerRevisao
+        },
+        autoAgendado: { em: Date.now(), confianca: parsed.confianca, fonte: parsed.fonte, revisado: false },
+        createdAt: Date.now()
+      };
+      deadline.deadlineInternaDate = computarFatalInterna(deadline);
+      appendLogPrazo(deadline, 'criado', {
+        origem: 'auto', djenHash: pub.hash, deadlineDate: deadline.deadlineDate,
+        parserConfianca: parsed.confianca, parserFonte: parsed.fonte
+      });
+      await DB.saveDeadline(deadline);
+      deadlines.push(deadline); // dedup intra-execução
+      res.prazosCriados++;
+      res.listaCriados.push({ cnj: cnjFmt, label: parsed.label, fatal: deadline.deadlineDate });
+      await trataPub({ autoTriagem: 'prazo_criado', autoTriagemEm: Date.now() });
+    } catch (e) {
+      res.erros++;
+      console.warn('[auto-agendar] falha na pub', pub.hash, e);
+    }
+  }
+
+  console.log('[auto-agendar]', res);
+  if (res.prazosCriados || res.expiradas || res.vinculadas || !silencioso) {
+    _mostrarRelatorioAutoAgendamento(res, silencioso);
+  }
+  if (state.currentRoute === 'deadlines') renderDeadlines();
+  else if (state.currentRoute === 'dashboard') renderDashboard();
+  try { _atualizarBadgePublicacoes().catch(() => {}); } catch (e) {}
+  return res;
+}
+
+// Relatório do auto-agendamento. Em modo silencioso (boot) vira só toast;
+// chamada manual abre modal com as listas pra conferência.
+function _mostrarRelatorioAutoAgendamento(res, somenteToast) {
+  const resumo = `${res.prazosCriados} prazo(s) criado(s) · ${res.vinculadas} vinculada(s) · ${res.expiradas} expirada(s) · ${res.orfas} órfã(s) · ${res.semPrazo} sem prazo extraível`;
+  if (somenteToast) {
+    if (res.prazosCriados > 0) toast('🤖 Auto-agendamento', resumo + ' — revise na fila 🤖 em Publicações.', 'success');
+    return;
+  }
+  const linha = (i) => `<div style="font-size:12px;padding:3px 0;border-bottom:1px solid var(--uc-line);">${escapeHtml(i.cnj)} · ${escapeHtml(i.label)} · fatal ${formatDate(i.fatal)}</div>`;
+  const modal = document.createElement('div');
+  modal.className = 'modal-backdrop';
+  modal.innerHTML = `
+    <div class="modal" style="max-width: 560px;">
+      <h3 class="modal-title">🤖 Auto-agendamento concluído</h3>
+      <div class="grid gap-2 mb-3" style="grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));">
+        <div class="stat-card"><div class="stat-label">Analisadas</div><div class="stat-value">${res.analisadas}</div></div>
+        <div class="stat-card" style="${res.prazosCriados ? 'background: var(--uc-green-soft, #e8f3e8);' : ''}"><div class="stat-label">Prazos criados</div><div class="stat-value">${res.prazosCriados}</div></div>
+        <div class="stat-card"><div class="stat-label">Vinculadas</div><div class="stat-value">${res.vinculadas}</div></div>
+        <div class="stat-card"><div class="stat-label">Expiradas</div><div class="stat-value">${res.expiradas}</div></div>
+        <div class="stat-card"><div class="stat-label">Órfãs (manual)</div><div class="stat-value">${res.orfas}</div></div>
+        <div class="stat-card"><div class="stat-label">Sem prazo (manual)</div><div class="stat-value">${res.semPrazo}</div></div>
+      </div>
+      ${res.listaCriados.length ? `<details open style="margin-bottom:10px;"><summary style="cursor:pointer;font-size:13px;font-weight:600;">✓ Prazos criados (${res.listaCriados.length}) — aguardando sua revisão</summary>${res.listaCriados.map(linha).join('')}</details>` : ''}
+      ${res.listaExpiradas.length ? `<details style="margin-bottom:10px;"><summary style="cursor:pointer;font-size:13px;font-weight:600;">⏱ Tratadas como expiradas (${res.listaExpiradas.length}) — prazo já tinha vencido; confira se foram cumpridas por fora</summary>${res.listaExpiradas.map(linha).join('')}</details>` : ''}
+      <p class="help-text">Os prazos criados estão na fila <strong>🤖 aguardando revisão</strong> no topo de Publicações — confirme, ajuste a fatal ou cancele cada um. Eles já contam na régua de lembretes.</p>
+      <button class="btn btn-primary" style="width:100%;margin-top:8px;" onclick="this.closest('.modal-backdrop').remove()">Fechar</button>
+    </div>`;
+  $('modalContainer').appendChild(modal);
+}
+
+// Fila de revisão dos prazos auto-agendados — seção no topo de Publicações.
+function _secaoRevisaoAutoHtml(deadlines, procById) {
+  const fila = (deadlines || []).filter(d => d.autoAgendado && !d.autoAgendado.revisado && !prazoEstaResolvido(d));
+  if (!fila.length) return '';
+  fila.sort((a, b) => new Date(a.deadlineInternaDate || a.deadlineDate) - new Date(b.deadlineInternaDate || b.deadlineDate));
+  return `
+    <div class="card mb-4" style="border-left: 4px solid var(--uc-gold);">
+      <h3 class="font-serif font-semibold smallcaps mb-1">🤖 Prazos auto-agendados aguardando revisão · ${fila.length}</h3>
+      <p class="help-text" style="margin: 0 0 10px;">Criados automaticamente pelo parser a partir das intimações. Já estão na régua de cobrança — <strong>Confirmar</strong> valida a leitura do parser, <strong>Ajustar fatal</strong> corrige a data (auditado), <strong>Cancelar</strong> anula com motivo.</p>
+      ${fila.map(d => {
+        const proc = procById[d.processId];
+        const conf = d.autoAgendado.confianca != null ? (d.autoAgendado.confianca * 100).toFixed(0) + '%' : '—';
+        return `
+        <div class="card" style="margin-bottom: 6px; padding: 10px; background: #fff;">
+          <div style="display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; align-items: center;">
+            <div style="flex: 1; min-width: 0;">
+              <strong style="color: var(--uc-black); font-size: 13px;">${escapeHtml(d.description || d.type)}</strong>
+              <span class="badge ${(d.autoAgendado.confianca || 0) >= 0.85 ? 'badge-green' : 'badge-amber'}" style="font-size: 9px;" title="Parser: ${escapeHtml(d.parser?.fonte || '')}${d.parser?.requerRevisao ? ' · confiança baixa' : ''}">⚙ ${conf}</span>
+              <div style="font-size: 12px; color: var(--uc-warm-gray); margin-top: 2px;">
+                ${escapeHtml(proc?.name || 'Processo')}${proc?.cnj ? ' · ' + escapeHtml(proc.cnj) : ''} ·
+                ${d.deadlineInternaDate ? 'cobra ' + formatDate(d.deadlineInternaDate) + ' · ' : ''}fatal ${formatDate(d.deadlineDate)}
+              </div>
+            </div>
+            <div style="display: flex; gap: 4px; flex-shrink: 0; flex-wrap: wrap;">
+              ${d.djenHash ? `<button class="btn btn-ghost btn-sm" onclick="djenShowFullPublicacaoFromDb('${d.djenHash}')" title="Ver a publicação que originou" style="padding: 2px 8px;">📰</button>` : ''}
+              <button class="btn btn-ghost btn-sm" onclick="navigate('process', { currentProcessId: '${d.processId}' })" title="Abrir processo" style="padding: 2px 8px;">↗</button>
+              <button class="btn btn-outline btn-sm" onclick="ajustarDataFatalPrazo('${d.id}')" style="padding: 2px 8px;">📅 Ajustar fatal</button>
+              <button class="btn btn-outline btn-sm" onclick="abrirModalCancelar('${d.id}')" style="padding: 2px 8px;">⊘ Cancelar</button>
+              <button class="btn btn-secondary btn-sm" onclick="confirmarRevisaoAuto('${d.id}')" style="padding: 2px 8px;">✓ Confirmar</button>
+            </div>
+          </div>
+        </div>`;
+      }).join('')}
+    </div>`;
+}
+
+async function confirmarRevisaoAuto(id) {
+  const d = await _findPrazoForAction(id);
+  if (!d) { toast('Prazo não encontrado', '', 'error'); return; }
+  if (!d.autoAgendado) { toast('Prazo não é auto-agendado', '', 'info'); return; }
+  const me = (window.UC_Auth?.getUser?.() || {}).email || '';
+  d.autoAgendado.revisado = true;
+  d.autoAgendado.revisadoEm = Date.now();
+  d.autoAgendado.revisadoPor = defaultAdvogado(me) || me;
+  appendLogPrazo(d, 'revisao_confirmada', { confianca: d.autoAgendado.confianca, fonte: d.autoAgendado.fonte }, d.autoAgendado.revisadoPor);
+  d.updatedAt = Date.now();
+  await DB.saveDeadline(d);
+  toast('Revisão confirmada', d.description || '', 'success');
+  _refreshAfterPrazoAction();
+}
+
+async function autoAgendarIntimacoesManual() {
+  const ok = await confirmDialog('Auto-agendar prazos da caixa?',
+    'Vincula intimações pendentes aos processos (CNJ idêntico), cria prazos automaticamente quando o parser extrai o prazo do teor, e dá ciência nas tratadas. Intimações com prazo já vencido são tratadas SEM criar prazo. Tudo fica auditado e revisável.', false);
+  if (!ok) return;
+  toast('🤖 Processando caixa de intimações…', 'Isso pode levar alguns segundos.', 'info');
+  await autoAgendarIntimacoes({ silencioso: false });
+}
+
 // Mapeia evento técnico → label humano (para o histórico expansível na linha do prazo).
 const LOG_EVENTO_LABEL = {
   criado:        '📝 criado',
@@ -8120,7 +8369,8 @@ const LOG_EVENTO_LABEL = {
   enviado_revisao:   '🔍 enviado pra revisão',
   devolvido_revisao: '↩ devolvido da revisão',
   etapa_alterada:    '↻ etapa alterada',
-  recalculado:       '📅 data fatal recalculada'
+  recalculado:       '📅 data fatal recalculada',
+  revisao_confirmada: '🤖✓ revisão do auto-agendamento confirmada'
 };
 
 function descreverLogEntry(entry) {
@@ -22752,7 +23002,10 @@ function _secaoIntimacoesHtml(todas, procById, hashesComPrazo) {
     <div class="card mb-3" style="padding:12px;">
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:6px;">
         <h3 class="font-serif font-semibold smallcaps" style="color: var(--uc-black);margin:0;">📬 Caixa de intimações</h3>
-        <button class="btn btn-outline btn-sm" onclick="_intimacaoCadastrarManualFlow()" title="Cadastrar publicação manualmente — usar quando o DJEN falhar, ou pra intimação que veio por carga/malote/outro canal">+ Cadastrar manualmente</button>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;">
+          <button class="btn btn-secondary btn-sm" onclick="autoAgendarIntimacoesManual()" title="Vincula intimações aos processos por CNJ, cria prazos automaticamente quando o parser extrai o prazo do teor (fila de revisão 🤖) e trata as já expiradas">🤖 Auto-agendar</button>
+          <button class="btn btn-outline btn-sm" onclick="_intimacaoCadastrarManualFlow()" title="Cadastrar publicação manualmente — usar quando o DJEN falhar, ou pra intimação que veio por carga/malote/outro canal">+ Cadastrar manualmente</button>
+        </div>
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
         ${chip('pendentes', 'Não tratadas', cNaoTratadas, 'var(--uc-amber)')}
@@ -24594,6 +24847,9 @@ async function bootApp() {
   // falha aqui não impede o boot.
   autoMarcarPerdidos().catch(err => console.warn('autoMarcarPerdidos:', err));
   garantirCamposKanban().catch(err => console.warn('garantirCamposKanban:', err));
+  // 🤖 Auto-agendamento contínuo: processa intimações novas que chegaram
+  // pelo cron DJEN desde a última sessão (silencioso — só toast se criar).
+  autoAgendarIntimacoes({ silencioso: true }).catch(err => console.warn('autoAgendarIntimacoes:', err));
 
   // Load settings
   state.settings.theme = await DB.getSetting('theme', 'light');
