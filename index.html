@@ -6782,6 +6782,7 @@ async function abrirModalCumprimento(id) {
     oab: d.cumprimento.advogadoOab
   });
   await DB.saveDeadline(d);
+  await _reconciliarPrazoGoogle(d); // cumprido → remove o espelho no Google Calendar
   toast('Prazo cumprido', `Protocolo ${d.cumprimento.numeroProtocolo}`, 'success');
   _refreshAfterPrazoAction();
 }
@@ -6846,6 +6847,7 @@ async function abrirModalCancelar(id) {
   d.updatedAt = Date.now();
   appendLogPrazo(d, 'cancelado', { motivo: d.cancelamento.motivo });
   await DB.saveDeadline(d);
+  await _reconciliarPrazoGoogle(d); // cancelado → remove o espelho no Google Calendar
   toast('Prazo cancelado', '', 'success');
   _refreshAfterPrazoAction();
 }
@@ -6853,6 +6855,8 @@ async function abrirModalCancelar(id) {
 async function deleteDeadline(id) {
   const ok = await confirmDialog('Remover prazo?', 'O prazo será apagado do registro. Para apenas anular mantendo histórico, use Cancelar.', true);
   if (!ok) return;
+  const d = await _findPrazoForAction(id); // remove o espelho no Google antes de apagar
+  if (d && d.googleEventId) await _removerPrazoGoogle(d, true);
   await DB.deleteDeadline(id);
   _refreshAfterPrazoAction();
 }
@@ -8149,6 +8153,9 @@ async function autoAgendarIntimacoes(opts) {
   processos.forEach(p => { procById[p.id] = p; });
 
   const hoje = new Date(); hoje.setHours(0, 0, 0, 0);
+  // Auto-Google só em execução MANUAL — o boot silencioso processa o backlog
+  // inteiro e não deve inundar o Google Calendar de eventos antigos.
+  const autoGoogle = !silencioso && await _prazoAutoGoogleLigado();
   const res = {
     analisadas: pendentes.length, vinculadas: 0, prazosCriados: 0,
     expiradas: 0, orfas: 0, semPrazo: 0, duplicadas: 0, erros: 0,
@@ -8209,45 +8216,23 @@ async function autoAgendarIntimacoes(opts) {
         continue;
       }
 
-      // 3b. Cria o prazo automaticamente
-      const deadline = {
-        id: uid(),
-        processId: proc.id,
-        description: `[DJEN·🤖] ${parsed.label} · ${pub.orgao || ''}`.slice(0, 200),
-        type: 'djen',
-        intimationDate: calc.publication.toISOString(),
-        daysAllowed: parsed.prazoDias,
-        unidade: parsed.unidade || 'UTEIS',
-        emDobro: !!parsed.emDobro,
-        deadlineDate: calc.deadline.toISOString(),
-        status: STATUS_PRAZO.PENDENTE,
-        etapa: 'atribuido',
-        atribuidoEm: responsavel ? Date.now() : null,
-        logs: [],
-        djenHash: pub.hash,
-        tribunal,
-        comarca: comarca || null,
-        diarioCalculo: calc.diario,
-        tipoEscolhido: parsed.tipo,
-        tipoEscolhidoLabel: parsed.label,
-        tipoEscolhidoBaseLegal: parsed.baseLegal,
+      // 3b. Cria o prazo automaticamente (helper compartilhado com a busca DJEN)
+      const deadline = montarPrazoDjen({
+        proc, pub, calc,
+        tipo: parsed.tipo, label: parsed.label, baseLegal: parsed.baseLegal,
+        prazoDias: parsed.prazoDias, unidade: parsed.unidade, emDobro: parsed.emDobro,
+        tribunal, comarca, responsavel,
         parser: {
           tipo: parsed.tipo, label: parsed.label, baseLegal: parsed.baseLegal,
-          confianca: parsed.confianca, fonte: parsed.fonte,
-          requerRevisao: !!parsed.requerRevisao
+          confianca: parsed.confianca, fonte: parsed.fonte, requerRevisao: !!parsed.requerRevisao
         },
-        autoAgendado: { em: Date.now(), confianca: parsed.confianca, fonte: parsed.fonte, revisado: false },
-        createdAt: Date.now()
-      };
-      deadline.deadlineInternaDate = computarFatalInterna(deadline);
-      appendLogPrazo(deadline, 'criado', {
-        origem: 'auto', djenHash: pub.hash, deadlineDate: deadline.deadlineDate,
-        parserConfianca: parsed.confianca, parserFonte: parsed.fonte
+        origem: 'auto'
       });
       await DB.saveDeadline(deadline);
       deadlines.push(deadline); // dedup intra-execução
       res.prazosCriados++;
       res.listaCriados.push({ cnj: cnjFmt, label: parsed.label, fatal: deadline.deadlineDate });
+      if (autoGoogle) { const ok = await _pushPrazoGoogle(deadline, proc, true); if (ok) await DB.saveDeadline(deadline); }
       await trataPub({ autoTriagem: 'prazo_criado', autoTriagemEm: Date.now() });
     } catch (e) {
       res.erros++;
@@ -8352,6 +8337,186 @@ async function autoAgendarIntimacoesManual() {
   if (!ok) return;
   toast('🤖 Processando caixa de intimações…', 'Isso pode levar alguns segundos.', 'info');
   await autoAgendarIntimacoes({ silencioso: false });
+}
+
+// ====================================================================
+// 🧱 Helper único de criação de prazo a partir de um ato DJEN
+// ====================================================================
+// Fonte única usada por DOIS fluxos, pra não divergirem:
+//   - autoAgendarIntimacoes (origem 'auto', com parser → fila de revisão 🤖)
+//   - djenAgendarPrazos     (origem 'djen-busca', recurso escolhido à mão)
+// Devolve o objeto de prazo já com fatal interna + log 'criado' (NÃO salva).
+function montarPrazoDjen({ proc, pub, calc, tipo, label, baseLegal, prazoDias, unidade, emDobro, tribunal, comarca, responsavel, parser, origem }) {
+  const orgao = (pub && (pub.orgao || pub.nomeOrgao)) || '';
+  const d = {
+    id: uid(),
+    processId: proc ? proc.id : ((pub && pub.processId) || null),
+    description: `[DJEN${origem === 'auto' ? '·🤖' : ''}] ${label} · ${orgao}`.slice(0, 200),
+    type: 'djen',
+    intimationDate: calc.publication.toISOString(),
+    daysAllowed: prazoDias,
+    unidade: unidade || 'UTEIS',
+    emDobro: !!emDobro,
+    deadlineDate: calc.deadline.toISOString(),
+    status: STATUS_PRAZO.PENDENTE,
+    etapa: 'atribuido',
+    atribuidoEm: responsavel ? Date.now() : null,
+    advogadoResponsavel: responsavel || null,
+    logs: [],
+    djenHash: pub ? pub.hash : null,
+    tribunal,
+    comarca: comarca || null,
+    diarioCalculo: calc.diario,
+    tipoEscolhido: tipo,
+    tipoEscolhidoLabel: label,
+    tipoEscolhidoBaseLegal: baseLegal,
+    createdAt: Date.now()
+  };
+  if (parser) {
+    d.parser = parser;
+    d.autoAgendado = { em: Date.now(), confianca: parser.confianca, fonte: parser.fonte, revisado: false };
+  }
+  d.deadlineInternaDate = computarFatalInterna(d);
+  appendLogPrazo(d, 'criado', {
+    origem, djenHash: d.djenHash, deadlineDate: d.deadlineDate,
+    parserConfianca: parser ? parser.confianca : undefined,
+    parserFonte: parser ? parser.fonte : undefined
+  });
+  return d;
+}
+
+// ====================================================================
+// 📅 Espelho de prazos no Google Calendar (evento simples, sem Meet)
+// ====================================================================
+// A Agenda é o centro de controle dos prazos; opcionalmente cada prazo
+// espelha um evento no Google Calendar do escritório (na DATA FATAL, 09:00),
+// com lembrete por e-mail 3 dias antes e popup 1 dia antes. Controle:
+//   - Toggle global (Settings → Sincronização): liga o auto-sync de prazos
+//     NOVOS criados pela busca DJEN.
+//   - Botão 📅 por prazo na Agenda: adiciona/remove avulso (inclui backlog).
+// Reconciliação no ciclo de vida: resolvido (cumprido/cancelado/perdido) →
+// remove o evento; fatal recalculada → atualiza. Nunca quebra o fluxo local:
+// se a Calendar API falhar, o prazo continua salvo, só sem espelho no Google.
+function _googleCalDisponivel() {
+  return !!(window.UC_RemoteDB && typeof window.UC_RemoteDB.criarEventoCalendar === 'function');
+}
+
+function _prazoGooglePayload(d, proc) {
+  const fatal = new Date(d.deadlineDate); fatal.setHours(9, 0, 0, 0);
+  const fim = new Date(fatal.getTime() + 60 * 60 * 1000);
+  const procIdent = proc ? ((proc.cnj || '') + (proc.name ? ' · ' + proc.name : '')).trim() : '';
+  const titulo = `⏰ ${d.tipoEscolhidoLabel || d.description || 'Prazo'}${procIdent ? ' · ' + procIdent : ''}`.slice(0, 200);
+  const linhas = [
+    'Prazo judicial — UC Jurídico',
+    procIdent ? 'Processo: ' + procIdent : '',
+    d.tipoEscolhidoBaseLegal ? 'Base legal: ' + d.tipoEscolhidoBaseLegal : '',
+    'Vence (fatal): ' + formatDate(d.deadlineDate),
+    d.deadlineInternaDate ? 'Fatal interna (cobrança): ' + formatDate(d.deadlineInternaDate) : ''
+  ].filter(Boolean);
+  return {
+    titulo,
+    descricao: linhas.join('\n'),
+    local: (proc && proc.court) || d.comarca || '',
+    inicioISO: fatal.toISOString(),
+    fimISO: fim.toISOString(),
+    gerarMeet: false,
+    lembretes: [
+      { method: 'email', minutes: 3 * 24 * 60 },
+      { method: 'popup', minutes: 24 * 60 }
+    ]
+  };
+}
+
+// Cria/atualiza o evento Google do prazo. Muta d.googleEventId/htmlLink/syncEm.
+// Retorna true se sincronizou. Não salva o prazo (cabe ao chamador).
+async function _pushPrazoGoogle(d, proc, silencioso) {
+  if (!_googleCalDisponivel()) {
+    if (!silencioso) toast('Google Calendar indisponível', 'A integração de calendário não está configurada.', 'error');
+    return false;
+  }
+  try {
+    const payload = _prazoGooglePayload(d, proc);
+    let r;
+    if (d.googleEventId) {
+      r = await window.UC_RemoteDB.atualizarEventoCalendar({ eventId: d.googleEventId, ...payload });
+      if (r && r.ok === false && r.limparVinculo) d.googleEventId = null; // sumiu do Google → recria abaixo
+    }
+    if (!d.googleEventId) {
+      r = await window.UC_RemoteDB.criarEventoCalendar(payload);
+    }
+    if (!r || r.ok === false) {
+      if (!silencioso) toast('Não sincronizou', 'Erro: ' + (r?.erro || r?.error || 'desconhecido'), 'error');
+      return false;
+    }
+    d.googleEventId = r.eventId || d.googleEventId || null;
+    d.googleHtmlLink = r.htmlLink || d.googleHtmlLink || null;
+    d.googleSyncEm = Date.now();
+    return true;
+  } catch (e) {
+    console.warn('[prazo→google] push falhou', d.id, e);
+    if (!silencioso) toast('Falha no Google Calendar', String(e?.message || e) + ' — prazo salvo localmente.', 'error');
+    return false;
+  }
+}
+
+async function _removerPrazoGoogle(d, silencioso) {
+  if (!d.googleEventId || !_googleCalDisponivel()) { d.googleEventId = null; return false; }
+  try {
+    await window.UC_RemoteDB.cancelarEventoCalendar(d.googleEventId);
+  } catch (e) {
+    console.warn('[prazo→google] cancelar falhou', d.id, e);
+  }
+  d.googleEventId = null; d.googleHtmlLink = null; d.googleSyncEm = null;
+  return true;
+}
+
+// Reconciliação automática chamada após mudanças de ciclo de vida do prazo.
+// Resolvido → remove do Google; ativo com evento → atualiza (fatal mudou).
+// Salva o prazo só se o vínculo Google mudou.
+async function _reconciliarPrazoGoogle(d, proc) {
+  if (!d || !_googleCalDisponivel()) return;
+  try {
+    if (prazoEstaResolvido(d)) {
+      if (d.googleEventId) { await _removerPrazoGoogle(d, true); await DB.saveDeadline(d); }
+    } else if (d.googleEventId) {
+      const p = proc || (d.processId ? await DB.getProcess(d.processId).catch(() => null) : null);
+      if (await _pushPrazoGoogle(d, p, true)) await DB.saveDeadline(d);
+    }
+  } catch (e) { console.warn('[prazo→google] reconciliar', e); }
+}
+
+// Botão por prazo na Agenda — liga/desliga o espelho no Google Calendar.
+async function togglePrazoGoogle(id) {
+  const d = await _findPrazoForAction(id);
+  if (!d) { toast('Prazo não encontrado', '', 'error'); return; }
+  const proc = d.processId ? await DB.getProcess(d.processId).catch(() => null) : null;
+  if (d.googleEventId) {
+    await _removerPrazoGoogle(d, false);
+    await DB.saveDeadline(d);
+    toast('Removido do Google Calendar', '', 'success');
+  } else {
+    if (await _pushPrazoGoogle(d, proc, false)) {
+      await DB.saveDeadline(d);
+      toast('Adicionado ao Google Calendar', 'Evento criado na agenda do escritório, na data fatal.', 'success');
+    }
+  }
+  _refreshAfterPrazoAction();
+}
+
+// Lê o toggle de auto-sync (cacheia em state.settings pra leituras síncronas).
+async function _prazoAutoGoogleLigado() {
+  if (state.settings && typeof state.settings.prazoAutoGoogle === 'boolean') return state.settings.prazoAutoGoogle;
+  const v = !!(await DB.getSetting('prazoAutoGoogle', false));
+  if (state.settings) state.settings.prazoAutoGoogle = v;
+  return v;
+}
+
+async function setPrazoAutoGoogle(on) {
+  state.settings = state.settings || {};
+  state.settings.prazoAutoGoogle = !!on;
+  await DB.setSetting('prazoAutoGoogle', !!on);
+  toast(on ? '📅 Auto-sync ligado' : 'Auto-sync desligado',
+    on ? 'Novos prazos da busca DJEN entram no Google Calendar.' : 'Prazos novos não vão mais automaticamente pro Google.', 'success');
 }
 
 // Mapeia evento técnico → label humano (para o histórico expansível na linha do prazo).
@@ -8546,6 +8711,7 @@ async function ajustarDataFatalPrazo(id) {
   }, defaultAdvogado(me) || me);
   d.updatedAt = Date.now();
   await DB.saveDeadline(d);
+  await _reconciliarPrazoGoogle(d); // fatal mudou → atualiza o evento no Google Calendar
   toast('Data fatal recalculada', `${formatDate(antes.deadlineDate)} → ${formatDate(d.deadlineDate)}`, 'success');
   _refreshAfterPrazoAction();
 }
@@ -12007,10 +12173,25 @@ async function renderAgenda() {
   }
   filtrados.sort((a, b) => (a.dataHoraInicio || '').localeCompare(b.dataHoraInicio || ''));
 
-  // Prazos NÃO aparecem na Agenda (ficam em Publicações). O que vem de uma
-  // publicação é o COMPROMISSO gerado no agendamento (djenAgendarPrazos),
-  // que linka pra a publicação que o originou. Evita duplicar prazo + compromisso.
-  const prazosOverlay = [];
+  // Overlay de prazos do Kanban na Agenda (v6.87 — a Agenda é o centro de
+  // controle dos prazos). Os prazos entram pela DATA FATAL, com ações inline
+  // (cumprir/suspender/cancelar/Google). Não duplicam compromissos — são
+  // entidades distintas (store `deadlines`). Gated pelo toggle ⏰ Mostrar prazos.
+  let prazosOverlay = [];
+  if (f.incluirPrazos && f.tipo === 'todos') {
+    prazosOverlay = deadlines.filter(d => {
+      // Status do compromisso não se aplica a prazo: 'ativos' (default) mostra
+      // não-resolvidos; 'todos' mostra tudo; um status específico esconde prazos.
+      if (f.status === 'ativos') { if (prazoEstaResolvido(d)) return false; }
+      else if (f.status !== 'todos') return false;
+      if (f.responsavel && (d.advogadoResponsavel || '') !== f.responsavel) return false;
+      const dia = (d.deadlineDate || '').slice(0, 10);
+      if (!dia) return false;
+      if (dataInicioISO && dia < dataInicioISO) return false;
+      if (dataFimISO && dia > dataFimISO) return false;
+      return true;
+    });
+  }
 
   // Stats
   const venceram = compromissos.filter(c => {
@@ -12075,6 +12256,9 @@ async function renderAgenda() {
             <option value="todos" ${f.status === 'todos' ? 'selected' : ''}>Todos status</option>
             ${COMPROMISSO_STATUS.map(s => `<option value="${s.value}" ${f.status === s.value ? 'selected' : ''}>${s.label}</option>`).join('')}
           </select>
+          <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; white-space: nowrap;" title="Mostra os prazos do Kanban no calendário, na data fatal">
+            <input type="checkbox" ${f.incluirPrazos ? 'checked' : ''} onchange="_setAgFiltro('incluirPrazos', this.checked)"> ⏰ Prazos
+          </label>
         </div>
       </div>
       ${_renderAgendaCalendario(porDia, hoje, calRef, procById, cliById)}
@@ -12123,6 +12307,9 @@ async function renderAgenda() {
             <label class="label" style="font-size: 11px; margin-bottom: 4px;">Buscar</label>
             <input type="text" class="input" value="${escapeHtml(f.busca || '')}" placeholder="Título, local, observações" oninput="_setAgFiltroDebounced('busca', this.value)">
           </div>
+          <label style="display: flex; align-items: center; gap: 6px; font-size: 12px; cursor: pointer; white-space: nowrap;" title="Mostra os prazos do Kanban na Agenda, na data fatal, com ações inline">
+            <input type="checkbox" ${f.incluirPrazos ? 'checked' : ''} onchange="_setAgFiltro('incluirPrazos', this.checked)"> ⏰ Mostrar prazos
+          </label>
         </div>
       </div>
     </div>
@@ -12334,6 +12521,9 @@ function _renderPrazoNaAgenda(d, procById, today) {
     acoes += `<button class="btn btn-ghost btn-sm" onclick="event.stopPropagation(); abrirModalCumprimento('${d.id}')" title="Marcar como cumprido (data + protocolo)" style="padding: 2px 6px;">✓</button>`;
     acoes += `<button class="btn btn-ghost btn-sm" onclick="event.stopPropagation(); abrirModalSuspender('${d.id}')" title="Suspender (pausa lembretes)" style="padding: 2px 6px;">⏸</button>`;
     acoes += `<button class="btn btn-ghost btn-sm" onclick="event.stopPropagation(); abrirModalCancelar('${d.id}')" title="Cancelar com motivo" style="padding: 2px 6px;">⊘</button>`;
+  }
+  if (prazoEstaAtivo(d) && _googleCalDisponivel()) {
+    acoes += `<button class="btn btn-ghost btn-sm" onclick="event.stopPropagation(); togglePrazoGoogle('${d.id}')" title="${d.googleEventId ? 'Remover do Google Calendar' : 'Adicionar ao Google Calendar (na data fatal)'}" style="padding: 2px 6px;">${d.googleEventId ? '📅✓' : '📅'}</button>`;
   }
   if (proc) {
     acoes += `<button class="btn btn-ghost btn-sm" onclick="event.stopPropagation(); navigate('process', { currentProcessId: '${proc.id}' })" title="Abrir processo" style="padding: 2px 6px;">↗</button>`;
@@ -18838,6 +19028,18 @@ function renderSettingsTab(tab, prompts, defaultPromptId) {
         </ol>
         <p class="help-text mt-3">⚠️ A importação substitui os dados locais. Faça backup do dispositivo de destino antes, se já tiver dados nele.</p>
       </div>
+      <div class="card mb-3" style="border-left: 3px solid var(--uc-gold);">
+        <h4 class="font-serif font-semibold smallcaps mb-2" style="color: var(--uc-black);">📅 Prazos no Google Calendar</h4>
+        <label style="display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--uc-graphite); cursor: pointer;">
+          <input type="checkbox" ${state.settings?.prazoAutoGoogle ? 'checked' : ''} onchange="setPrazoAutoGoogle(this.checked)">
+          Sincronizar automaticamente novos prazos da busca DJEN com o Google Calendar do escritório
+        </label>
+        <p class="help-text mt-2">
+          Cria um evento simples (sem Meet) na data fatal, com lembrete por e-mail 3 dias antes e popup 1 dia antes.
+          Cumprir/cancelar/remover apaga o evento; recalcular a fatal atualiza. Para prazos já existentes (backlog),
+          use o botão <strong>📅</strong> em cada prazo na Agenda. Requer a Google Calendar API habilitada no Apps Script.
+        </p>
+      </div>
       <div class="card" style="border-left: 3px solid var(--uc-gold);">
         <h4 class="font-serif font-semibold smallcaps mb-2" style="color: var(--uc-black);">Por que sem servidor?</h4>
         <p style="font-size: 13px; color: var(--uc-graphite); line-height: 1.6;">
@@ -22668,7 +22870,7 @@ function djenRenderPubRow(pub, kind, idx) {
                 </div>
                 <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 4px;">
                   <button type="button" class="btn btn-ghost btn-sm" onclick="_djenAddRecursoSlot(this)" style="padding: 3px 10px; font-size: 11px;" title="Adicionar outro recurso/ato pra agendar a partir desta mesma publicação (cria um prazo adicional)">+ Adicionar outro recurso</button>
-                  <button type="button" data-djen-agendar-btn class="btn btn-primary btn-sm" onclick="djenAgendarPrazos('${pub.hash}')" style="padding: 4px 12px; font-size: 11px;" title="Salva esta publicação no processo + cria 1 compromisso 'Prazo judicial' na agenda pra cada recurso escolhido — independente do botão 'Importar selecionadas' lá embaixo">📅 Salvar e agendar prazos</button>
+                  <button type="button" data-djen-agendar-btn class="btn btn-primary btn-sm" onclick="djenAgendarPrazos('${pub.hash}')" style="padding: 4px 12px; font-size: 11px;" title="Salva esta publicação no processo + cria 1 prazo (Kanban e Agenda) pra cada recurso escolhido — independente do botão 'Importar selecionadas' lá embaixo">📅 Salvar e agendar prazos</button>
                 </div>
                 <div style="margin-top: 8px; display:flex; gap:6px; flex-wrap: wrap; align-items:center;">
                   <span class="badge ${confColor}" style="font-size: 10px;" title="Confiança ${(parsed.confianca*100).toFixed(0)}% · fonte: ${escapeHtml(parsed.fonte)}${parsed.evidencia ? ' · trecho: &quot;' + escapeHtml(String(parsed.evidencia).slice(0, 80)) + '&quot;' : ''}">⚙ parser: ${escapeHtml(parsed.label)}</span>
@@ -23642,68 +23844,36 @@ async function djenAgendarPrazos(hash) {
     });
   }
 
-  // Cria 1 compromisso por recurso
+  // Cria 1 PRAZO (Kanban + Agenda) por recurso escolhido — fonte única.
+  // (v6.87: unificado. Antes criava compromisso `prazo_judicial`; agora cria
+  // deadline, pra a Agenda virar o centro de controle sem duplicar entidades.)
   const proc = processId ? await DB.getProcess(processId) : null;
   const tribunal = inferirTribunal(proc?.court || pub.tribunal || pub.nomeOrgao);
   const orgaoNome = pub.nomeOrgao || pub.orgao || '';
-  const procIdent = proc ? ((proc.cnj || pub._cnjFormatted || '') + (proc.name ? ' · ' + proc.name : '')).trim() : (pub._cnjFormatted || '(sem CNJ)');
-  const meta = pub._meta || _djenExtractMeta(pub);
-  const pubISO = meta.dataPublicacaoApi || _djenCalcDataPublicacao(meta.dataDisponibilizacao, tribunal) || dataDispo;
+  const comarca = inferirComarca(orgaoNome || proc?.court || '');
   const meuEmail = (window.UC_Auth?.getUser?.() || {}).email || '';
   const meuNome = (typeof defaultAdvogado === 'function' ? defaultAdvogado(meuEmail) : '') || '';
+  const responsavel = meuNome || proc?.advogadoResponsavel || null;
 
-  // Dedup: olha compromissos já existentes do mesmo processo com mesmo hash+recurso
-  const existentes = processId ? await DB.getCompromissosByProcess?.(processId).catch(() => []) || [] : [];
-  let criados = 0, pulados = 0;
+  // Dedup contra prazos já existentes do processo (mesmo hash + tipo de ato).
+  const deadlinesProc = processId ? (await DB.getAllDeadlines()).filter(x => x.processId === processId) : [];
+  const autoGoogle = await _prazoAutoGoogleLigado();
+  let criados = 0, pulados = 0, googled = 0;
 
   for (const r of recursos) {
+    if (deadlinesProc.some(x => x.djenHash === pub.hash && x.tipoEscolhido === r.tipoAto)) { pulados++; continue; }
     const calc = calcDjenDeadline(dataDispo, r.prazo, tribunal, r.unidade, false);
-    const deadlineDate = new Date(calc.deadline);
-    deadlineDate.setHours(9, 0, 0, 0); // 09:00 do dia do vencimento — push T-0 dispara cedo
-
-    // Dedup: mesmo djenHash + djenRecurso já existe?
-    if (existentes.some(c => c.djenHash === pub.hash && c.djenRecurso === r.tipoAto)) {
-      pulados++;
-      continue;
-    }
-
-    const unidLabel = r.unidade === 'CORRIDOS' ? 'corridos' : 'úteis';
-    const obsLinhas = [
-      `Prazo originado de publicação DJEN.`,
-      ``,
-      `Processo: ${procIdent}`,
-      `Órgão: ${orgaoNome}`,
-      `Disp: ${_djenFormatBrDate(meta.dataDisponibilizacao || dataDispo)}`,
-      `Pub: ${_djenFormatBrDate(pubISO)}${pubISO && !meta.dataPublicacaoApi ? ' (calc.)' : ''}`,
-      `Marco inicial: ${formatDate(calc.publication)}`,
-      `Prazo: ${r.prazo} dias ${unidLabel}${r.baseLegal ? ' · ' + r.baseLegal : ''}`,
-      `Vence: ${formatDate(calc.deadline)}`
-    ];
-    if (meta.numeroDiario) obsLinhas.push(`DJ Nº ${meta.numeroDiario}${meta.caderno ? ' · cad. ' + meta.caderno : ''}${meta.pagina ? ' · pág ' + meta.pagina : ''}`);
-    if (meta.link) obsLinhas.push(``, `Diário oficial: ${meta.link}`);
-
-    await DB.saveCompromisso({
-      id: uid(),
-      tipo: 'prazo_judicial',
-      titulo: `${r.label} · ${procIdent}`.slice(0, 200),
-      dataHoraInicio: deadlineDate.toISOString(),
-      dataHoraFim: null,
-      local: orgaoNome || null,
-      processoId: processId || null,
-      clienteId: proc?.clienteId || null,
-      responsavel: meuNome || null,
-      participantes: [],
-      status: 'agendado',
-      observacoes: obsLinhas.join('\n'),
-      notificado: {},
-      // Trilha forense + dedup
-      djenHash: pub.hash,
-      djenRecurso: r.tipoAto,
-      djenRecursoBaseLegal: r.baseLegal,
-      diarioCalculo: calc.diario || null,
-      createdAt: Date.now()
+    const d = montarPrazoDjen({
+      proc, pub, calc,
+      tipo: r.tipoAto, label: r.label, baseLegal: r.baseLegal,
+      prazoDias: r.prazo, unidade: r.unidade, emDobro: false,
+      tribunal, comarca, responsavel,
+      parser: null, origem: 'djen-busca'
     });
+    await DB.saveDeadline(d);
+    deadlinesProc.push(d);
     criados++;
+    if (autoGoogle) { const ok = await _pushPrazoGoogle(d, proc, true); if (ok) { await DB.saveDeadline(d); googled++; } }
   }
 
   // Visual feedback no botão
@@ -23716,10 +23886,11 @@ async function djenAgendarPrazos(hash) {
     btn.textContent = pulados > 0 && criados === 0 ? '✓ Já agendado' : `✓ ${criados} agendado${criados !== 1 ? 's' : ''}`;
   }
   const msgPartes = [];
-  if (criados > 0) msgPartes.push(`${criados} prazo${criados !== 1 ? 's' : ''} agendado${criados !== 1 ? 's' : ''}`);
+  if (criados > 0) msgPartes.push(`${criados} prazo${criados !== 1 ? 's' : ''} no Kanban/Agenda`);
+  if (googled > 0) msgPartes.push(`${googled} no Google Calendar`);
   if (pulados > 0) msgPartes.push(`${pulados} duplicad${pulados !== 1 ? 'os' : 'o'} ignorad${pulados !== 1 ? 'os' : 'o'}`);
   if (!processId) msgPartes.push('sem processo vinculado');
-  toast('Compromissos na agenda', msgPartes.join(' · ') || 'Nada a fazer', criados > 0 ? 'success' : 'info');
+  toast('Prazos agendados', msgPartes.join(' · ') || 'Nada a fazer', criados > 0 ? 'success' : 'info');
 }
 
 function djenInferProcessFromPublication(pub) {
@@ -24857,6 +25028,7 @@ async function bootApp() {
   state.settings.lastBackupAt = await DB.getSetting('lastBackupAt', null);
   state.settings.lastBackupCloud = await DB.getSetting('lastBackup', null);
   state.settings.notificacoesAtivas = await DB.getSetting('notificacoesAtivas', true);
+  state.settings.prazoAutoGoogle = await DB.getSetting('prazoAutoGoogle', false);
   applyTheme(state.settings.theme);
   _updateThemeQuickToggleLabel();
   _iniciarRefreshSino();

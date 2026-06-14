@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.86.0 (feat: 🤖 auto-agendamento de prazos — intimações não tratadas são vinculadas aos processos por CNJ, parser extrai o prazo do teor (confiança ≥50% com prazo numérico) e cria o prazo automaticamente [fatal interna + etapa atribuido + cobrança imediata]; fila "🤖 aguardando revisão" no topo de Publicações com Confirmar/Ajustar fatal/Cancelar; backlog com fatal já vencida é tratado SEM criar prazo [marca prazo_expirado]; roda no boot [silencioso] e via botão 🤖 Auto-agendar na caixa)
-const CACHE_NAME = 'uc-juridico-v6-86-0';
+// Service Worker — UC Jurídico v6.87.0 (feat: Agenda vira o centro de controle dos prazos — (1) overlay: prazos do Kanban aparecem na Agenda [lista+calendário] na data fatal, com ações inline cumprir/suspender/cancelar/Google, gated pelo toggle "⏰ Mostrar prazos"; (2) unificação: "Salvar e agendar prazos" da busca DJEN passa a criar PRAZO [deadline] em vez de compromisso, via helper único montarPrazoDjen compartilhado com o auto-agendamento; (3) Google Calendar: prazos espelham evento simples [sem Meet] na fatal com lembrete e-mail 3d + popup 1d — botão 📅 por prazo na Agenda, toggle de auto-sync em Settings→Sincronização, e reconciliação no ciclo de vida [cumprido/cancelado/removido→apaga; recalcular fatal→atualiza])
+const CACHE_NAME = 'uc-juridico-v6-87-0';
 const APP_SHELL = [
   './',
   './index.html',
