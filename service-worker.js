@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.87.0 (feat: Agenda vira o centro de controle dos prazos — (1) overlay: prazos do Kanban aparecem na Agenda [lista+calendário] na data fatal, com ações inline cumprir/suspender/cancelar/Google, gated pelo toggle "⏰ Mostrar prazos"; (2) unificação: "Salvar e agendar prazos" da busca DJEN passa a criar PRAZO [deadline] em vez de compromisso, via helper único montarPrazoDjen compartilhado com o auto-agendamento; (3) Google Calendar: prazos espelham evento simples [sem Meet] na fatal com lembrete e-mail 3d + popup 1d — botão 📅 por prazo na Agenda, toggle de auto-sync em Settings→Sincronização, e reconciliação no ciclo de vida [cumprido/cancelado/removido→apaga; recalcular fatal→atualiza])
-const CACHE_NAME = 'uc-juridico-v6-87-0';
+// Service Worker — UC Jurídico v6.87.1 (refac UX: prazos auto-agendados não geram mais banner/fila 🤖 separado na página Publicações — eram confusos. Agora vivem só no Kanban [coluna Atribuído, badge "🤖 revisar"] e na Agenda. Revisão acontece no lugar: dar ciência no Kanban OU "🤖 revisar" na Agenda confirma a leitura do parser e limpa o marcador. Card da Agenda ganha 🤖 revisar + ajustar fatal 🗓. Removida _secaoRevisaoAutoHtml; mensagens do relatório atualizadas)
+const CACHE_NAME = 'uc-juridico-v6-87-1';
 const APP_SHELL = [
   './',
   './index.html',

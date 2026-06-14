@@ -7121,19 +7121,16 @@ async function renderDeadlines() {
       </div>
     </div>`;
 
-  // Fila de revisão dos prazos auto-agendados (🤖) — visível nas duas visões.
-  const secaoRevisaoAuto = _secaoRevisaoAutoHtml(deadlines, _procById);
-
-  // Kanban primeiro (quadro é o foco da visão); na lista, a ordem clássica
-  // com a Caixa de intimações no topo é preservada.
+  // Prazos auto-agendados (🤖) NÃO têm mais banner separado aqui — geravam
+  // confusão na página de Publicações. Eles vivem no Kanban (coluna Atribuído,
+  // com badge 🤖) e na Agenda, onde são tratados/revisados: a primeira ação
+  // no Kanban (dar ciência) ou o "✓ revisar" na Agenda limpam o marcador.
   $('appContent').innerHTML = state._prazosView === 'kanban'
     ? `${header}
-       ${secaoRevisaoAuto}
        ${secaoPerdidos}
        ${_renderKanbanPrazos(active, done, processes)}
        <div style="margin-top: 20px;">${secaoIntimacoes}</div>`
     : `${header}
-       ${secaoRevisaoAuto}
        ${secaoIntimacoes}
        ${secaoPerdidos}
        ${statsGrid}
@@ -7227,7 +7224,7 @@ function _kanbanCardPrazo(d, procById, today) {
     <div class="card" style="margin: 0 0 8px; padding: 10px; cursor: pointer; ${suspenso ? 'opacity:.65;' : ''}" onclick="navigate('process', { currentProcessId: '${d.processId}' })">
       <div style="display: flex; justify-content: space-between; gap: 6px; align-items: flex-start;">
         <strong style="font-size: 12.5px; color: var(--uc-black); line-height: 1.35;">${escapeHtml(d.description || d.type)}</strong>
-        <span style="display:flex;gap:3px;flex-shrink:0;">${d.autoAgendado && !d.autoAgendado.revisado ? '<span class="badge badge-amber" style="font-size: 9px;" title="Auto-agendado — aguardando revisão (fila 🤖 no topo)">🤖</span>' : ''}${badge}</span>
+        <span style="display:flex;gap:3px;flex-shrink:0;">${d.autoAgendado && !d.autoAgendado.revisado ? '<span class="badge badge-amber" style="font-size: 9px;" title="Auto-agendado pelo parser — confira a leitura. Dar ciência (ou ✓ revisar na Agenda) confirma e remove este marcador.">🤖 revisar</span>' : ''}${badge}</span>
       </div>
       <div style="font-size: 11px; color: var(--uc-warm-gray); margin-top: 4px;">
         ${escapeHtml(proc?.name || d.processName || 'Processo removido')}${proc?.cnj ? ' · ' + escapeHtml(proc.cnj) : ''}
@@ -8121,7 +8118,8 @@ function appendLogPrazo(d, evento, payload, ator) {
 //   1. Vincula ao processo da carteira por CNJ idêntico (se ainda sem vínculo).
 //   2. Roda o parser no teor. Se extraiu prazo numérico (confiança ≥ 50%),
 //      calcula a data fatal e CRIA O PRAZO automaticamente — já com fatal
-//      interna, etapa 'atribuido' e flag de revisão pendente (fila 🤖).
+//      interna, etapa 'atribuido' e marcador 🤖 (revisado ao dar ciência no
+//      Kanban ou via "🤖 revisar" na Agenda — sem banner separado).
 //   3. Dá ciência na intimação (ator 'sistema · auto'), tirando-a da caixa.
 // Guardas:
 //   - Fatal já vencida (backlog antigo): NÃO cria prazo — trata a intimação
@@ -8255,7 +8253,7 @@ async function autoAgendarIntimacoes(opts) {
 function _mostrarRelatorioAutoAgendamento(res, somenteToast) {
   const resumo = `${res.prazosCriados} prazo(s) criado(s) · ${res.vinculadas} vinculada(s) · ${res.expiradas} expirada(s) · ${res.orfas} órfã(s) · ${res.semPrazo} sem prazo extraível`;
   if (somenteToast) {
-    if (res.prazosCriados > 0) toast('🤖 Auto-agendamento', resumo + ' — revise na fila 🤖 em Publicações.', 'success');
+    if (res.prazosCriados > 0) toast('🤖 Auto-agendamento', resumo + ' — revise no Kanban (🤖) ou na Agenda.', 'success');
     return;
   }
   const linha = (i) => `<div style="font-size:12px;padding:3px 0;border-bottom:1px solid var(--uc-line);">${escapeHtml(i.cnj)} · ${escapeHtml(i.label)} · fatal ${formatDate(i.fatal)}</div>`;
@@ -8274,48 +8272,15 @@ function _mostrarRelatorioAutoAgendamento(res, somenteToast) {
       </div>
       ${res.listaCriados.length ? `<details open style="margin-bottom:10px;"><summary style="cursor:pointer;font-size:13px;font-weight:600;">✓ Prazos criados (${res.listaCriados.length}) — aguardando sua revisão</summary>${res.listaCriados.map(linha).join('')}</details>` : ''}
       ${res.listaExpiradas.length ? `<details style="margin-bottom:10px;"><summary style="cursor:pointer;font-size:13px;font-weight:600;">⏱ Tratadas como expiradas (${res.listaExpiradas.length}) — prazo já tinha vencido; confira se foram cumpridas por fora</summary>${res.listaExpiradas.map(linha).join('')}</details>` : ''}
-      <p class="help-text">Os prazos criados estão na fila <strong>🤖 aguardando revisão</strong> no topo de Publicações — confirme, ajuste a fatal ou cancele cada um. Eles já contam na régua de lembretes.</p>
+      <p class="help-text">Os prazos criados estão no <strong>Kanban</strong> (coluna <em>Atribuído</em>, com 🤖) e na <strong>Agenda</strong>, onde você revisa: dar ciência no Kanban — ou <em>🤖 revisar</em> na Agenda — confirma a leitura e remove o marcador. Ajuste a fatal ou cancele direto no card. Eles já contam na régua de lembretes.</p>
       <button class="btn btn-primary" style="width:100%;margin-top:8px;" onclick="this.closest('.modal-backdrop').remove()">Fechar</button>
     </div>`;
   $('modalContainer').appendChild(modal);
 }
 
-// Fila de revisão dos prazos auto-agendados — seção no topo de Publicações.
-function _secaoRevisaoAutoHtml(deadlines, procById) {
-  const fila = (deadlines || []).filter(d => d.autoAgendado && !d.autoAgendado.revisado && !prazoEstaResolvido(d));
-  if (!fila.length) return '';
-  fila.sort((a, b) => new Date(a.deadlineInternaDate || a.deadlineDate) - new Date(b.deadlineInternaDate || b.deadlineDate));
-  return `
-    <div class="card mb-4" style="border-left: 4px solid var(--uc-gold);">
-      <h3 class="font-serif font-semibold smallcaps mb-1">🤖 Prazos auto-agendados aguardando revisão · ${fila.length}</h3>
-      <p class="help-text" style="margin: 0 0 10px;">Criados automaticamente pelo parser a partir das intimações. Já estão na régua de cobrança — <strong>Confirmar</strong> valida a leitura do parser, <strong>Ajustar fatal</strong> corrige a data (auditado), <strong>Cancelar</strong> anula com motivo.</p>
-      ${fila.map(d => {
-        const proc = procById[d.processId];
-        const conf = d.autoAgendado.confianca != null ? (d.autoAgendado.confianca * 100).toFixed(0) + '%' : '—';
-        return `
-        <div class="card" style="margin-bottom: 6px; padding: 10px; background: #fff;">
-          <div style="display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; align-items: center;">
-            <div style="flex: 1; min-width: 0;">
-              <strong style="color: var(--uc-black); font-size: 13px;">${escapeHtml(d.description || d.type)}</strong>
-              <span class="badge ${(d.autoAgendado.confianca || 0) >= 0.85 ? 'badge-green' : 'badge-amber'}" style="font-size: 9px;" title="Parser: ${escapeHtml(d.parser?.fonte || '')}${d.parser?.requerRevisao ? ' · confiança baixa' : ''}">⚙ ${conf}</span>
-              <div style="font-size: 12px; color: var(--uc-warm-gray); margin-top: 2px;">
-                ${escapeHtml(proc?.name || 'Processo')}${proc?.cnj ? ' · ' + escapeHtml(proc.cnj) : ''} ·
-                ${d.deadlineInternaDate ? 'cobra ' + formatDate(d.deadlineInternaDate) + ' · ' : ''}fatal ${formatDate(d.deadlineDate)}
-              </div>
-            </div>
-            <div style="display: flex; gap: 4px; flex-shrink: 0; flex-wrap: wrap;">
-              ${d.djenHash ? `<button class="btn btn-ghost btn-sm" onclick="djenShowFullPublicacaoFromDb('${d.djenHash}')" title="Ver a publicação que originou" style="padding: 2px 8px;">📰</button>` : ''}
-              <button class="btn btn-ghost btn-sm" onclick="navigate('process', { currentProcessId: '${d.processId}' })" title="Abrir processo" style="padding: 2px 8px;">↗</button>
-              <button class="btn btn-outline btn-sm" onclick="ajustarDataFatalPrazo('${d.id}')" style="padding: 2px 8px;">📅 Ajustar fatal</button>
-              <button class="btn btn-outline btn-sm" onclick="abrirModalCancelar('${d.id}')" style="padding: 2px 8px;">⊘ Cancelar</button>
-              <button class="btn btn-secondary btn-sm" onclick="confirmarRevisaoAuto('${d.id}')" style="padding: 2px 8px;">✓ Confirmar</button>
-            </div>
-          </div>
-        </div>`;
-      }).join('')}
-    </div>`;
-}
-
+// Revisão do auto-agendamento: confirma a leitura do parser e remove o
+// marcador 🤖. Acionada pelo "🤖 revisar" na Agenda (e implicitamente ao dar
+// ciência no Kanban). Não há mais banner/fila separado em Publicações.
 async function confirmarRevisaoAuto(id) {
   const d = await _findPrazoForAction(id);
   if (!d) { toast('Prazo não encontrado', '', 'error'); return; }
@@ -8651,6 +8616,15 @@ async function mudarEtapaPrazo(id, novaEtapa, payloadExtra) {
     }
     d.cienteEm = Date.now();
     d.cientePor = meuNome;
+  }
+
+  // Auto-agendado: a primeira ação no Kanban (sair de "atribuído") vale como
+  // revisão do parser — limpa o marcador 🤖. Sem fila/banner separado.
+  if (de === 'atribuido' && d.autoAgendado && !d.autoAgendado.revisado) {
+    d.autoAgendado.revisado = true;
+    d.autoAgendado.revisadoEm = Date.now();
+    d.autoAgendado.revisadoPor = meuNome;
+    appendLogPrazo(d, 'revisao_confirmada', { via: 'kanban' }, meuNome);
   }
 
   const evento = (novaEtapa === 'elaboracao' && de === 'revisao')
@@ -12518,7 +12492,11 @@ function _renderPrazoNaAgenda(d, procById, today) {
     acoes += `<button class="btn btn-ghost btn-sm" onclick="event.stopPropagation(); reabrirPrazo('${d.id}')" title="Reabrir prazo" style="padding: 2px 6px;">▶</button>`;
     acoes += `<button class="btn btn-ghost btn-sm" onclick="event.stopPropagation(); abrirModalCancelar('${d.id}')" title="Cancelar com motivo" style="padding: 2px 6px;">⊘</button>`;
   } else if (prazoEstaAtivo(d)) {
+    if (d.autoAgendado && !d.autoAgendado.revisado) {
+      acoes += `<button class="btn btn-secondary btn-sm" onclick="event.stopPropagation(); confirmarRevisaoAuto('${d.id}')" title="Confirmar a leitura do parser — remove o marcador 🤖" style="padding: 2px 8px;">🤖 revisar</button>`;
+    }
     acoes += `<button class="btn btn-ghost btn-sm" onclick="event.stopPropagation(); abrirModalCumprimento('${d.id}')" title="Marcar como cumprido (data + protocolo)" style="padding: 2px 6px;">✓</button>`;
+    acoes += `<button class="btn btn-ghost btn-sm" onclick="event.stopPropagation(); ajustarDataFatalPrazo('${d.id}')" title="Ajustar data fatal (auditado)" style="padding: 2px 6px;">🗓</button>`;
     acoes += `<button class="btn btn-ghost btn-sm" onclick="event.stopPropagation(); abrirModalSuspender('${d.id}')" title="Suspender (pausa lembretes)" style="padding: 2px 6px;">⏸</button>`;
     acoes += `<button class="btn btn-ghost btn-sm" onclick="event.stopPropagation(); abrirModalCancelar('${d.id}')" title="Cancelar com motivo" style="padding: 2px 6px;">⊘</button>`;
   }
@@ -12539,6 +12517,7 @@ function _renderPrazoNaAgenda(d, procById, today) {
             <strong style="color: var(--uc-black); font-size: 14px;">${escapeHtml(d.description || d.type || 'Prazo')}</strong>
             <span class="badge ${badgeClass}" style="font-size: 9px;">${label}</span>
             ${d.emDobro ? '<span class="badge badge-amber" style="font-size: 9px;">DOBRO</span>' : ''}
+            ${d.autoAgendado && !d.autoAgendado.revisado ? '<span class="badge badge-amber" style="font-size: 9px;" title="Auto-agendado pelo parser — confira e clique 🤖 revisar">🤖 revisar</span>' : ''}
           </div>
           <div style="font-size: 12px; color: var(--uc-warm-gray);">
             ${d.advogadoResponsavel ? '👤 ' + escapeHtml(d.advogadoResponsavel.split(' ')[0]) : ''}
