@@ -140,6 +140,12 @@ git push origin sandbox
    - **🐛 Fix de off-by-one nos marcos** (pré-existente): datas fatais gravadas ao meio-dia + `Math.ceil` faziam T-0 disparar um dia DEPOIS do vencimento. Corrigido com normalização pro dia-calendário (`_diaFatalLocal`) no client e no GAS. 24 casos de teste passando (interna, FATAL, legado, date-only, feriados).
    - Obs.: os badges de dias da LISTA de publicações (Vencidos/Urgentes/etc.) ainda usam a contagem antiga (visual, conservador +1d) — candidato a ajuste fino futuro.
 
+7. **📧 E-mails de lembrete consolidados por processo** (backend `Lembretes.gs`) — a pedido ("evitar repetir as notificações por e-mail para o mesmo processo só porque são várias as partes representadas"):
+   - `cron_lembretesDePrazo` e `_escalonarSemAck` reescritos em 3 fases: (1) push por prazo + coleta de grupos, (2) **1 e-mail consolidado por (destinatário · CNJ · marco)**, (3) persiste `notificado`. Agrupa por **CNJ normalizado** (`_cnjKeyProc`) — vários prazos/partes do mesmo processo viram **um único e-mail**.
+   - Novo conteúdo do e-mail: tabela **Parte · Providência · Prazo**, com o **número do processo** no topo. "Providência em poucas palavras" = `_providenciaCurta` (tipo de ato do parser, ex.: "Contestação"). Push também passou a citar providência + parte.
+   - Anti-spam preservado e refinado: `notificado[marco][email]` agora separa `.push` e `.email` (não re-emite). Compositores novos: `_montarEmailLembreteConsolidado`, `_montarEmailSemAckConsolidado`. Parcelas (honorários) intactas.
+   - Teste: 20 casos end-to-end em Node (stub Firestore/FCM/Mail) — 3 prazos mesmo CNJ → 1 e-mail com 2 partes + 3 providências; anti-spam; sem-ACK consolidado. ⚠️ **Pendência manual: colar `Lembretes.gs` no Apps Script** (não há deploy automático do backend).
+
 6. **🤖 Prazos auto-agendados sem banner em Publicações** (**v6.87.1**) — a pedido ("devem ficar somente na agenda, juntamente com o kanban onde serão tratados; se permanecerem em publicações gera confusão"):
    - Removido o banner/fila "🤖 aguardando revisão" do topo da página Publicações (era um terceiro lugar redundante, além de Kanban e Agenda). `_secaoRevisaoAutoHtml` deletada.
    - Os auto-agendados continuam no **Kanban** (coluna Atribuído, badge **"🤖 revisar"**) e na **Agenda** (overlay, badge + botão **"🤖 revisar"**). A revisão acontece no lugar: **dar ciência no Kanban** marca `autoAgendado.revisado` (log `revisao_confirmada` via:kanban) **ou** **"🤖 revisar" na Agenda** (chama `confirmarRevisaoAuto`). Card da Agenda também ganhou ajustar-fatal (🗓).

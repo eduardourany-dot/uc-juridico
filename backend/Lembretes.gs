@@ -415,6 +415,176 @@ function _escapeEmail(s) {
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
+// =====================================================================
+// Consolidação de e-mail POR PROCESSO (evita repetir e-mail pro mesmo CNJ
+// só porque há várias partes representadas pelo escritório)
+// =====================================================================
+
+// dd/mm/aaaa a partir de ISO/date-only/timestamp.
+function _fmtDataBr(v) {
+  var s = (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}/.test(v))
+    ? v.slice(0, 10)
+    : new Date(v).toISOString().slice(0, 10);
+  var p = s.split('-');
+  return p.length === 3 ? (p[2] + '/' + p[1] + '/' + p[0]) : s;
+}
+
+// "Providência a ser cumprida", em poucas palavras: usa o tipo de ato do
+// parser (tipoEscolhidoLabel, ex.: "Contestação"); senão limpa a description
+// (tira o prefixo "[DJEN…] " e o sufixo " · órgão").
+function _providenciaCurta(prazo) {
+  if (prazo.tipoEscolhidoLabel) return String(prazo.tipoEscolhidoLabel).slice(0, 80);
+  var desc = String(prazo.description || prazo.type || 'Cumprir prazo');
+  desc = desc.replace(/^\[[^\]]*\]\s*/, '');
+  desc = desc.split(' · ')[0];
+  return desc.slice(0, 80) || 'Cumprir prazo';
+}
+
+// Chave de agrupamento por PROCESSO: CNJ normalizado (só dígitos). Sem CNJ,
+// cai no processId pra não fundir processos distintos.
+function _cnjKeyProc(proc) {
+  var cnj = (proc && proc.cnj) ? String(proc.cnj).replace(/\D/g, '') : '';
+  return cnj || ('pid:' + ((proc && proc._docId) || 'x'));
+}
+
+// <th> reutilizado nos e-mails consolidados.
+function _thEmail(txt) {
+  return '<th style="text-align:left;padding:8px 10px;font-size:12px;color:#6b6b68;text-transform:uppercase;letter-spacing:.04em;">' + txt + '</th>';
+}
+
+/**
+ * E-mail consolidado de lembrete: UMA mensagem por (destinatário · processo ·
+ * marco), mesmo que haja vários prazos (várias partes). Lista, por linha,
+ * a parte + a providência (poucas palavras) + o prazo.
+ * itens = [{ d: prazo, proc: processo, docId }]
+ */
+function _montarEmailLembreteConsolidado(marco, itens) {
+  var labels = {
+    'T-7': 'Prazo em até 7 dias', 'T-3': 'Prazo em 3 dias', 'T-2': 'Prazo em 2 dias',
+    'T-1': '🚨 PRAZO AMANHÃ', 'T-0': '🚨🚨 PRAZO HOJE',
+    'T+1': '✗ PRAZO VENCIDO ONTEM', 'FATAL': '⛔ FATAL REAL HOJE — IMPRORROGÁVEL'
+  };
+  var cores = {
+    'T-7': '#4a7c4a', 'T-3': '#b87f1c', 'T-2': '#b87f1c',
+    'T-1': '#a8472d', 'T-0': '#a8472d', 'T+1': '#a8472d', 'FATAL': '#7a1f1f'
+  };
+  var titulo = labels[marco] || marco;
+  var cor = cores[marco] || '#6b6b68';
+  var proc0 = itens[0].proc;
+  var numero = proc0.cnj || proc0.name || 'Processo';
+  var url = 'https://uc.uranydecastro.adv.br/#process/' + (proc0._docId || itens[0].docId);
+
+  var vistos = {}, linhas = [], partesSet = {};
+  for (var i = 0; i < itens.length; i++) {
+    var d = itens[i].d, proc = itens[i].proc;
+    var parte = (proc.client || proc.name || '—');
+    var prov = _providenciaCurta(d);
+    var dlReal = _fmtDataBr(d.deadlineDate);
+    var dlInterna = (d.deadlineInternaDate && d.deadlineInternaDate !== d.deadlineDate)
+      ? _fmtDataBr(d.deadlineInternaDate) : null;
+    var k = parte + '|' + prov + '|' + dlReal;
+    if (vistos[k]) continue;
+    vistos[k] = true;
+    partesSet[parte] = true;
+    linhas.push({ parte: parte, prov: prov, dlReal: dlReal, dlInterna: dlInterna, emDobro: !!d.emDobro });
+  }
+  var partes = Object.keys(partesSet);
+  var partesLabel = partes.slice(0, 3).join(', ') + (partes.length > 3 ? ' +' + (partes.length - 3) : '');
+  var assunto = '[' + titulo.replace(/[🚨✗⛔⚠]/g, '').trim() + '] ' + numero +
+    (partesLabel ? ' · ' + partesLabel : '');
+
+  var linhasHtml = linhas.map(function (l) {
+    var prazoCel = l.dlInterna
+      ? ('cobra ' + _escapeEmail(l.dlInterna) + '<br><span style="color:#a8472d;font-weight:600;">fatal ' + _escapeEmail(l.dlReal) + '</span>')
+      : ('<span style="font-weight:600;">' + _escapeEmail(l.dlReal) + '</span>');
+    return '<tr>' +
+      '<td style="padding:8px 10px;border-bottom:1px solid #eee;vertical-align:top;font-size:14px;"><strong>' + _escapeEmail(l.parte) + '</strong></td>' +
+      '<td style="padding:8px 10px;border-bottom:1px solid #eee;vertical-align:top;font-size:14px;">' + _escapeEmail(l.prov) + (l.emDobro ? ' <span style="color:#b87f1c;">(em dobro)</span>' : '') + '</td>' +
+      '<td style="padding:8px 10px;border-bottom:1px solid #eee;vertical-align:top;font-size:13px;white-space:nowrap;">' + prazoCel + '</td>' +
+    '</tr>';
+  }).join('');
+
+  var html =
+    '<div style="font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',Roboto,sans-serif;max-width:640px;margin:0 auto;background:#fafaf7;padding:24px;border-radius:8px;border:1px solid #e8e3d4;">' +
+      '<div style="border-left:4px solid ' + cor + ';padding-left:16px;margin-bottom:18px;">' +
+        '<h1 style="margin:0 0 6px;font-size:22px;color:' + cor + ';font-weight:600;">' + _escapeEmail(titulo) + '</h1>' +
+        '<p style="margin:0;color:#1f1f1f;font-size:15px;font-weight:500;">Processo ' + _escapeEmail(numero) + '</p>' +
+        (proc0.name && proc0.cnj && proc0.name !== proc0.cnj ? '<p style="margin:2px 0 0;color:#6b6b68;font-size:13px;">' + _escapeEmail(proc0.name) + '</p>' : '') +
+      '</div>' +
+      '<p style="margin:0 0 10px;color:#6b6b68;font-size:13px;">' + linhas.length + ' providência(s)' +
+        (partes.length > 1 ? ' · ' + partes.length + ' partes representadas' : '') + ' neste processo:</p>' +
+      '<table style="width:100%;border-collapse:collapse;margin-bottom:20px;">' +
+        '<tr style="background:#f0ece0;">' + _thEmail('Parte') + _thEmail('Providência') + _thEmail('Prazo') + '</tr>' +
+        linhasHtml +
+      '</table>' +
+      '<a href="' + url + '" style="display:inline-block;background:#8a6f3d;color:white;padding:12px 24px;text-decoration:none;border-radius:4px;font-weight:600;font-size:14px;">Abrir processo no UC Jurídico →</a>' +
+      '<p style="color:#6b6b68;font-size:12px;margin-top:28px;padding-top:16px;border-top:1px solid #e8e3d4;">Um único e-mail por processo, mesmo com várias partes. Para parar de receber sobre um prazo, marque-o como cumprido (com nº de protocolo) no app.</p>' +
+      '<p style="color:#9b9b96;font-size:11px;margin-top:12px;text-align:center;">UC Jurídico · Urany de Castro Advocacia · 30 anos</p>' +
+    '</div>';
+
+  return { assunto: assunto, html: html };
+}
+
+/**
+ * E-mail consolidado de escalonamento por falta de ciência (sem-ACK): UMA
+ * mensagem por (destinatário · processo), listando as partes/providências
+ * atribuídas e ainda sem ciência.
+ * itens = [{ d: prazo, proc: processo, docId, horas }]
+ */
+function _montarEmailSemAckConsolidado(itens, ehEscalonamento) {
+  var proc0 = itens[0].proc;
+  var numero = proc0.cnj || proc0.name || 'Processo';
+  var titular = proc0.advogadoResponsavel || null;
+  var url = 'https://uc.uranydecastro.adv.br/#process/' + (proc0._docId || itens[0].docId);
+  var titulo = ehEscalonamento ? '🔺 Escalonamento: prazos sem ciência' : '✋ Prazos aguardando sua ciência';
+
+  var vistos = {}, linhas = [], partesSet = {};
+  for (var i = 0; i < itens.length; i++) {
+    var d = itens[i].d, proc = itens[i].proc;
+    var parte = proc.client || proc.name || '—';
+    var prov = _providenciaCurta(d);
+    var k = parte + '|' + prov;
+    if (vistos[k]) continue;
+    vistos[k] = true;
+    partesSet[parte] = true;
+    linhas.push({
+      parte: parte, prov: prov,
+      dlInterna: d.deadlineInternaDate ? _fmtDataBr(d.deadlineInternaDate) : null,
+      dlReal: d.deadlineDate ? _fmtDataBr(d.deadlineDate) : null,
+      horas: Math.floor(itens[i].horas || 0)
+    });
+  }
+  var partes = Object.keys(partesSet);
+  var partesLabel = partes.slice(0, 3).join(', ') + (partes.length > 3 ? ' +' + (partes.length - 3) : '');
+  var assunto = '[' + titulo.replace(/[🔺✋]/g, '').trim() + '] ' + numero + (partesLabel ? ' · ' + partesLabel : '');
+
+  var linhasHtml = linhas.map(function (l) {
+    var prazoCel = (l.dlInterna ? 'cobra ' + _escapeEmail(l.dlInterna) + '<br>' : '') +
+      (l.dlReal ? '<span style="color:#a8472d;">fatal ' + _escapeEmail(l.dlReal) + '</span>' : '');
+    return '<tr>' +
+      '<td style="padding:8px 10px;border-bottom:1px solid #eee;vertical-align:top;font-size:14px;"><strong>' + _escapeEmail(l.parte) + '</strong></td>' +
+      '<td style="padding:8px 10px;border-bottom:1px solid #eee;vertical-align:top;font-size:14px;">' + _escapeEmail(l.prov) + '<br><span style="color:#a8472d;font-size:12px;">atribuído há ' + l.horas + 'h sem ciência</span></td>' +
+      '<td style="padding:8px 10px;border-bottom:1px solid #eee;vertical-align:top;font-size:13px;white-space:nowrap;">' + prazoCel + '</td>' +
+    '</tr>';
+  }).join('');
+
+  var html =
+    '<div style="font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',Roboto,sans-serif;max-width:640px;margin:0 auto;background:#fafaf7;padding:24px;border-radius:8px;border:1px solid #e8e3d4;">' +
+      '<div style="border-left:4px solid #a8472d;padding-left:16px;margin-bottom:18px;">' +
+        '<h1 style="margin:0 0 6px;font-size:20px;color:#a8472d;font-weight:600;">' + _escapeEmail(titulo) + '</h1>' +
+        '<p style="margin:0;color:#1f1f1f;font-size:15px;font-weight:500;">Processo ' + _escapeEmail(numero) + '</p>' +
+        (ehEscalonamento && titular ? '<p style="margin:2px 0 0;color:#6b6b68;font-size:13px;">Responsável: ' + _escapeEmail(titular) + '</p>' : '') +
+      '</div>' +
+      '<table style="width:100%;border-collapse:collapse;margin-bottom:20px;">' +
+        '<tr style="background:#f0ece0;">' + _thEmail('Parte') + _thEmail('Providência') + _thEmail('Prazo') + '</tr>' +
+        linhasHtml +
+      '</table>' +
+      '<a href="' + url + '" style="display:inline-block;background:#8a6f3d;color:white;padding:12px 24px;text-decoration:none;border-radius:4px;font-weight:600;font-size:14px;">Dar ciência no UC Jurídico →</a>' +
+      '<p style="color:#6b6b68;font-size:12px;margin-top:28px;padding-top:16px;border-top:1px solid #e8e3d4;">Um único e-mail por processo. A cobrança se repete a cada 24h até a ciência ser registrada no Kanban.</p>' +
+    '</div>';
+  return { assunto: assunto, html: html };
+}
+
 /**
  * Teste manual — envia email de exemplo. Cole o destinatário na constante.
  */
@@ -544,9 +714,16 @@ function cron_lembretesDePrazo() {
   const socioDoc = _firestoreGet('settings/socioPadraoNome') || {};
   const socio = (socioDoc && socioDoc.value) || null;
 
-  let processados = 0, enviados = 0, erros = 0, ignorados = 0;
+  let processados = 0, enviados = 0, erros = 0, ignorados = 0, emailsConsolidados = 0;
   let tokensRemovidos = false;
 
+  // Estado por prazo (pra persistir notificado uma vez só, no fim) e grupos de
+  // e-mail por (destinatário · processo/CNJ · marco) — consolidação: 1 e-mail
+  // por processo, mesmo com várias partes representadas.
+  const prazoState = {};   // docId -> { notificado, changed }
+  const emailGroups = {};  // chave -> { email, marco, itens: [{d, proc, docId}] }
+
+  // ---------- Fase 1: PUSH por prazo + coleta dos grupos de e-mail ----------
   for (const d of prazos) {
     const marco = _marcoDoPrazo(d, todayMs);
     if (!marco) { ignorados++; continue; }
@@ -564,21 +741,22 @@ function cron_lembretesDePrazo() {
     const destinatariosNomes = _rotearDestinatarios(titular, suplente, socio, marco, titularAusente);
     if (!destinatariosNomes.length) { ignorados++; continue; }
 
-    let alterado = false;
     const notificado = d.notificado || {};
     notificado[marco] = notificado[marco] || {};
+    const st = prazoState[d._docId] = { notificado: notificado, changed: false };
+    const enviarEmailNesteMarco = EMAIL_MARCOS.indexOf(marco) >= 0;
 
     for (const nome of destinatariosNomes) {
       const email = NOME_EMAIL_MAP[nome];
       if (!email) continue;
-      if (notificado[marco][email]) continue;  // anti-spam (por marco/email)
-
-      let pushOk = false, emailOk = false;
+      const rec = notificado[marco][email] || null;
+      const jaPush = !!(rec && rec.push);
+      const jaEmail = !!(rec && rec.email);
       const tokenInfo = fcmTokens[email];
-      const enviarEmailNesteMarco = EMAIL_MARCOS.indexOf(marco) >= 0;
 
-      // ---------- Canal 1: Push FCM (todos os marcos, se tem token) ----------
-      if (tokenInfo && tokenInfo.token) {
+      // ---------- Canal 1: Push FCM (todos os marcos, se tem token, 1x) ----------
+      let pushOk = false;
+      if (!jaPush && tokenInfo && tokenInfo.token) {
         processados++;
         try {
           const title = MARCO_LABELS[marco] || ('Prazo ' + marco);
@@ -587,7 +765,7 @@ function cron_lembretesDePrazo() {
           const venc = temInterna
             ? ('cobra ' + String(d.deadlineInternaDate).slice(0,10) + ' · fatal real ' + dlRealStr)
             : ('vence ' + dlRealStr);
-          const body = (d.description || d.type || 'Prazo') + ' · ' + venc;
+          const body = _providenciaCurta(d) + ' · ' + (proc.client || proc.name || '') + ' · ' + venc;
           const url = 'https://uc.uranydecastro.adv.br/#process/' + proc._docId;
           const requireInteraction = ['T-1','T-0','T+1','FATAL'].indexOf(marco) >= 0 ? 'true' : 'false';
           const r = enviarFcmPush(tokenInfo.token, title, body, {
@@ -612,41 +790,60 @@ function cron_lembretesDePrazo() {
           erros++;
           Logger.log('FCM exceção para ' + email + ' marco ' + marco + ': ' + e.message);
         }
-      }
-
-      // ---------- Canal 2: Email Gmail ----------
-      // Envia email se: marco crítico (T-1/T-0/T+1) OU push falhou/sem token (fallback).
-      const precisaEmail = enviarEmailNesteMarco || (!pushOk && !tokenInfo);
-      if (precisaEmail) {
-        try {
-          const conteudo = _montarEmailLembrete(marco, d, proc);
-          const r = enviarEmail(email, conteudo.assunto, conteudo.html);
-          if (r.ok) {
-            emailOk = true;
-          } else {
-            erros++;
-            Logger.log('Email falha pra ' + email + ' marco ' + marco + ': ' + r.error);
-          }
-        } catch (e) {
-          erros++;
-          Logger.log('Email exceção para ' + email + ' marco ' + marco + ': ' + e.message);
+        if (pushOk) {
+          const r0 = notificado[marco][email] || { at: Date.now() };
+          r0.push = true; r0.at = Date.now();
+          notificado[marco][email] = r0;
+          st.changed = true;
+          enviados++;
         }
       }
 
-      // Anti-spam: marca notificado se ALGUM canal funcionou
-      if (pushOk || emailOk) {
-        notificado[marco][email] = { at: Date.now(), push: pushOk, email: emailOk };
-        alterado = true;
-        enviados++;
+      // ---------- Canal 2: Email (CONSOLIDADO por processo) ----------
+      // Coleta no grupo se: marco crítico OU push impossível (sem token e sem
+      // push). O envio é uma vez só, por processo, na Fase 2.
+      const precisaEmail = !jaEmail && (enviarEmailNesteMarco || (!pushOk && !jaPush && !tokenInfo));
+      if (precisaEmail) {
+        const chave = email + '|' + _cnjKeyProc(proc) + '|' + marco;
+        if (!emailGroups[chave]) emailGroups[chave] = { email: email, marco: marco, itens: [] };
+        emailGroups[chave].itens.push({ d: d, proc: proc, docId: d._docId });
       }
     }
+  }
 
-    if (alterado) {
-      try {
-        _firestoreUpdate('prazos/' + d._docId, { notificado: notificado, updatedAt: Date.now() });
-      } catch (e) {
-        Logger.log('update prazo ' + d._docId + ' falhou: ' + e.message);
+  // ---------- Fase 2: 1 e-mail consolidado por (destinatário · processo · marco) ----------
+  for (const chave in emailGroups) {
+    const g = emailGroups[chave];
+    try {
+      const conteudo = _montarEmailLembreteConsolidado(g.marco, g.itens);
+      const r = enviarEmail(g.email, conteudo.assunto, conteudo.html);
+      if (r.ok) {
+        emailsConsolidados++;
+        for (const it of g.itens) {
+          const st2 = prazoState[it.docId];
+          if (!st2) continue;
+          const r0 = st2.notificado[g.marco][g.email] || { at: Date.now() };
+          r0.email = true; r0.at = Date.now();
+          st2.notificado[g.marco][g.email] = r0;
+          st2.changed = true;
+        }
+      } else {
+        erros++;
+        Logger.log('Email consolidado falha pra ' + g.email + ' marco ' + g.marco + ': ' + r.error);
       }
+    } catch (e) {
+      erros++;
+      Logger.log('Email consolidado exceção pra ' + g.email + ': ' + e.message);
+    }
+  }
+
+  // ---------- Fase 3: persiste notificado dos prazos alterados ----------
+  for (const docId in prazoState) {
+    if (!prazoState[docId].changed) continue;
+    try {
+      _firestoreUpdate('prazos/' + docId, { notificado: prazoState[docId].notificado, updatedAt: Date.now() });
+    } catch (e) {
+      Logger.log('update prazo ' + docId + ' falhou: ' + e.message);
     }
   }
 
@@ -672,13 +869,14 @@ function cron_lembretesDePrazo() {
   const summary = 'cron_lembretesDePrazo: prazos_query=' + prazos.length +
     ' processos_fetch=' + processIdsUnicos.length +
     ' processados=' + processados +
-    ' enviados=' + enviados +
+    ' push_enviados=' + enviados +
+    ' emails_consolidados=' + emailsConsolidados +
     ' sem_ack_escalados=' + semAck +
     ' erros=' + erros +
     ' ignorados=' + ignorados +
     ' elapsed=' + elapsed + 'ms';
   Logger.log(summary);
-  return { prazos: prazos.length, processos_fetch: processIdsUnicos.length, processados, enviados, semAck, erros, ignorados, elapsed };
+  return { prazos: prazos.length, processos_fetch: processIdsUnicos.length, processados, enviados, emailsConsolidados, semAck, erros, ignorados, elapsed };
 }
 
 // =====================================================================
@@ -705,6 +903,10 @@ function _escalonarSemAck(fcmTokens, socio, processosCache) {
   }
 
   let enviados = 0;
+  const prazoState = {};   // docId -> { notificado, changed }
+  const emailGroups = {};  // email|cnj -> { email, ehEscalonamento, itens: [{d, proc, docId, horas}] }
+
+  // ---------- Fase 1: push por prazo + coleta dos grupos de e-mail ----------
   for (const d of prazos) {
     if (d.status !== 'pendente') continue;
     if (!d.atribuidoEm || d.cienteEm) continue;
@@ -725,7 +927,7 @@ function _escalonarSemAck(fcmTokens, socio, processosCache) {
 
     const notificado = d.notificado || {};
     notificado.SEM_ACK = notificado.SEM_ACK || {};
-    let alterado = false;
+    const st = prazoState[d._docId] = { notificado: notificado, changed: false };
     const horasInt = Math.floor(horas);
     const dlInterna = d.deadlineInternaDate ? String(d.deadlineInternaDate).slice(0,10) : null;
     const dlReal = typeof d.deadlineDate === 'string' ? d.deadlineDate.slice(0,10) : '';
@@ -737,18 +939,18 @@ function _escalonarSemAck(fcmTokens, socio, processosCache) {
       if (ultimo && (agora - ultimo.at) < SEM_ACK_HORAS * 3600000) continue;
 
       const ehEscalonamento = nome === socio && nome !== titular;
-      const title = ehEscalonamento ? '🔺 Escalonamento: prazo sem ciência' : '✋ Prazo aguardando sua ciência';
-      const body = (d.description || d.type || 'Prazo') +
-        ' · atribuído há ' + horasInt + 'h sem ciência' +
-        (ehEscalonamento && titular ? ' · responsável: ' + titular : '') +
-        (dlInterna ? ' · cobra ' + dlInterna : '') +
-        (dlReal ? ' · fatal ' + dlReal : '');
-      const url = 'https://uc.uranydecastro.adv.br/#process/' + (proc._docId || d.processId);
 
-      let pushOk = false, emailOk = false;
+      // ----- Push por prazo (como hoje) -----
+      let pushOk = false;
       const tokenInfo = fcmTokens[email];
       if (tokenInfo && tokenInfo.token) {
         try {
+          const title = ehEscalonamento ? '🔺 Escalonamento: prazo sem ciência' : '✋ Prazo aguardando sua ciência';
+          const body = _providenciaCurta(d) + ' · ' + (proc.client || proc.name || '') +
+            ' · atribuído há ' + horasInt + 'h sem ciência' +
+            (dlInterna ? ' · cobra ' + dlInterna : '') +
+            (dlReal ? ' · fatal ' + dlReal : '');
+          const url = 'https://uc.uranydecastro.adv.br/#process/' + (proc._docId || d.processId);
           const r = enviarFcmPush(tokenInfo.token, title, body, {
             tag: 'prazo-semack-' + d._docId,
             url: url,
@@ -761,43 +963,52 @@ function _escalonarSemAck(fcmTokens, socio, processosCache) {
           Logger.log('sem-ACK push exceção pra ' + email + ': ' + e.message);
         }
       }
-      // Email sempre (escalonamento é crítico — não depende do push)
-      try {
-        const html =
-          '<div style="font-family: -apple-system, BlinkMacSystemFont, \'Segoe UI\', Roboto, sans-serif; max-width: 600px; margin: 0 auto; background: #fafaf7; padding: 24px; border-radius: 8px; border: 1px solid #e8e3d4;">' +
-            '<div style="border-left: 4px solid #a8472d; padding-left: 16px; margin-bottom: 20px;">' +
-              '<h1 style="margin: 0 0 6px; font-size: 20px; color: #a8472d; font-weight: 600;">' + _escapeEmail(title) + '</h1>' +
-              '<p style="margin: 0; color: #1f1f1f; font-size: 15px; font-weight: 500;">' + _escapeEmail(d.description || d.type || 'Prazo') + '</p>' +
-            '</div>' +
-            '<table style="width: 100%; border-collapse: collapse; margin-bottom: 20px; font-size: 14px;">' +
-              '<tr><td style="padding: 6px 0; color: #6b6b68; width: 150px;">Atribuído há:</td><td style="padding: 6px 0; font-weight: 600; color: #a8472d;">' + horasInt + ' horas, sem ciência</td></tr>' +
-              (titular ? '<tr><td style="padding: 6px 0; color: #6b6b68;">Responsável:</td><td style="padding: 6px 0;">' + _escapeEmail(titular) + '</td></tr>' : '') +
-              (dlInterna ? '<tr><td style="padding: 6px 0; color: #6b6b68;">Fatal interna:</td><td style="padding: 6px 0; font-weight: 600;">' + _escapeEmail(dlInterna) + '</td></tr>' : '') +
-              (dlReal ? '<tr><td style="padding: 6px 0; color: #6b6b68;">Fatal real:</td><td style="padding: 6px 0; font-weight: 600;">' + _escapeEmail(dlReal) + '</td></tr>' : '') +
-              ((proc.cnj || proc.name) ? '<tr><td style="padding: 6px 0; color: #6b6b68;">Processo:</td><td style="padding: 6px 0;">' + _escapeEmail(proc.cnj || proc.name) + '</td></tr>' : '') +
-            '</table>' +
-            '<a href="' + url + '" style="display: inline-block; background: #8a6f3d; color: white; padding: 12px 24px; text-decoration: none; border-radius: 4px; font-weight: 600; font-size: 14px;">Dar ciência no UC Jurídico →</a>' +
-            '<p style="color: #6b6b68; font-size: 12px; margin-top: 28px; padding-top: 16px; border-top: 1px solid #e8e3d4;">A cobrança se repete a cada 24h até a ciência ser registrada no Kanban de prazos.</p>' +
-          '</div>';
-        const r = enviarEmail(email, '[' + title.replace(/[🔺✋]/g, '').trim() + '] ' + (d.description || d.type || 'Prazo'), html);
-        emailOk = !!r.ok;
-      } catch (e) {
-        Logger.log('sem-ACK email exceção pra ' + email + ': ' + e.message);
-      }
 
-      if (pushOk || emailOk) {
-        notificado.SEM_ACK[email] = { at: agora, push: pushOk, email: emailOk };
-        alterado = true;
-        enviados++;
+      // ----- Email CONSOLIDADO por processo (coleta; envio na Fase 2) -----
+      const chave = email + '|' + _cnjKeyProc(proc);
+      if (!emailGroups[chave]) emailGroups[chave] = { email: email, ehEscalonamento: ehEscalonamento, itens: [] };
+      emailGroups[chave].itens.push({ d: d, proc: proc, docId: d._docId, horas: horas });
+
+      if (pushOk) {
+        const r0 = notificado.SEM_ACK[email] || {};
+        r0.at = agora; r0.push = true;
+        notificado.SEM_ACK[email] = r0;
+        st.changed = true;
       }
     }
+  }
 
-    if (alterado) {
-      try {
-        _firestoreUpdate('prazos/' + d._docId, { notificado: notificado, updatedAt: Date.now() });
-      } catch (e) {
-        Logger.log('sem-ACK update prazo ' + d._docId + ' falhou: ' + e.message);
+  // ---------- Fase 2: 1 e-mail consolidado por (destinatário · processo) ----------
+  for (const chave in emailGroups) {
+    const g = emailGroups[chave];
+    try {
+      const conteudo = _montarEmailSemAckConsolidado(g.itens, g.ehEscalonamento);
+      const r = enviarEmail(g.email, conteudo.assunto, conteudo.html);
+      if (r.ok) {
+        enviados++;
+        for (const it of g.itens) {
+          const st2 = prazoState[it.docId];
+          if (!st2) continue;
+          const r0 = st2.notificado.SEM_ACK[g.email] || {};
+          r0.at = agora; r0.email = true;
+          st2.notificado.SEM_ACK[g.email] = r0;
+          st2.changed = true;
+        }
+      } else {
+        Logger.log('sem-ACK email consolidado falha pra ' + g.email + ': ' + r.error);
       }
+    } catch (e) {
+      Logger.log('sem-ACK email consolidado exceção pra ' + g.email + ': ' + e.message);
+    }
+  }
+
+  // ---------- Fase 3: persiste ----------
+  for (const docId in prazoState) {
+    if (!prazoState[docId].changed) continue;
+    try {
+      _firestoreUpdate('prazos/' + docId, { notificado: prazoState[docId].notificado, updatedAt: Date.now() });
+    } catch (e) {
+      Logger.log('sem-ACK update prazo ' + docId + ' falhou: ' + e.message);
     }
   }
   return enviados;
