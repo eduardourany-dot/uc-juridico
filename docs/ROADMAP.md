@@ -1,37 +1,51 @@
 # UC Jurídico — Roadmap & Backlog
 
-> Última atualização: 16/05/2026 (final do dia de trabalho intensivo)
-> Branch ativa: `sandbox` · Próximo merge: `sandbox → main`
+> Última atualização: **29/06/2026**
+> Código em `main`/`sandbox`: **v6.87.1** (+ `Lembretes.gs` consolidado) · em sincronia (fast-forward)
+> Hospedagem: LOCAWEB (`uc.uranydecastro.adv.br`, upload manual) + GitHub Pages (auto-build de `main`)
 
 ---
 
 ## 🚦 Status atual
 
-**Em produção (`main`):**
-- App UC Jurídico estável (versão anterior à reformulação do cliente)
+**Em produção, estável:**
+- App completo: processos, clientes, agenda, financeiro, publicações/prazos, petições IA, calculadora cível
+- Roles `cliente` / `viewer` / `admin` com Firestore Rules estritas
+- Cron DJEN diário → push FCM · MNI.5 (protocolo SOAP TJGO Projudi)
+- Co-titularidade `ucjuridico@` (GitHub, Cloudflare, Firebase, Apps Script)
+- Agenda com Google Calendar + Meet (auto-convidados + RSVP)
 
-**Validado em staging (`sandbox` + Cloudflare Pages + Firebase `uc-juridico-staging`):**
-- Role `cliente` completo (cliente externo acessa só processos vinculados)
-- Role `viewer` (read-only escritório)
-- Firestore Security Rules estritas por role
-- Cron DJEN diário 08h via Cloud Functions sa-east1 → push FCM
-- MNI.5 MVP — protocolar petição via SOAP no TJGO Projudi
-- Migração 1879 processos + 806 clientes do Astrea → staging
-- Limpeza completa do DataJud (-767 linhas órfãs)
-- Restrições API key Firebase (HTTP referrers + 6 APIs específicas)
+**Pronto no código, ⏳ aguardando deploy manual (ver abaixo):**
+- Épico **Prazos** (v6.85 → v6.87.1): Kanban + máquina de estados, fatal interna, auto-agendamento 🤖, Agenda como centro de controle, sync Google Calendar, e-mails consolidados por processo
 
 ---
 
-## ⏳ Pendências imediatas (segunda-feira 19/05)
+## ⏳ Pendências imediatas — DEPLOY MANUAL
 
-Validar tudo que está em staging antes de deploy prod:
+Sem deploy automático no backend nem na LOCAWEB. Para colocar o épico de Prazos no ar:
 
-- [ ] **Navegar pelos 1879 processos importados** no sandbox — verificar formato, partes, advogado responsável (Eduardo Urany OAB 16539)
-- [ ] **Testar MNI.5 com peça real** num processo do TJGO Projudi (manifestação intercorrente simples)
-- [ ] **Confirmar primeira execução automática do cron DJEN** (segunda 08h Brasília — push deve chegar no celular se houver publicações novas)
-- [ ] **Merge `sandbox` → `main`** depois de validar acima
-- [ ] **Deploy Security Rules em prod**: `firebase deploy --only firestore:rules`
-- [ ] **Resolver alerta GitHub Secret Scanner** — marcar Firebase API key como "False positive — public by design, protected via referrer restrictions"
+- [ ] **LOCAWEB (FileZilla)** — subir `index.html` + `service-worker.js` (v6.87.1). Conferir rodapé `v6-87-1`. *(`api.js` não mudou.)*
+- [ ] **Apps Script ("UC Juridico Backend")** — colar `backend/Lembretes.gs` (e-mail consolidado por processo + fatal interna/FATAL/sem-ACK).
+- [ ] **Apps Script (verificar)** — Google Calendar API habilitada em Serviços (já usada pelo Meet; provável que sim) — necessária pro sync de prazos → Google Calendar.
+
+As duas primeiras são independentes; sem (1) a Agenda/Kanban novos não aparecem, sem (2) os e-mails continuam saindo um por parte.
+
+---
+
+## ✅ Entregue recentemente — Épico Prazos (junho/2026)
+
+| Versão | Entrega |
+|---|---|
+| **v6.85.0** | Kanban de prazos + máquina de estados (etapas auditadas), **fatal interna** (real − 2 úteis), marco **⛔FATAL**, escalonamento **sem-ACK**, ajustar fatal com motivo, fix off-by-one nos marcos |
+| **v6.86.0** | **Auto-agendamento 🤖**: intimação não tratada → vínculo por CNJ + parser extrai prazo → cria prazo automaticamente (guarda de expirados; órfãs/sem-prazo ficam na caixa) |
+| **v6.87.0** | **Agenda como centro de controle**: prazos do Kanban na Agenda (lista+calendário, ações inline); unificação do fluxo DJEN (helper único `montarPrazoDjen`); **sync Google Calendar** por prazo + auto-sync opcional |
+| **v6.87.1** | Auto-agendados sem banner em Publicações — revisão no próprio Kanban (dar ciência) / Agenda (🤖 revisar) |
+| `Lembretes.gs` | **E-mails consolidados por processo**: 1 e-mail por CNJ (não por parte), com nome das partes + número do processo + providência em poucas palavras |
+
+**Ainda em aberto no épico (afinamento, baixa urgência):**
+- [ ] Badges de dias da LISTA de publicações ainda usam contagem antiga (+1d conservador) — alinhar com `_diaFatalLocal`
+- [ ] Avaliar consolidar também o **push** por processo (hoje 1 push por prazo; e-mail já consolidado)
+- [ ] Opção de silenciar o lembrete do Google Calendar quando o prazo já cobra pela régua do app (evitar alerta em dobro)
 
 ---
 
@@ -39,139 +53,67 @@ Validar tudo que está em staging antes de deploy prod:
 
 ### ⭐ Prioridade ALTA (alto ROI, uso diário)
 
-#### P1 — Calculadora de atualização monetária + análise de cobranças
-*(bate com Módulo 85 INTEGRA + sugestão #3 do escritório)*
-
-**FASE 1 ✅ CONCLUÍDA** (commits `1de1f0f` → `36aeb44`):
-- [x] Menu lateral + rota `/calculadora` com tab Cível
-- [x] 6 índices BCB (INPC, IGP-M, IPCA, SELIC, TR, CDI) + opção "Sem correção"
-- [x] Múltiplos lançamentos em tabela editável
-- [x] Tipo de lançamento: Principal (correção + juros) ou Custas/Despesa (só correção · CPC 84)
-- [x] Juros simples, composto ou **Taxa legal CC art. 406** (SELIC − IPCA com floor 0)
-- [x] Termo a quo dos juros: vencimento / citação / trânsito / mora / manual
-- [x] Multa contratual (CC 412) + honorários sucumbência (CPC 85) com bases corretas
-- [x] Multa + honorários CPC art. 523 §1º (cumprimento de sentença não pago)
-- [x] Replicar lançamentos: 1x inline ou Nx mensal/anual em massa
-- [x] Salvar cálculos no Firestore `calculos/{id}`
-
-**FASE 2 — pendente:**
+#### P1 — Calculadora · Fase 2
+*(Fase 1 ✅ concluída: tab Cível completa, 6 índices BCB, juros CC 406, multa/honorários CPC, salvar em `calculos/{id}`)*
 - [ ] **Tab Fiscal**: índices legais por esfera (Selic federal, IPCA, juros legais), confronto com cobrança tributária
 - [ ] Vincular cálculo a processo/cliente
-- [ ] Listar cálculos salvos (tab "Histórico" pra reabrir/excluir)
-- [ ] Exportar memória do cálculo em PDF/Word
+- [ ] Tab "Histórico" (reabrir/excluir cálculos salvos)
+- [ ] Exportar memória de cálculo em PDF/Word
 
-**Esforço fase 2:** 4-5 horas restantes.
+**Esforço:** ~4-5h.
 
----
-
-#### P2 — Relatórios automáticos pra cliente
+#### P2 — Relatórios automáticos pro cliente
 *(sugestão #1 do escritório)*
-
 - [ ] Template configurável por cliente (visual + campos)
-- [ ] Conteúdo mínimo: pólo ativo/passivo, data distribuição, vara/comarca, valor causa, resumo, prob. êxito, último andamento, providência pendente
-- [ ] Periodicidade automática (semanal/quinzenal/mensal)
-- [ ] Fila de revisão (advogado revisa antes de enviar)
-- [ ] Envio via email/WhatsApp/Drive link
-- [ ] Pode reusar dados do `mniData` + eventos do processo
+- [ ] Conteúdo: pólo ativo/passivo, distribuição, vara/comarca, valor da causa, resumo, prob. êxito, último andamento, **providência pendente**
+- [ ] Periodicidade automática (semanal/quinzenal/mensal) + fila de revisão do advogado
+- [ ] Envio por e-mail/WhatsApp/Drive · reusa `mniData` + eventos do processo
 
-**Esforço:** 2 dias. **Quem usa:** clientes (externamente) + advogados (revisão).
+**Esforço:** ~2 dias.
 
----
+#### P3 / #34 — Cards de petição + fila de revisão do advogado
+*(sugestão #2 — parcialmente feito: análise IA + `gerarPeticaoIA` + modelos genéricos já existem)*
+- [ ] Cards por tipo de peça com prompt pré-otimizado (Inicial, Contestação, Embargos exec./decl., Agravo, Apelação, Recursos constitucionais)
+- [ ] Workflow: PDF do auto → análise IA → detecção de "providência em N dias" → "Gerar peça"
+- [ ] **Fila de revisão** pelo advogado responsável antes de virar versão final (#34)
 
-#### P3 — Cards especializados de análise + geração de petição
-*(sugestão #2 do escritório — 50% já feito)*
-
-- [ ] Cards distintos por tipo de peça (cada um com prompt pré-otimizado):
-  - [ ] Petição Inicial (com upload de fatos + linha de trabalho + documentos)
-  - [ ] Contestação
-  - [ ] Embargos à Execução
-  - [ ] Embargos Declaratórios
-  - [ ] Agravo de Instrumento
-  - [ ] Apelação
-  - [ ] Recursos Constitucionais (RE, REsp, RR)
-- [ ] Workflow: PDF do auto → análise IA → identificação automática de "providência pendente em N dias" → botão "Gerar peça"
-- [ ] Fila de revisão pelo advogado responsável antes de virar versão final
-
-**Já temos:** Análise IA básica + gerarPeticaoIA via Claude API + Petições > Modelos genéricos.
-
-**Esforço:** 1-2 dias.
+**Esforço:** ~1-2 dias.
 
 ---
 
 ### 🔧 Prioridade MÉDIA
 
 #### P4 — Protocolo multi-sistema (extensão MNI.5)
-*(sugestão #6 do escritório + MNI.5 v2)*
+- [ ] PJe (TRFs, TJMT/ES/CE/MA, TST, TRTs) · eSAJ (TJSP/MS/AC) · eProc (TRF2/4)
+- [ ] Tipos de transmissão: recurso, embargos, petição inicial
+- [ ] Compressão automática de PDF > limite do tribunal
+- [ ] Workflow de aprovação por OUTRO advogado antes de liberar "Protocolar"
+- [ ] Assinatura ICP-Brasil (quando exigido)
 
-- [ ] **PJe** — TRF1, TRF3, TRF5, TJMT, TJES, TJCE, TJMA, TST, TRTs (testar com peticionamento real)
-- [ ] **eSAJ** — TJSP, TJMS, TJAC
-- [ ] **eProc** — TRF2, TRF4 (quando passarem do WAF)
-- [ ] Outros tipos de transmissão:
-  - [ ] Recurso (idTipoTransmissao=2) — requer classeProcessual + dadosBasicos do julgamento recorrido
-  - [ ] Embargos de Declaração (5)
-  - [ ] Petição Inicial (1) — requer cadastro completo de partes/valor causa
-- [ ] **Adequação automática de tamanho** (compressão de PDFs > limite do tribunal)
-- [ ] **Workflow de aprovação**: peça aguarda revisão de OUTRO advogado antes do botão "Protocolar" liberar
-- [ ] Assinatura digital ICP-Brasil (quando algum tribunal exigir)
-
-**Esforço:** 3-5 dias (depende dos quirks de cada tribunal).
-
----
+**Esforço:** 3-5 dias.
 
 #### P5 — Custas e despesas processuais
-*(Módulo 35 INTEGRA)*
-
-- [ ] Nova collection `custas_despesas` — registros vinculados a processo + cliente
-- [ ] Tipos: custas iniciais, GRU, perícia, AR, diligência, certidão, etc.
-- [ ] Status: pago / a reembolsar / reembolsado
-- [ ] Saldo por processo + por cliente
-- [ ] Diferente de `honorarios` (que é receita do escritório) e `transacoes` (caixa interno)
+- [ ] Collection `custas_despesas` vinculada a processo + cliente (iniciais, GRU, perícia, AR, diligência…)
+- [ ] Status pago / a reembolsar / reembolsado · saldo por processo e por cliente
 
 **Esforço:** 1-2 dias.
 
----
+#### P6 — Documentos não-judiciais
+- [ ] Templates: procuração (ad judicia / + especiais), contrato de honorários, hipossuficiência, substabelecimento
+- [ ] OCR de documento pessoal → preenchimento automático · ditado por voz (Web Speech API)
+- [ ] Integração assinatura (DocuSign/ClickSign/Drive)
 
-#### P6 — Geração de documentos não-judiciais
-*(sugestão #5 do escritório — 20% feito)*
+**Esforço:** ~3 dias.
 
-- [ ] Templates pré-prontos:
-  - [ ] Procuração ad judicia
-  - [ ] Procuração ad judicia + poderes especiais (recebimento, transação)
-  - [ ] Contrato de honorários (com placeholders ditáveis)
-  - [ ] Declaração de hipossuficiência
-  - [ ] Substabelecimento (com/sem reserva)
-- [ ] Upload de foto/cópia documento pessoal → OCR → preenchimento automático de campos do cliente
-- [ ] **Ditado por voz** pra escopo do contrato de honorários (Web Speech API browser)
-- [ ] Integração com **DocuSign / ClickSign / link Drive** pra envio à assinatura
-
-**Esforço:** 3 dias (OCR + ditado + integração assinatura).
-
----
-
-#### P7 — Organização e renomeação automática de arquivos no Drive
-*(sugestão #4 do escritório — 30% feito)*
-
-- [ ] Padrão único de nomenclatura: `{CNJ}_{tipo}_{YYYY-MM-DD}_{descrição}.pdf`
-- [ ] Tipos: petição, sentença, decisão, despacho, doc cliente, anexo, etc.
-- [ ] Dedupe automático via hash SHA-256
-- [ ] Renomeação em batch
-- [ ] Estrutura de pastas no Drive: `/Processos/{CNJ}/` + `/Clientes/{Nome}/`
-- [ ] Movimentação retroativa de docs já existentes
+#### P7 — Organização de arquivos no Drive
+- [ ] Nomenclatura padrão `{CNJ}_{tipo}_{AAAA-MM-DD}_{descrição}.pdf` · dedupe SHA-256 · batch
+- [ ] Estrutura `/Processos/{CNJ}/` + `/Clientes/{Nome}/` · movimentação retroativa
 
 **Esforço:** 1-2 dias.
-
----
 
 #### P8 — Relatórios filtrados + export Excel
-*(Módulo 50 INTEGRA)*
-
-- [ ] Tela `/relatorios` com filtros gerenciais:
-  - Status, advogado, valor causa, comarca, tribunal, período (distribuição/movimentação)
-  - Cliente, parte adversa, tipo de ação, área
-- [ ] Listagem paginada
-- [ ] Export XLSX (já temos lib `xlsx` instalada em tools/migration)
-- [ ] "Salvar pesquisa" pra reusar filtros frequentes
-- [ ] Ações em bloco: alterar status, atribuir advogado, etc.
+- [ ] Tela `/relatorios` com filtros gerenciais (status, advogado, comarca, tribunal, período, cliente, área)
+- [ ] Listagem paginada · export XLSX · salvar pesquisa · ações em bloco
 
 **Esforço:** 1-2 dias.
 
@@ -179,69 +121,30 @@ Validar tudo que está em staging antes de deploy prod:
 
 ### 🐢 Prioridade BAIXA
 
-#### P9 — Migração INTEGRA (PROMAD)
-- [ ] Recuperar acesso ao PROMAD (Eduardo voltará depois)
-- [ ] Quando voltar: exportar XLSX via Módulo 50/149/117
-- [ ] Adaptar parser pra schema do INTEGRA (`tools/migration/parse-integra.js`)
-- [ ] Cuidado: 2.155 clientes ativos (vs 806 do Astrea) — pode haver duplicação que precisa dedupe
-
-**Esforço:** 1-2 dias (depende do que vier no XLSX).
+- **P9 — Migração INTEGRA (PROMAD)**: exportar XLSX (Mód. 50/149/117), adaptar parser, dedupe (2.155 clientes vs 806 do Astrea). *1-2 dias.*
+- **P10 — Cálculos previdenciários** (Mód. 86): só se atender a área. *3+ dias.*
+- **P11 — Contas a pagar/receber estruturado** (Mód. 32/33): refator do financeiro. *2-3 dias.*
+- **P12 — Cargas/protocolo físico** (Mód. 53/114): avaliar necessidade. *1 dia.*
 
 ---
 
-#### P10 — Cálculos previdenciários
-*(Módulo 86 INTEGRA — só se atender essa área)*
+### 📋 Outros (não-features)
 
-- [ ] Aposentadoria por tempo de contribuição
-- [ ] Conversão tempo especial (regras TNU + EC 103/2019)
-- [ ] Cálculo carência DN/DER
-
-**Esforço:** 3+ dias (regras complexas). **Não fazer se não atende essa área.**
+- [ ] Push pro **cliente** quando publicação nova chegar no processo dele
+- [ ] Performance: cache LRU de processos no app cliente
+- [ ] Onboarding: guia de uso pra novos advogados
+- [ ] Testes E2E (Playwright) pros fluxos críticos (login, cadastro, protocolo, agendar prazo)
 
 ---
 
-#### P11 — Contas a pagar/receber estruturado
-*(Módulos 32/33 INTEGRA)*
+## 📊 Resumo
 
-- [ ] Refator do módulo financeiro existente
-- [ ] Status: a vencer / vencido / pago / autorizado / não autorizado
-- [ ] Centros de despesa/receita
-- [ ] NP/NC (números fiscais)
-
-**Esforço:** 2-3 dias (refator). Hoje funciona com transações + recorrências.
-
----
-
-#### P12 — Cargas e protocolo físico
-*(Módulos 53/114 INTEGRA)*
-
-- [ ] Pouco aplicável em era digital
-- [ ] Avaliar se vale a pena, depende do volume de autos físicos do escritório
-
-**Esforço:** 1 dia. **Verificar necessidade antes.**
-
----
-
-### 📋 Outros itens não-features
-
-- [ ] **Push notification pro cliente** quando publicação nova chegar pra processo dele (extensão do cron DJEN)
-- [ ] **MNI.4 fase 3** (se ainda quiser): processar pubs do cron automaticamente em vez de só pre-fetch
-- [ ] **Performance**: cache de processos no app cliente (LRU) pra não refetch ao trocar de tela
-- [ ] **Documentação interna**: guia de uso pra novos advogados (onboarding)
-- [ ] **Testes E2E**: Playwright/Cypress pra fluxos críticos (login, cadastro, protocolo)
-
----
-
-## 📊 Resumo numérico
-
-| Prioridade | Itens | Esforço total |
+| Prioridade | Itens | Esforço |
 |---|---|---|
-| ⏳ Imediato (segunda) | 6 | 1 dia validação |
-| ⭐ ALTA | 3 (P1-P3) | ~6 dias |
-| 🔧 MÉDIA | 5 (P4-P8) | ~11 dias |
-| 🐢 BAIXA | 4 (P9-P12) | ~7 dias |
-| 📋 Outros | 5 | ~4 dias |
+| ⏳ Deploy manual | 3 | minutos |
+| ⭐ ALTA | P1-P3 | ~5 dias |
+| 🔧 MÉDIA | P4-P8 | ~10 dias |
+| 🐢 BAIXA | P9-P12 | ~7 dias |
+| 📋 Outros | 4 | ~4 dias |
 
-**Total se fizermos TUDO:** ~30 dias de desenvolvimento.
-
-**Sequência minha recomendação:** Validar staging → P1 (Calculadora) → P2 (Relatórios cliente) → P3 (Cards petição) → P4 (Protocolo multi-sistema) → resto conforme demanda real do escritório.
+**Sequência recomendada:** deploy do épico Prazos → P1 (Calculadora Fiscal) → P2 (Relatórios cliente) → P3/#34 (Cards + fila de revisão) → P4+ conforme demanda real do escritório.
