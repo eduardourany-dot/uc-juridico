@@ -15,6 +15,10 @@
 | **Working tree** | Limpo |
 | **Repositório** | https://github.com/eduardourany-dot/uc-juridico |
 
+### ⛔ E-mails de lembrete SUSPENSOS (até segunda ordem)
+
+Por decisão do titular (jun/2026), os e-mails do backend estão **desligados** enquanto o sistema de prazos não está 100% operante (estavam só lotando as caixas). Interruptor: `const EMAILS_SUSPENSOS = true;` no topo da seção de e-mail do `backend/Lembretes.gs`. **O push continua normal.** Pra **reativar**: trocar para `false` e recolar o `Lembretes.gs` no Apps Script (ou pedir ao Claude).
+
 ### ⏳ Pendências de ação manual (fazer pra colocar o épico Prazos no ar)
 
 1. **LOCAWEB (FileZilla)** — subir `index.html` + `service-worker.js` (v6.87.1). Conferir rodapé `v6-87-1`. *(`api.js` não mudou desde o último upload.)*

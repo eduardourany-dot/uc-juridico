@@ -320,11 +320,23 @@ function enviarFcmPush(token, title, body, data) {
 // Email é redundância pros marcos críticos onde o push pode ser perdido.
 const EMAIL_MARCOS = ['T-1', 'T-0', 'T+1', 'FATAL'];
 
+// ⛔ KILL-SWITCH GERAL DE E-MAIL — suspensão temporária ("até segunda ordem").
+// Enquanto o sistema de prazos não está 100% operante, os e-mails só lotam as
+// caixas dos destinatários. Com isto LIGADO, NENHUM e-mail do backend sai
+// (lembretes de prazo, escalonamento sem-ACK e parcelas) — o PUSH continua
+// normal. Pra REATIVAR: trocar para `false` e recolar este arquivo no Apps
+// Script. (Decisão do titular em jun/2026.)
+const EMAILS_SUSPENSOS = true;
+
 /**
  * Abstração de provider. Hoje: Gmail (MailApp). Amanhã: SES, se precisar.
  * Retorna { ok, error? }.
  */
 function enviarEmail(destinatario, assunto, corpoHtml) {
+  if (EMAILS_SUSPENSOS) {
+    Logger.log('[email suspenso] NÃO enviado para ' + destinatario + ' — assunto: ' + assunto);
+    return { ok: true, suprimido: true };
+  }
   return enviarEmailGmail(destinatario, assunto, corpoHtml);
   // Pra migrar pra SES quando precisar:
   // return enviarEmailSES(destinatario, assunto, corpoHtml);
