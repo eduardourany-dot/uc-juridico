@@ -1,7 +1,7 @@
 # UC Jurídico — Roadmap & Backlog
 
-> Última atualização: **29/06/2026**
-> Código em `main`/`sandbox`: **v6.87.1** (+ `Lembretes.gs` consolidado) · em sincronia (fast-forward)
+> Última atualização: **29/06/2026** (fim do dia — plano oficial consolidado após análise de mercado)
+> Código em `main`/`sandbox`: **v6.87.1** (+ `Lembretes.gs` consolidado, e-mails suspensos por kill-switch)
 > Hospedagem: LOCAWEB (`uc.uranydecastro.adv.br`, upload manual) + GitHub Pages (auto-build de `main`)
 
 ---
@@ -12,23 +12,74 @@
 - App completo: processos, clientes, agenda, financeiro, publicações/prazos, petições IA, calculadora cível
 - Roles `cliente` / `viewer` / `admin` com Firestore Rules estritas
 - Cron DJEN diário → push FCM · MNI.5 (protocolo SOAP TJGO Projudi)
-- Co-titularidade `ucjuridico@` (GitHub, Cloudflare, Firebase, Apps Script)
 - Agenda com Google Calendar + Meet (auto-convidados + RSVP)
 
-**Pronto no código, ⏳ aguardando deploy manual (ver abaixo):**
-- Épico **Prazos** (v6.85 → v6.87.1): Kanban + máquina de estados, fatal interna, auto-agendamento 🤖, Agenda como centro de controle, sync Google Calendar, e-mails consolidados por processo
+**Pronto no código, ⏳ aguardando deploy manual:**
+- Épico **Prazos** (v6.85 → v6.87.1): Kanban + máquina de estados, fatal interna, auto-agendamento 🤖, Agenda como centro de controle, sync Google Calendar, e-mails consolidados por processo + **kill-switch de e-mail LIGADO** (suspensão a pedido do titular até segunda ordem)
+
+**Posição competitiva (análise de mercado 29/06):** o UC está em pé de igualdade ou à frente de Astrea/Projuris/ADVBOX/EasyJur em captura de intimações, cálculo auditável de prazos, IA e peticionamento MNI — a custo ~zero vs R$ 1.350–2.700/mês que um SaaS custaria pros 9 usuários. Os gaps reais estão listados no plano abaixo.
 
 ---
 
-## ⏳ Pendências imediatas — DEPLOY MANUAL
+## ⏳ BLOCO A — Pronto no código, só falta ativar (minutos, R$ 0)
 
-Sem deploy automático no backend nem na LOCAWEB. Para colocar o épico de Prazos no ar:
+- [ ] **A1. LOCAWEB (FileZilla)** — subir `index.html` + `service-worker.js` (v6.87.1). Conferir rodapé `v6-87-1`. *(`api.js` não mudou.)*
+- [ ] **A2. Apps Script** — colar `backend/Lembretes.gs` (e-mail consolidado + kill-switch; a suspensão dos e-mails só vale de fato após colar).
+- [ ] **A3. Apps Script (verificar)** — Google Calendar API habilitada em Serviços (Meet já usa; necessária pro sync de prazos).
 
-- [ ] **LOCAWEB (FileZilla)** — subir `index.html` + `service-worker.js` (v6.87.1). Conferir rodapé `v6-87-1`. *(`api.js` não mudou.)*
-- [ ] **Apps Script ("UC Juridico Backend")** — colar `backend/Lembretes.gs` (e-mail consolidado por processo + fatal interna/FATAL/sem-ACK).
-- [ ] **Apps Script (verificar)** — Google Calendar API habilitada em Serviços (já usada pelo Meet; provável que sim) — necessária pro sync de prazos → Google Calendar.
+---
 
-As duas primeiras são independentes; sem (1) a Agenda/Kanban novos não aparecem, sem (2) os e-mails continuam saindo um por parte.
+## 🗺 Plano priorizado (consolidado na conversa de 29/06)
+
+### BLOCO B — Vitórias rápidas · custo zero, alto retorno
+
+| # | Item | Esforço | Notas |
+|---|---|---|---|
+| B1 | **Varredura DataJud da carteira** — cron semanal consulta cada CNJ ativo na API pública do CNJ (91 tribunais) e joga movimentações novas no processo com alerta | ~1-2 dias | Fecha o gap "movimentação sem intimação fora do TJGO" de graça. Worker `uc-datajud` já existe. Rate limit 120 req/min (600 proc/semana = folga). Defasagem de dias é aceitável: prazo nasce da intimação (DJEN, já em D+1). **Melhor primeiro passo pós-deploy** |
+| B2 | **E-mail em formato digest** — ao reativar os e-mails (segunda ordem do titular): resumo diário 7h por advogado + e-mail individual só em T-0/FATAL | ~1 dia | Resolve na raiz o "lotar caixa". Reativar já no formato bom, não no modelo antigo |
+| B3 | **Painel de notificações no app** — ligar/desligar e-mail e push por marco e por pessoa em Settings, sem mexer em código | ~1 dia | A suspensão de 29/06 teria sido um clique. Mata a classe de problema "config hardcoded no .gs" |
+| B4 | **Botão WhatsApp por processo** — link `wa.me` com mensagem pronta (andamento + prazo) pro cliente | horas | Sem custo de API. Automação total (Meta API) fica pra depois, se valer |
+| B5 | **Afinamentos do épico Prazos** — badges de dias da lista alinhados ao cálculo novo; avaliar consolidar push por processo; silenciar lembrete Google quando a régua do app já cobra | horas | Dívidas pequenas registradas no HANDOFF |
+
+### BLOCO C — Novas funcionalidades (gaps do comparativo de mercado)
+
+| # | Item | Esforço / custo | Notas |
+|---|---|---|---|
+| C1 | **Tarefas genéricas com delegação** ("ligar pro cliente", "elaborar contrato") no Kanban + produtividade por advogado | ~1-2 dias | Estilo ADVBOX Taskscore; dados de etapas/logs já existem |
+| C2 | **Cobrança automática** — boleto/PIX via gateway (Asaas ou similar) + NFS-e depois, ligado nas parcelas de honorários | ~3 dias + taxa gateway | Impacto direto em inadimplência |
+| C3 | **Assinatura eletrônica** (era o P6) — procuração/contrato → API ZapSign/Autentique → cliente assina no celular | ~1-2 dias | Autentique tem plano grátis |
+| C4 | **Descoberta de processos novos por OAB** (única coisa que EXIGE serviço pago — DataJud não busca por OAB, por LGPD) | R$ 49,90–249,90/mês | Piloto sem fidelidade: Escavador Avançado (R$ 49,90) ou Judit Plataforma Advogado (R$ 249,90). API integrada (Judit: setup R$ 5k + R$ 1k/mês) só se o piloto provar valor |
+| C5 | **BI gerencial** — rentabilidade por cliente/área, produtividade por advogado, mapa de calor de prazos | ~1-2 dias/painel | Dados já existem |
+| C6 | **Timesheet + faturamento por hora** | ~2 dias | **Só se** o escritório passar a cobrar por hora; senão pular |
+
+### BLOCO D — Infraestrutura (a dor operacional crônica)
+
+| # | Item | Notas |
+|---|---|---|
+| D1 | **Deploy automático** — Firebase Hosting/CF Pages no push (aposenta FileZilla) + backend em Cloud Functions (aposenta colar-no-Apps-Script) | **Destrava todo o resto**: hoje correção urgente espera ação manual (caso dos e-mails em 29/06) |
+| D2 | **Testes no repositório + CI** — modularizar `index.html` (Vite, sem framework) pra commitar os testes (73 casos escritos em 29/06 viveram fora do repo) | Reduz custo de toda mudança futura |
+| D3 | **Um único host de produção** — encerrar dualidade GitHub Pages legado vs LOCAWEB | Decidir junto com D1 |
+
+### BLOCO E — Decisões do titular (pendentes de "segunda ordem")
+
+- [ ] **E1. Quando reativar os e-mails** — e se reativa no modelo consolidado atual ou já como digest (B2, recomendado).
+- [ ] **E2. Se contrata o piloto de descoberta por OAB** (C4) — único custo recorrente novo em discussão.
+
+### 📌 Sequência recomendada
+
+**A (deploys) → B1 (DataJud) → B2+B3 (digest + painel, reativando e-mails no formato bom) → C1 (tarefas) → C2 (cobrança) → D1 (deploy automático em paralelo, quando houver folga).**
+
+---
+
+## 📋 Backlog complementar (anterior, continua válido)
+
+- **Calculadora Fase 2** (~4-5h): tab Fiscal, vincular a processo/cliente, histórico, export PDF/Word. *(Fase 1 ✅.)*
+- **Relatórios automáticos pro cliente** (~2 dias): template configurável, periodicidade, fila de revisão, envio e-mail/WhatsApp/Drive.
+- **Cards de petição por tipo + fila de revisão do advogado (#34)** (~1-2 dias): prompts pré-otimizados (contestação, agravo, apelação…), workflow PDF→análise→peça.
+- **Protocolo multi-sistema** (3-5 dias): PJe/eSAJ/eProc, recurso/inicial, compressão de PDF, aprovação por segundo advogado.
+- **Custas e despesas** (1-2 dias) · **Docs não-judiciais + OCR** (~3 dias) · **Drive organizado** (1-2 dias) · **Relatórios Excel gerenciais** (1-2 dias).
+- Baixa prioridade: migração INTEGRA · previdenciário · contas a pagar/receber estruturado · cargas físicas.
+- Outros: push pro cliente em publicação nova · cache LRU no app cliente · onboarding · testes E2E.
 
 ---
 
@@ -36,115 +87,18 @@ As duas primeiras são independentes; sem (1) a Agenda/Kanban novos não aparece
 
 | Versão | Entrega |
 |---|---|
-| **v6.85.0** | Kanban de prazos + máquina de estados (etapas auditadas), **fatal interna** (real − 2 úteis), marco **⛔FATAL**, escalonamento **sem-ACK**, ajustar fatal com motivo, fix off-by-one nos marcos |
-| **v6.86.0** | **Auto-agendamento 🤖**: intimação não tratada → vínculo por CNJ + parser extrai prazo → cria prazo automaticamente (guarda de expirados; órfãs/sem-prazo ficam na caixa) |
-| **v6.87.0** | **Agenda como centro de controle**: prazos do Kanban na Agenda (lista+calendário, ações inline); unificação do fluxo DJEN (helper único `montarPrazoDjen`); **sync Google Calendar** por prazo + auto-sync opcional |
-| **v6.87.1** | Auto-agendados sem banner em Publicações — revisão no próprio Kanban (dar ciência) / Agenda (🤖 revisar) |
-| `Lembretes.gs` | **E-mails consolidados por processo**: 1 e-mail por CNJ (não por parte), com nome das partes + número do processo + providência em poucas palavras |
-
-**Ainda em aberto no épico (afinamento, baixa urgência):**
-- [ ] Badges de dias da LISTA de publicações ainda usam contagem antiga (+1d conservador) — alinhar com `_diaFatalLocal`
-- [ ] Avaliar consolidar também o **push** por processo (hoje 1 push por prazo; e-mail já consolidado)
-- [ ] Opção de silenciar o lembrete do Google Calendar quando o prazo já cobra pela régua do app (evitar alerta em dobro)
+| **v6.85.0** | Kanban + máquina de estados, **fatal interna**, marco ⛔FATAL, escalonamento sem-ACK, ajustar fatal auditado, fix off-by-one |
+| **v6.86.0** | **Auto-agendamento 🤖** (vínculo por CNJ + parser + guardas de expirados/órfãs) |
+| **v6.87.0** | **Agenda centro de controle** + unificação fluxo DJEN + **sync Google Calendar** |
+| **v6.87.1** | Auto-agendados sem banner — revisão no Kanban (ciência) / Agenda (🤖 revisar) |
+| `Lembretes.gs` | **E-mails consolidados por processo** (1 por CNJ: partes + providência) + **kill-switch de suspensão** |
 
 ---
 
-## 🎯 Backlog priorizado
+## 💰 Referências de custo levantadas (jul/2026 — confirmar com comercial antes de fechar)
 
-### ⭐ Prioridade ALTA (alto ROI, uso diário)
-
-#### P1 — Calculadora · Fase 2
-*(Fase 1 ✅ concluída: tab Cível completa, 6 índices BCB, juros CC 406, multa/honorários CPC, salvar em `calculos/{id}`)*
-- [ ] **Tab Fiscal**: índices legais por esfera (Selic federal, IPCA, juros legais), confronto com cobrança tributária
-- [ ] Vincular cálculo a processo/cliente
-- [ ] Tab "Histórico" (reabrir/excluir cálculos salvos)
-- [ ] Exportar memória de cálculo em PDF/Word
-
-**Esforço:** ~4-5h.
-
-#### P2 — Relatórios automáticos pro cliente
-*(sugestão #1 do escritório)*
-- [ ] Template configurável por cliente (visual + campos)
-- [ ] Conteúdo: pólo ativo/passivo, distribuição, vara/comarca, valor da causa, resumo, prob. êxito, último andamento, **providência pendente**
-- [ ] Periodicidade automática (semanal/quinzenal/mensal) + fila de revisão do advogado
-- [ ] Envio por e-mail/WhatsApp/Drive · reusa `mniData` + eventos do processo
-
-**Esforço:** ~2 dias.
-
-#### P3 / #34 — Cards de petição + fila de revisão do advogado
-*(sugestão #2 — parcialmente feito: análise IA + `gerarPeticaoIA` + modelos genéricos já existem)*
-- [ ] Cards por tipo de peça com prompt pré-otimizado (Inicial, Contestação, Embargos exec./decl., Agravo, Apelação, Recursos constitucionais)
-- [ ] Workflow: PDF do auto → análise IA → detecção de "providência em N dias" → "Gerar peça"
-- [ ] **Fila de revisão** pelo advogado responsável antes de virar versão final (#34)
-
-**Esforço:** ~1-2 dias.
-
----
-
-### 🔧 Prioridade MÉDIA
-
-#### P4 — Protocolo multi-sistema (extensão MNI.5)
-- [ ] PJe (TRFs, TJMT/ES/CE/MA, TST, TRTs) · eSAJ (TJSP/MS/AC) · eProc (TRF2/4)
-- [ ] Tipos de transmissão: recurso, embargos, petição inicial
-- [ ] Compressão automática de PDF > limite do tribunal
-- [ ] Workflow de aprovação por OUTRO advogado antes de liberar "Protocolar"
-- [ ] Assinatura ICP-Brasil (quando exigido)
-
-**Esforço:** 3-5 dias.
-
-#### P5 — Custas e despesas processuais
-- [ ] Collection `custas_despesas` vinculada a processo + cliente (iniciais, GRU, perícia, AR, diligência…)
-- [ ] Status pago / a reembolsar / reembolsado · saldo por processo e por cliente
-
-**Esforço:** 1-2 dias.
-
-#### P6 — Documentos não-judiciais
-- [ ] Templates: procuração (ad judicia / + especiais), contrato de honorários, hipossuficiência, substabelecimento
-- [ ] OCR de documento pessoal → preenchimento automático · ditado por voz (Web Speech API)
-- [ ] Integração assinatura (DocuSign/ClickSign/Drive)
-
-**Esforço:** ~3 dias.
-
-#### P7 — Organização de arquivos no Drive
-- [ ] Nomenclatura padrão `{CNJ}_{tipo}_{AAAA-MM-DD}_{descrição}.pdf` · dedupe SHA-256 · batch
-- [ ] Estrutura `/Processos/{CNJ}/` + `/Clientes/{Nome}/` · movimentação retroativa
-
-**Esforço:** 1-2 dias.
-
-#### P8 — Relatórios filtrados + export Excel
-- [ ] Tela `/relatorios` com filtros gerenciais (status, advogado, comarca, tribunal, período, cliente, área)
-- [ ] Listagem paginada · export XLSX · salvar pesquisa · ações em bloco
-
-**Esforço:** 1-2 dias.
-
----
-
-### 🐢 Prioridade BAIXA
-
-- **P9 — Migração INTEGRA (PROMAD)**: exportar XLSX (Mód. 50/149/117), adaptar parser, dedupe (2.155 clientes vs 806 do Astrea). *1-2 dias.*
-- **P10 — Cálculos previdenciários** (Mód. 86): só se atender a área. *3+ dias.*
-- **P11 — Contas a pagar/receber estruturado** (Mód. 32/33): refator do financeiro. *2-3 dias.*
-- **P12 — Cargas/protocolo físico** (Mód. 53/114): avaliar necessidade. *1 dia.*
-
----
-
-### 📋 Outros (não-features)
-
-- [ ] Push pro **cliente** quando publicação nova chegar no processo dele
-- [ ] Performance: cache LRU de processos no app cliente
-- [ ] Onboarding: guia de uso pra novos advogados
-- [ ] Testes E2E (Playwright) pros fluxos críticos (login, cadastro, protocolo, agendar prazo)
-
----
-
-## 📊 Resumo
-
-| Prioridade | Itens | Esforço |
-|---|---|---|
-| ⏳ Deploy manual | 3 | minutos |
-| ⭐ ALTA | P1-P3 | ~5 dias |
-| 🔧 MÉDIA | P4-P8 | ~10 dias |
-| 🐢 BAIXA | P9-P12 | ~7 dias |
-| 📋 Outros | 4 | ~4 dias |
-
-**Sequência recomendada:** deploy do épico Prazos → P1 (Calculadora Fiscal) → P2 (Relatórios cliente) → P3/#34 (Cards + fila de revisão) → P4+ conforme demanda real do escritório.
+- **DataJud (CNJ)**: grátis; consulta por CNJ em 91 tribunais; SEM busca por OAB/CPF (LGPD); defasagem horas–dias; ~120 req/min.
+- **Judit Plataforma**: R$ 9,90 → R$ 249,90/mês (Advogado: 59 monitoramentos + 31 novas ações). **Judit API**: setup R$ 5k + mínimo R$ 1k/mês anual (monitoramento diário R$ 1,50/proc, consulta R$ 0,25, novas ações R$ 15/filtro + R$ 0,25/captura).
+- **Escavador Plataforma**: R$ 9,90 (3 proc) / R$ 29,90 (10) / R$ 49,90 (20 + alerta de processos novos). **API**: créditos, tabela só no dashboard (cadastro grátis dá créditos de teste); volume via comercial.
+- **Codilo**: sob consulta (terceira cotação pra negociar).
+- Comparativo SaaS: Astrea/EasyJur ≈ R$ 150–300/usuário/mês (≈ R$ 1.350–2.700/mês pros 9).

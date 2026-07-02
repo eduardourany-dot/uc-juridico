@@ -15,6 +15,10 @@
 | **Working tree** | Limpo |
 | **Repositório** | https://github.com/eduardourany-dot/uc-juridico |
 
+### ▶️ Próxima sessão (combinado em 29/06)
+
+Plano oficial consolidado em `docs/ROADMAP.md` (blocos A–E, após análise de mercado + levantamento Judit/Escavador/DataJud). Sequência: **A (deploys manuais) → B1 (varredura DataJud da carteira, grátis) → B2+B3 (e-mail digest + painel de notificações, reativando os e-mails no formato bom)**. Decisões pendentes do titular: quando reativar e-mails (E1) e se contrata piloto de descoberta por OAB ~R$ 50–250/mês (E2).
+
 ### ⛔ E-mails de lembrete SUSPENSOS (até segunda ordem)
 
 Por decisão do titular (jun/2026), os e-mails do backend estão **desligados** enquanto o sistema de prazos não está 100% operante (estavam só lotando as caixas). Interruptor: `const EMAILS_SUSPENSOS = true;` no topo da seção de e-mail do `backend/Lembretes.gs`. **O push continua normal.** Pra **reativar**: trocar para `false` e recolar o `Lembretes.gs` no Apps Script (ou pedir ao Claude).
