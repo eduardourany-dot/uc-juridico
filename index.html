@@ -18453,6 +18453,9 @@ async function renderSettings() {
   const prompts = await DB.getAllPrompts();
   const defaultPromptId = await DB.getSetting('defaultPromptId');
   state.prompts = prompts;
+  // B3 — config de notificações (settings/notifConfig, lida pelo cron do backend)
+  try { state._notifCfg = _notifCfgMerge(await DB.getSetting('notifConfig', null)); }
+  catch (e) { state._notifCfg = _notifCfgMerge(null); }
   let tab = state._settingsTab || 'appearance';
   const isAdmin = window.UC_Auth?.getUser?.()?.role === 'admin';
   // Cliente só vê: appearance / security / about — qualquer outra cai pra appearance.
@@ -18495,6 +18498,134 @@ async function renderSettings() {
 
 function setSettingsTab(tab) {
   state._settingsTab = tab;
+  renderSettings();
+}
+
+// ====================================================================
+// B3 — Painel de notificações (Configurações → Sincronização → 🔔)
+// ====================================================================
+// Edita settings/notifConfig no Firestore. O cron do Apps Script
+// (Lembretes.gs → _notifConfig) lê a cada execução: mudança aqui vale no
+// ciclo seguinte (≤30 min), SEM recolar código no Apps Script.
+// Defaults idênticos aos do backend (NOTIF_DEFAULTS lá).
+const NOTIF_MARCOS = ['T-7', 'T-3', 'T-2', 'T-1', 'T-0', 'T+1', 'FATAL'];
+const NOTIF_MARCO_LABEL = {
+  'T-7': '7 dias', 'T-3': '3 dias', 'T-2': '2 dias', 'T-1': 'véspera',
+  'T-0': 'no dia', 'T+1': 'vencido', 'FATAL': '⛔ fatal real'
+};
+
+function _notifCfgMerge(cfg) {
+  cfg = cfg || {};
+  const def = {
+    emailsSuspensos: true, pushAtivo: true, emailModo: 'digest', digestHora: 7,
+    porMarcoEmail: { 'T-7': false, 'T-3': false, 'T-2': false, 'T-1': true, 'T-0': true, 'T+1': true, 'FATAL': true },
+    porPessoa: {}
+  };
+  const out = Object.assign({}, def, cfg);
+  out.porMarcoEmail = Object.assign({}, def.porMarcoEmail, cfg.porMarcoEmail || {});
+  out.porPessoa = cfg.porPessoa || {};
+  return out;
+}
+
+function _notifPanelHtml(cfg) {
+  const pessoas = (typeof ADVOGADOS !== 'undefined' ? ADVOGADOS : []).map(n => {
+    const email = (typeof advogadoEmailPorNome === 'function' ? advogadoEmailPorNome(n) : '') || '';
+    const pp = (email && cfg.porPessoa[email]) || {};
+    return { nome: n, email, push: pp.push !== false, email_on: pp.email !== false };
+  }).filter(p => p.email);
+  return `
+    <div class="card mb-3" style="border-left: 3px solid ${cfg.emailsSuspensos ? 'var(--uc-red)' : 'var(--uc-green)'};">
+      <h4 class="font-serif font-semibold smallcaps mb-2" style="color: var(--uc-black);">🔔 Notificações (prazos · parcelas · compromissos)</h4>
+      <p class="help-text mb-3">Controla o cron do backend sem mexer em código — mudanças valem no próximo ciclo (até 30 min). O push do celular e o e-mail são canais independentes.</p>
+
+      <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:12px;">
+        <label style="display:flex; align-items:center; gap:8px; cursor:pointer; font-size:14px;">
+          <input type="checkbox" id="notifEmailsAtivos" ${cfg.emailsSuspensos ? '' : 'checked'}>
+          <strong>E-mails ativos</strong>
+        </label>
+        <span class="badge ${cfg.emailsSuspensos ? 'badge-red' : 'badge-green'}">${cfg.emailsSuspensos ? '⛔ suspensos no momento' : '✓ ativos'}</span>
+        <label style="display:flex; align-items:center; gap:8px; cursor:pointer; font-size:14px; margin-left:12px;">
+          <input type="checkbox" id="notifPushAtivo" ${cfg.pushAtivo ? 'checked' : ''}>
+          <strong>Push no celular ativo</strong>
+        </label>
+      </div>
+
+      <div class="mb-3" style="background: var(--uc-cream); border-radius: 8px; padding: 12px;">
+        <div style="font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; color: var(--uc-warm-gray); margin-bottom: 8px;">Formato dos e-mails de prazo</div>
+        <label style="display:flex; gap:8px; align-items:flex-start; cursor:pointer; margin-bottom:8px;">
+          <input type="radio" name="notifModo" value="digest" ${cfg.emailModo === 'digest' ? 'checked' : ''} style="margin-top:3px;">
+          <span><strong>☕ Resumo diário (recomendado)</strong><br>
+          <span class="help-text">Um único e-mail por advogado, de manhã, com todas as providências do dia agrupadas por processo. Individuais na hora só pro crítico: prazo HOJE, fatal real e escalonamento sem-ciência.</span></span>
+        </label>
+        <div style="display:flex; align-items:center; gap:8px; margin: 0 0 10px 24px; font-size: 13px;">
+          Enviar a partir das <input type="number" id="notifDigestHora" value="${cfg.digestHora}" min="5" max="12" style="width:58px; padding:4px; border:1px solid var(--uc-line); border-radius:4px;">h
+        </div>
+        <label style="display:flex; gap:8px; align-items:flex-start; cursor:pointer;">
+          <input type="radio" name="notifModo" value="porMarco" ${cfg.emailModo === 'porMarco' ? 'checked' : ''} style="margin-top:3px;">
+          <span><strong>📨 Um e-mail por marco</strong> (modelo anterior, consolidado por processo)<br>
+          <span class="help-text">Marcos que geram e-mail:</span><br>
+          <span style="display:inline-flex; gap:10px; flex-wrap:wrap; margin-top:4px;">
+            ${NOTIF_MARCOS.map(m => `<label style="display:flex; align-items:center; gap:4px; font-size:12px; cursor:pointer;"><input type="checkbox" data-notif-marco="${m}" ${cfg.porMarcoEmail[m] ? 'checked' : ''}>${NOTIF_MARCO_LABEL[m]}</label>`).join('')}
+          </span></span>
+        </label>
+      </div>
+
+      <div class="mb-3">
+        <div style="font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; color: var(--uc-warm-gray); margin-bottom: 6px;">Por pessoa</div>
+        <div style="overflow-x:auto;">
+        <table style="width:100%; border-collapse:collapse; font-size:13px;">
+          <tr style="border-bottom: 2px solid var(--uc-line);">
+            <th style="text-align:left; padding:6px 8px; font-size:11px; text-transform:uppercase; color:var(--uc-warm-gray);">Advogado</th>
+            <th style="text-align:center; padding:6px 8px; font-size:11px; text-transform:uppercase; color:var(--uc-warm-gray);">Push</th>
+            <th style="text-align:center; padding:6px 8px; font-size:11px; text-transform:uppercase; color:var(--uc-warm-gray);">E-mail</th>
+          </tr>
+          ${pessoas.map(p => `
+            <tr style="border-bottom: 1px solid var(--uc-line-soft, var(--uc-line));">
+              <td style="padding:6px 8px;">${escapeHtml(p.nome)} <span class="help-text" style="font-size:11px;">${escapeHtml(p.email)}</span></td>
+              <td style="text-align:center;"><input type="checkbox" data-notif-pessoa-push="${escapeHtml(p.email)}" ${p.push ? 'checked' : ''}></td>
+              <td style="text-align:center;"><input type="checkbox" data-notif-pessoa-email="${escapeHtml(p.email)}" ${p.email_on ? 'checked' : ''}></td>
+            </tr>`).join('')}
+        </table>
+        </div>
+      </div>
+
+      <button class="btn btn-primary btn-sm" onclick="salvarNotifConfig()">💾 Salvar notificações</button>
+      <span class="help-text" style="margin-left: 10px;">vale no próximo ciclo do cron (≤30 min)</span>
+    </div>`;
+}
+
+async function salvarNotifConfig() {
+  const cfg = _notifCfgMerge(state._notifCfg);
+  cfg.emailsSuspensos = !document.getElementById('notifEmailsAtivos')?.checked;
+  cfg.pushAtivo = !!document.getElementById('notifPushAtivo')?.checked;
+  cfg.emailModo = document.querySelector('input[name="notifModo"]:checked')?.value || 'digest';
+  const hora = parseInt(document.getElementById('notifDigestHora')?.value, 10);
+  cfg.digestHora = (hora >= 5 && hora <= 12) ? hora : 7;
+  document.querySelectorAll('[data-notif-marco]').forEach(el => {
+    cfg.porMarcoEmail[el.getAttribute('data-notif-marco')] = el.checked;
+  });
+  const porPessoa = {};
+  document.querySelectorAll('[data-notif-pessoa-push]').forEach(el => {
+    const email = el.getAttribute('data-notif-pessoa-push');
+    porPessoa[email] = porPessoa[email] || {};
+    porPessoa[email].push = el.checked;
+  });
+  document.querySelectorAll('[data-notif-pessoa-email]').forEach(el => {
+    const email = el.getAttribute('data-notif-pessoa-email');
+    porPessoa[email] = porPessoa[email] || {};
+    porPessoa[email].email = el.checked;
+  });
+  // Só persiste opt-outs (default é receber tudo) — mantém o doc enxuto.
+  cfg.porPessoa = {};
+  for (const email in porPessoa) {
+    const p = porPessoa[email];
+    if (p.push === false || p.email === false) cfg.porPessoa[email] = { push: p.push, email: p.email };
+  }
+  await DB.setSetting('notifConfig', cfg);
+  state._notifCfg = cfg;
+  toast('🔔 Notificações salvas',
+    (cfg.emailsSuspensos ? 'E-mails SUSPENSOS' : 'E-mails ativos · modo ' + (cfg.emailModo === 'digest' ? 'resumo diário ' + cfg.digestHora + 'h' : 'por marco')) +
+    ' · vale no próximo ciclo do cron (≤30 min).', 'success');
   renderSettings();
 }
 
@@ -19018,6 +19149,8 @@ function renderSettingsTab(tab, prompts, defaultPromptId) {
         </ol>
         <p class="help-text mt-3">⚠️ A importação substitui os dados locais. Faça backup do dispositivo de destino antes, se já tiver dados nele.</p>
       </div>
+      ${_notifPanelHtml(_notifCfgMerge(state._notifCfg))}
+
       <div class="card mb-3" style="border-left: 3px solid var(--uc-gold);">
         <h4 class="font-serif font-semibold smallcaps mb-2" style="color: var(--uc-black);">📅 Prazos no Google Calendar</h4>
         <label style="display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--uc-graphite); cursor: pointer;">

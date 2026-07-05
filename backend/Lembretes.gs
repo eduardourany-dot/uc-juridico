@@ -316,25 +316,83 @@ function enviarFcmPush(token, title, body, data) {
 // enviarEmailSES() (criar essa função com UrlFetchApp.fetch). Nada mais muda
 // no resto do código.
 
-// Marcos em que email é enviado (push é enviado em TODOS os marcos sempre).
-// Email é redundância pros marcos críticos onde o push pode ser perdido.
-const EMAIL_MARCOS = ['T-1', 'T-0', 'T+1', 'FATAL'];
+// =====================================================================
+// B3 — Configuração de notificações SEM mexer em código
+// =====================================================================
+// A configuração vive no Firestore em settings/notifConfig e é editada no
+// app (Configurações → Sincronização → 🔔 Notificações). O cron lê a cada
+// execução — mudança no painel vale no ciclo seguinte (≤30 min), sem
+// recolar nada no Apps Script.
+//
+// Defaults refletem o estado decidido pelo titular (jun/2026):
+//   e-mails SUSPENSOS + modo digest pronto pra quando reativar.
+var NOTIF_DEFAULTS = {
+  emailsSuspensos: true,        // ⛔ kill-switch global de e-mail (agora é um clique no app)
+  pushAtivo: true,              // kill-switch global de push
+  emailModo: 'digest',          // 'digest' = resumo diário + individuais só críticos · 'porMarco' = e-mail em cada marco listado
+  digestHora: 7,                // hora local (America/Sao_Paulo) a partir da qual o digest do dia é enviado
+  porMarcoEmail: { 'T-7': false, 'T-3': false, 'T-2': false, 'T-1': true, 'T-0': true, 'T+1': true, 'FATAL': true },
+  porPessoa: {}                 // { 'email@': { push: false, email: false } } — opt-out individual
+};
 
-// ⛔ KILL-SWITCH GERAL DE E-MAIL — suspensão temporária ("até segunda ordem").
-// Enquanto o sistema de prazos não está 100% operante, os e-mails só lotam as
-// caixas dos destinatários. Com isto LIGADO, NENHUM e-mail do backend sai
-// (lembretes de prazo, escalonamento sem-ACK e parcelas) — o PUSH continua
-// normal. Pra REATIVAR: trocar para `false` e recolar este arquivo no Apps
-// Script. (Decisão do titular em jun/2026.)
-const EMAILS_SUSPENSOS = true;
+var _notifCfgCache = null;
+function _notifConfig() {
+  if (_notifCfgCache) return _notifCfgCache;
+  var cfg = {};
+  try {
+    var doc = _firestoreGet('settings/notifConfig');
+    cfg = (doc && doc.value) || {};
+  } catch (e) {
+    Logger.log('notifConfig: leitura falhou, usando defaults — ' + e.message);
+  }
+  var out = {};
+  for (var k in NOTIF_DEFAULTS) out[k] = (cfg[k] !== undefined && cfg[k] !== null) ? cfg[k] : NOTIF_DEFAULTS[k];
+  // porMarcoEmail: merge raso pra aceitar config parcial
+  out.porMarcoEmail = {};
+  for (var m in NOTIF_DEFAULTS.porMarcoEmail) {
+    out.porMarcoEmail[m] = (cfg.porMarcoEmail && cfg.porMarcoEmail[m] !== undefined)
+      ? !!cfg.porMarcoEmail[m] : NOTIF_DEFAULTS.porMarcoEmail[m];
+  }
+  _notifCfgCache = out;
+  return out;
+}
+
+// Marcos que geram e-mail INDIVIDUAL, conforme o modo:
+//  - digest: só os críticos do dia (T-0 e FATAL) — o resto vai no resumo diário.
+//  - porMarco: o que estiver ligado no painel.
+function _emailMarcosAtivos() {
+  var cfg = _notifConfig();
+  if (cfg.emailModo === 'digest') return ['T-0', 'FATAL'];
+  var out = [];
+  for (var m in cfg.porMarcoEmail) if (cfg.porMarcoEmail[m]) out.push(m);
+  return out;
+}
+
+// Opt-outs individuais (painel por pessoa).
+function _pessoaRecebeEmail(email) {
+  var p = _notifConfig().porPessoa[email];
+  return !(p && p.email === false);
+}
+function _pessoaRecebePush(email) {
+  var cfg = _notifConfig();
+  if (!cfg.pushAtivo) return false;
+  var p = cfg.porPessoa[email];
+  return !(p && p.push === false);
+}
 
 /**
  * Abstração de provider. Hoje: Gmail (MailApp). Amanhã: SES, se precisar.
- * Retorna { ok, error? }.
+ * Aplica o kill-switch global e o opt-out por pessoa (settings/notifConfig).
+ * Retorna { ok, error?, suprimido? }.
  */
 function enviarEmail(destinatario, assunto, corpoHtml) {
-  if (EMAILS_SUSPENSOS) {
-    Logger.log('[email suspenso] NÃO enviado para ' + destinatario + ' — assunto: ' + assunto);
+  var cfg = _notifConfig();
+  if (cfg.emailsSuspensos) {
+    Logger.log('[email suspenso via painel] NÃO enviado para ' + destinatario + ' — assunto: ' + assunto);
+    return { ok: true, suprimido: true };
+  }
+  if (!_pessoaRecebeEmail(destinatario)) {
+    Logger.log('[email opt-out] ' + destinatario + ' desativou e-mail no painel — assunto: ' + assunto);
     return { ok: true, suprimido: true };
   }
   return enviarEmailGmail(destinatario, assunto, corpoHtml);
@@ -597,6 +655,157 @@ function _montarEmailSemAckConsolidado(itens, ehEscalonamento) {
   return { assunto: assunto, html: html };
 }
 
+// =====================================================================
+// B2 — Digest diário: UM e-mail por advogado, de manhã, com tudo do dia
+// =====================================================================
+// No modo 'digest' (padrão do painel), os marcos não-críticos deixam de
+// gerar e-mail individual e entram num RESUMO DIÁRIO por advogado, enviado
+// no primeiro ciclo do cron após cfg.digestHora (hora local). Individuais
+// imediatos continuam só em T-0, FATAL e escalonamento sem-ACK ao sócio.
+// Anti-duplicação por dia via settings/digestStatus {date, enviados}.
+// O digest é informativo — NÃO marca notificado[marco] (o anti-spam dos
+// canais imediatos é independente).
+
+var DIGEST_MARCO_LABEL = {
+  'T-7': 'em até 7 dias', 'T-3': 'em 3 dias', 'T-2': 'em 2 dias',
+  'T-1': '🚨 AMANHÃ', 'T-0': '🚨🚨 HOJE', 'T+1': '✗ VENCIDO ontem',
+  'FATAL': '⛔ FATAL REAL HOJE', 'SEM_ACK': '✋ aguarda sua ciência'
+};
+
+function _talvezEnviarDigest(prazos, processos, ausencias, socio, todayMs) {
+  var cfg = _notifConfig();
+  if (cfg.emailsSuspensos || cfg.emailModo !== 'digest') return 0;
+
+  var agora = new Date();
+  var horaLocal = parseInt(Utilities.formatDate(agora, 'America/Sao_Paulo', 'H'), 10);
+  if (horaLocal < cfg.digestHora) return 0;
+  var hojeStr = Utilities.formatDate(agora, 'America/Sao_Paulo', 'yyyy-MM-dd');
+
+  var statusDoc = null;
+  try { statusDoc = _firestoreGet('settings/digestStatus'); } catch (e) {}
+  var status = (statusDoc && statusDoc.value) || {};
+  if (status.date === hojeStr) return 0; // já enviado hoje
+
+  // Coleta por destinatário — mesma regra de roteamento da régua.
+  // porEmail[email] = map docId -> { d, proc, marco, semAck }
+  var porEmail = {};
+  function addItem(email, d, proc, marco, semAck) {
+    if (!email || !_pessoaRecebeEmail(email)) return;
+    var bucket = porEmail[email] = porEmail[email] || {};
+    var it = bucket[d._docId];
+    if (it) { if (semAck) it.semAck = true; return; }
+    bucket[d._docId] = { d: d, proc: proc, marco: marco, semAck: !!semAck };
+  }
+
+  for (var i = 0; i < prazos.length; i++) {
+    var d = prazos[i];
+    var marco = _marcoDoPrazo(d, todayMs);
+    if (!marco) continue;
+    var proc = processos[d.processId];
+    if (!proc) continue;
+    var titular = proc.advogadoResponsavel || null;
+    var suplente = proc.advogadoSuplente || null;
+    var titAus = titular ? ausencias[titular] : null;
+    var titularAusente = !!titAus && (!titAus.ate || new Date(titAus.ate + 'T23:59:59').getTime() >= todayMs);
+    var nomes = _rotearDestinatarios(titular, suplente, socio, marco, titularAusente);
+    for (var j = 0; j < nomes.length; j++) addItem(NOME_EMAIL_MAP[nomes[j]], d, proc, marco, false);
+  }
+
+  // Sem-ACK pendentes (atribuído >24h sem ciência) — entram no digest do titular
+  var agoraMs = Date.now();
+  var semAckPrazos = [];
+  try { semAckPrazos = _firestoreQuery('prazos', [{ field: 'etapa', op: 'EQUAL', value: 'atribuido' }], 300); }
+  catch (e) { Logger.log('digest sem-ACK query falhou: ' + e.message); }
+  for (var s = 0; s < semAckPrazos.length; s++) {
+    var d2 = semAckPrazos[s];
+    if (d2.status !== 'pendente' || !d2.atribuidoEm || d2.cienteEm) continue;
+    if ((agoraMs - d2.atribuidoEm) / 3600000 < SEM_ACK_HORAS) continue;
+    var proc2 = processos[d2.processId];
+    if (!proc2) { try { proc2 = _firestoreGet('processos/' + d2.processId); } catch (e) { proc2 = null; } }
+    if (!proc2 || !proc2.advogadoResponsavel) continue;
+    addItem(NOME_EMAIL_MAP[proc2.advogadoResponsavel], d2, proc2, 'SEM_ACK', true);
+  }
+
+  var enviados = 0;
+  for (var email in porEmail) {
+    var itens = [];
+    for (var docId in porEmail[email]) itens.push(porEmail[email][docId]);
+    if (!itens.length) continue;
+    try {
+      var conteudo = _montarEmailDigest(itens, hojeStr);
+      var r = enviarEmail(email, conteudo.assunto, conteudo.html);
+      if (r.ok && !r.suprimido) enviados++;
+    } catch (e) {
+      Logger.log('digest pra ' + email + ' falhou: ' + e.message);
+    }
+  }
+
+  try {
+    _firestoreUpdate('settings/digestStatus', { value: { date: hojeStr, enviados: enviados, at: Date.now() }, updatedAt: Date.now() });
+  } catch (e) {
+    Logger.log('digestStatus update falhou: ' + e.message);
+  }
+  return enviados;
+}
+
+// Monta o resumo diário: agrupado por processo, ordenado pelo mais urgente.
+function _montarEmailDigest(itens, hojeStr) {
+  var pesoMarco = { 'FATAL': 0, 'T-0': 1, 'T+1': 2, 'T-1': 3, 'SEM_ACK': 4, 'T-2': 5, 'T-3': 6, 'T-7': 7 };
+  itens.sort(function (a, b) { return (pesoMarco[a.marco] || 9) - (pesoMarco[b.marco] || 9); });
+
+  // Agrupa por processo preservando a ordem de urgência
+  var grupos = [], porProc = {};
+  for (var i = 0; i < itens.length; i++) {
+    var k = _cnjKeyProc(itens[i].proc);
+    if (!porProc[k]) { porProc[k] = { proc: itens[i].proc, itens: [] }; grupos.push(porProc[k]); }
+    porProc[k].itens.push(itens[i]);
+  }
+
+  var pDia = hojeStr.split('-');
+  var diaBr = pDia.length === 3 ? (pDia[2] + '/' + pDia[1]) : hojeStr;
+  var assunto = '[UC Jurídico] Resumo do dia ' + diaBr + ' — ' + itens.length + ' providência(s)';
+
+  var blocos = grupos.map(function (g) {
+    var numero = g.proc.cnj || g.proc.name || 'Processo';
+    var linhas = g.itens.map(function (it) {
+      var d = it.d;
+      var parte = g.proc.client || g.proc.name || '—';
+      var prov = _providenciaCurta(d);
+      var marcoLbl = DIGEST_MARCO_LABEL[it.marco] || it.marco;
+      var extra = it.semAck && it.marco !== 'SEM_ACK' ? ' · ✋ sem ciência' : '';
+      var critico = ['FATAL', 'T-0', 'T+1'].indexOf(it.marco) >= 0;
+      var prazoCel = (d.deadlineInternaDate && d.deadlineInternaDate !== d.deadlineDate
+        ? 'cobra ' + _fmtDataBr(d.deadlineInternaDate) + '<br>' : '') +
+        (d.deadlineDate ? '<span style="color:#a8472d;font-weight:600;">fatal ' + _fmtDataBr(d.deadlineDate) + '</span>' : '—');
+      return '<tr>' +
+        '<td style="padding:7px 9px;border-bottom:1px solid #eee;vertical-align:top;font-size:13px;"><strong>' + _escapeEmail(parte) + '</strong><br><span style="color:#6b6b68;font-size:12px;">' + _escapeEmail(prov) + '</span></td>' +
+        '<td style="padding:7px 9px;border-bottom:1px solid #eee;vertical-align:top;font-size:12px;' + (critico ? 'color:#a8472d;font-weight:700;' : 'color:#1f1f1f;') + '">' + _escapeEmail(marcoLbl + extra) + '</td>' +
+        '<td style="padding:7px 9px;border-bottom:1px solid #eee;vertical-align:top;font-size:12px;white-space:nowrap;">' + prazoCel + '</td>' +
+      '</tr>';
+    }).join('');
+    var url = 'https://uc.uranydecastro.adv.br/#process/' + (g.proc._docId || '');
+    return '<div style="margin-bottom:18px;">' +
+      '<p style="margin:0 0 6px;font-size:13px;font-weight:600;color:#1f1f1f;">⚖ <a href="' + url + '" style="color:#8a6f3d;text-decoration:none;">' + _escapeEmail(numero) + '</a>' +
+      (g.proc.name && g.proc.cnj && g.proc.name !== g.proc.cnj ? ' <span style="color:#6b6b68;font-weight:400;">· ' + _escapeEmail(g.proc.name) + '</span>' : '') + '</p>' +
+      '<table style="width:100%;border-collapse:collapse;">' +
+        '<tr style="background:#f0ece0;">' + _thEmail('Parte · Providência') + _thEmail('Situação') + _thEmail('Prazo') + '</tr>' +
+        linhas +
+      '</table></div>';
+  }).join('');
+
+  var html =
+    '<div style="font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',Roboto,sans-serif;max-width:640px;margin:0 auto;background:#fafaf7;padding:24px;border-radius:8px;border:1px solid #e8e3d4;">' +
+      '<div style="border-left:4px solid #8a6f3d;padding-left:16px;margin-bottom:18px;">' +
+        '<h1 style="margin:0 0 4px;font-size:20px;color:#1f1f1f;font-weight:600;">☕ Bom dia — seu resumo de prazos</h1>' +
+        '<p style="margin:0;color:#6b6b68;font-size:13px;">' + itens.length + ' providência(s) na sua régua · ' + grupos.length + ' processo(s) · ' + diaBr + '</p>' +
+      '</div>' +
+      blocos +
+      '<a href="https://uc.uranydecastro.adv.br/#deadlines" style="display:inline-block;background:#8a6f3d;color:white;padding:12px 24px;text-decoration:none;border-radius:4px;font-weight:600;font-size:14px;">Abrir o Kanban de prazos →</a>' +
+      '<p style="color:#6b6b68;font-size:12px;margin-top:28px;padding-top:16px;border-top:1px solid #e8e3d4;">Um resumo por dia. Situações críticas (prazo HOJE, fatal real e escalonamentos) continuam chegando também na hora, individualmente. Ajuste tudo em Configurações → Sincronização → Notificações.</p>' +
+    '</div>';
+  return { assunto: assunto, html: html };
+}
+
 /**
  * Teste manual — envia email de exemplo. Cole o destinatário na constante.
  */
@@ -756,7 +965,7 @@ function cron_lembretesDePrazo() {
     const notificado = d.notificado || {};
     notificado[marco] = notificado[marco] || {};
     const st = prazoState[d._docId] = { notificado: notificado, changed: false };
-    const enviarEmailNesteMarco = EMAIL_MARCOS.indexOf(marco) >= 0;
+    const enviarEmailNesteMarco = _emailMarcosAtivos().indexOf(marco) >= 0;
 
     for (const nome of destinatariosNomes) {
       const email = NOME_EMAIL_MAP[nome];
@@ -768,7 +977,7 @@ function cron_lembretesDePrazo() {
 
       // ---------- Canal 1: Push FCM (todos os marcos, se tem token, 1x) ----------
       let pushOk = false;
-      if (!jaPush && tokenInfo && tokenInfo.token) {
+      if (!jaPush && tokenInfo && tokenInfo.token && _pessoaRecebePush(email)) {
         processados++;
         try {
           const title = MARCO_LABELS[marco] || ('Prazo ' + marco);
@@ -812,9 +1021,12 @@ function cron_lembretesDePrazo() {
       }
 
       // ---------- Canal 2: Email (CONSOLIDADO por processo) ----------
-      // Coleta no grupo se: marco crítico OU push impossível (sem token e sem
-      // push). O envio é uma vez só, por processo, na Fase 2.
-      const precisaEmail = !jaEmail && (enviarEmailNesteMarco || (!pushOk && !jaPush && !tokenInfo));
+      // Coleta no grupo se: marco com e-mail ativo OU (modo porMarco) push
+      // impossível — fallback sem-token NÃO se aplica no modo digest, senão
+      // quem não tem push voltaria a receber e-mail em todo marco (o resumo
+      // diário cobre esses casos). Envio uma vez só, por processo, na Fase 2.
+      const precisaEmail = !jaEmail && (enviarEmailNesteMarco ||
+        (_notifConfig().emailModo !== 'digest' && !pushOk && !jaPush && !tokenInfo));
       if (precisaEmail) {
         const chave = email + '|' + _cnjKeyProc(proc) + '|' + marco;
         if (!emailGroups[chave]) emailGroups[chave] = { email: email, marco: marco, itens: [] };
@@ -868,6 +1080,15 @@ function cron_lembretesDePrazo() {
     Logger.log('escalonamento sem-ACK falhou: ' + e.message);
   }
 
+  // B2 — digest diário (modo digest): um resumo por advogado, 1x/dia,
+  // enviado no primeiro ciclo do cron após cfg.digestHora.
+  let digestEnviados = 0;
+  try {
+    digestEnviados = _talvezEnviarDigest(prazos, processos, ausencias, socio, todayMs);
+  } catch (e) {
+    Logger.log('digest diário falhou: ' + e.message);
+  }
+
   // Persiste fcmTokens limpo se tirou algum
   if (tokensRemovidos) {
     try {
@@ -883,12 +1104,13 @@ function cron_lembretesDePrazo() {
     ' processados=' + processados +
     ' push_enviados=' + enviados +
     ' emails_consolidados=' + emailsConsolidados +
+    ' digest=' + digestEnviados +
     ' sem_ack_escalados=' + semAck +
     ' erros=' + erros +
     ' ignorados=' + ignorados +
     ' elapsed=' + elapsed + 'ms';
   Logger.log(summary);
-  return { prazos: prazos.length, processos_fetch: processIdsUnicos.length, processados, enviados, emailsConsolidados, semAck, erros, ignorados, elapsed };
+  return { prazos: prazos.length, processos_fetch: processIdsUnicos.length, processados, enviados, emailsConsolidados, digestEnviados, semAck, erros, ignorados, elapsed };
 }
 
 // =====================================================================
@@ -955,7 +1177,7 @@ function _escalonarSemAck(fcmTokens, socio, processosCache) {
       // ----- Push por prazo (como hoje) -----
       let pushOk = false;
       const tokenInfo = fcmTokens[email];
-      if (tokenInfo && tokenInfo.token) {
+      if (tokenInfo && tokenInfo.token && _pessoaRecebePush(email)) {
         try {
           const title = ehEscalonamento ? '🔺 Escalonamento: prazo sem ciência' : '✋ Prazo aguardando sua ciência';
           const body = _providenciaCurta(d) + ' · ' + (proc.client || proc.name || '') +
@@ -993,6 +1215,9 @@ function _escalonarSemAck(fcmTokens, socio, processosCache) {
   // ---------- Fase 2: 1 e-mail consolidado por (destinatário · processo) ----------
   for (const chave in emailGroups) {
     const g = emailGroups[chave];
+    // Modo digest: o responsável recebe a cobrança de ciência no resumo diário;
+    // e-mail individual imediato fica só pro ESCALONAMENTO ao sócio (crítico).
+    if (_notifConfig().emailModo === 'digest' && !g.ehEscalonamento) continue;
     try {
       const conteudo = _montarEmailSemAckConsolidado(g.itens, g.ehEscalonamento);
       const r = enviarEmail(g.email, conteudo.assunto, conteudo.html);
@@ -1209,7 +1434,7 @@ function cron_lembretesDeParcelas() {
         const procPrincipal = procsCobertos[0];
 
         // Push FCM
-        if (tokenInfo && tokenInfo.token) {
+        if (tokenInfo && tokenInfo.token && _pessoaRecebePush(email)) {
           processados++;
           try {
             const title = PARCELA_MARCO_LABELS[marco] || ('Parcela ' + marco);
@@ -1484,7 +1709,7 @@ function cron_lembretesDeCompromissos() {
       const enviarEmailNesteMarco = COMPROMISSO_EMAIL_MARCOS.indexOf(marco) >= 0;
 
       // Push FCM
-      if (tokenInfo && tokenInfo.token) {
+      if (tokenInfo && tokenInfo.token && _pessoaRecebePush(email)) {
         processados++;
         try {
           const title = COMPROMISSO_MARCO_LABELS[marco] || ('Compromisso ' + marco);
@@ -1993,7 +2218,7 @@ function _previewLembretesDePrazo() {
     const pendentes = destEmails.filter(e => !(notificado[marco] && notificado[marco][e]));
     if (pendentes.length === 0) continue;
 
-    const enviarEmailNesteMarco = EMAIL_MARCOS.indexOf(marco) >= 0;
+    const enviarEmailNesteMarco = _emailMarcosAtivos().indexOf(marco) >= 0;
     const enviarPush = pendentes.filter(e => fcmTokens[e] && fcmTokens[e].token);
     const enviarEmail = pendentes.filter(e => enviarEmailNesteMarco || !(fcmTokens[e] && fcmTokens[e].token));
 

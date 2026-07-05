@@ -36,8 +36,8 @@
 | # | Item | Esforço | Notas |
 |---|---|---|---|
 | B1 | ✅ **Varredura DataJud da carteira** (**v6.88.0**) — boot diário (silencioso) + botão em Configurações→MNI; consulta a API pública do CNJ (91 tribunais) pra cada processo ativo >7d sem sync e importa movimentos dos últimos 90d como eventos (dedupe idempotente) | feito 30/06 | Lotes de 150, ~85 req/min, relatório clicável. ⏳ ativa junto com o deploy da LOCAWEB (A1) |
-| B2 | **E-mail em formato digest** — ao reativar os e-mails (segunda ordem do titular): resumo diário 7h por advogado + e-mail individual só em T-0/FATAL | ~1 dia | Resolve na raiz o "lotar caixa". Reativar já no formato bom, não no modelo antigo |
-| B3 | **Painel de notificações no app** — ligar/desligar e-mail e push por marco e por pessoa em Settings, sem mexer em código | ~1 dia | A suspensão de 29/06 teria sido um clique. Mata a classe de problema "config hardcoded no .gs" |
+| B2 | ✅ **E-mail em formato digest** (**v6.89.0**) — resumo diário por advogado após a hora configurada (default 7h), agrupado por processo (Parte·Providência·Situação·Prazo, inclui sem-ACK); individuais só T-0/FATAL/escalonamento; anti-dup por dia | feito 30/06 | ⏳ ativa ao colar `Lembretes.gs`. Reativação dos e-mails (E1) já nasce no formato digest |
+| B3 | ✅ **Painel de notificações no app** (**v6.89.0**) — Configurações→Sincronização→🔔: kill-switch de e-mail (um clique!), modo digest/porMarco, hora, marcos, opt-out push/e-mail por advogado. Backend lê `settings/notifConfig` a cada ciclo (≤30 min, sem recolar código) | feito 30/06 | ⏳ ativa com LOCAWEB (painel) + `Lembretes.gs` (leitura) |
 | B4 | **Botão WhatsApp por processo** — link `wa.me` com mensagem pronta (andamento + prazo) pro cliente | horas | Sem custo de API. Automação total (Meta API) fica pra depois, se valer |
 | B5 | **Afinamentos do épico Prazos** — badges de dias da lista alinhados ao cálculo novo; avaliar consolidar push por processo; silenciar lembrete Google quando a régua do app já cobra | horas | Dívidas pequenas registradas no HANDOFF |
 

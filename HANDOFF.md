@@ -8,15 +8,22 @@
 
 | Item | Valor |
 |---|---|
-| **Versão no código (`main`/`sandbox`)** | `v6.88.0` (B1 varredura DataJud) + `Lembretes.gs` consolidado |
-| **Versão em produção (LOCAWEB)** | `v6.86.0` — ⏳ **v6.88.0 pendente de upload** |
+| **Versão no código (`main`/`sandbox`)** | `v6.89.0` (B1 DataJud + B2 digest + B3 painel de notificações) |
+| **Versão em produção (LOCAWEB)** | `v6.86.0` — ⏳ **v6.89.0 pendente de upload** (e `Lembretes.gs` de recolagem) |
 | **Branches** | `main` = `sandbox` = `claude/continuidade-aaq0lh` (em sincronia, fast-forward) |
 | **Working tree** | Limpo |
 | **Repositório** | https://github.com/eduardourany-dot/uc-juridico |
 
 ### ▶️ Próxima sessão
 
-**B1 ✅ concluído (v6.88.0)** — varredura DataJud implementada e testada (13 casos); ativa junto com o deploy da LOCAWEB. Próximo da fila: **B2+B3 (e-mail digest + painel de notificações no app)** — de preferência juntos, pra reativar os e-mails já no formato bom quando vier a ordem do titular (E1). Plano completo em `docs/ROADMAP.md`. Decisões pendentes do titular: reativar e-mails (E1) e piloto de descoberta por OAB ~R$ 50–250/mês (E2).
+**B1+B2+B3 ✅ concluídos (v6.88.0 e v6.89.0)** — bloco B de vitórias rápidas quase todo entregue (restam B4 WhatsApp e B5 afinamentos). Próximos da fila: **B4 (botão WhatsApp por processo, horas)** e **B5 (afinamentos do épico Prazos)**, ou pular pro **C1 (tarefas genéricas com delegação)**. Plano completo em `docs/ROADMAP.md`. Decisões pendentes do titular: **E1 reativar e-mails — agora é um CLIQUE no painel** (Configurações → Sincronização → 🔔, marcar "E-mails ativos"; já reativa no modo digest) e E2 piloto de descoberta por OAB ~R$ 50–250/mês.
+
+### 🔔 B2+B3 — Digest diário + painel de notificações (v6.89.0, sessão 30/06)
+
+- **B3 painel**: Configurações → Sincronização → card 🔔. Edita `settings/notifConfig` no Firestore: kill-switch de e-mail, kill-switch de push, modo `digest`/`porMarco`, hora do digest, marcos com e-mail individual, opt-out push/e-mail por advogado. O backend (`_notifConfig()` no Lembretes.gs) lê a cada ciclo do cron — **mudança vale em ≤30 min sem recolar código**. Defaults = estado atual (e-mails suspensos + modo digest): colar o Lembretes.gs não muda comportamento até alguém mexer no painel.
+- **B2 digest**: `_talvezEnviarDigest` roda dentro do cron de 30 min; após `digestHora` local, monta UM e-mail por advogado (roteamento igual ao da régua: titular/suplente/sócio por marco) agrupado por processo — Parte · Providência · Situação · Prazo — incluindo prazos sem-ACK (>24h sem ciência). Anti-dup diário em `settings/digestStatus`. No modo digest: e-mails individuais imediatos só em **T-0, FATAL e escalonamento sem-ACK ao sócio**; o fallback "sem token de push → e-mail em todo marco" fica desativado (senão quem não tem push voltaria a ser inundado — bug pego por teste).
+- Kill-switch antigo hardcoded (`EMAILS_SUSPENSOS`) substituído pelo config — a "segunda ordem" do titular agora é autosserviço.
+- Testes: 19 casos GAS (defaults/merge, kill-switch, opt-outs, marcos por modo, digest end-to-end com anti-dup, sem-ACK gating, regressão do modo porMarco) + parse client + merge client=backend.
 
 ### 🛰 B1 — Varredura DataJud (v6.88.0, sessão 30/06)
 
