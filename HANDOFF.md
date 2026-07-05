@@ -8,16 +8,22 @@
 
 | Item | Valor |
 |---|---|
-| **Versão no código (`main`/`sandbox`)** | `v6.87.1` + `Lembretes.gs` consolidado |
-| **Versão em produção (LOCAWEB)** | `v6.86.0` — ⏳ **v6.87.1 pendente de upload** |
-| **Último commit** | `993a1d7` — docs: regenera ROADMAP (jun/2026) |
+| **Versão no código (`main`/`sandbox`)** | `v6.88.0` (B1 varredura DataJud) + `Lembretes.gs` consolidado |
+| **Versão em produção (LOCAWEB)** | `v6.86.0` — ⏳ **v6.88.0 pendente de upload** |
 | **Branches** | `main` = `sandbox` = `claude/continuidade-aaq0lh` (em sincronia, fast-forward) |
 | **Working tree** | Limpo |
 | **Repositório** | https://github.com/eduardourany-dot/uc-juridico |
 
-### ▶️ Próxima sessão (combinado em 29/06)
+### ▶️ Próxima sessão
 
-Plano oficial consolidado em `docs/ROADMAP.md` (blocos A–E, após análise de mercado + levantamento Judit/Escavador/DataJud). Sequência: **A (deploys manuais) → B1 (varredura DataJud da carteira, grátis) → B2+B3 (e-mail digest + painel de notificações, reativando os e-mails no formato bom)**. Decisões pendentes do titular: quando reativar e-mails (E1) e se contrata piloto de descoberta por OAB ~R$ 50–250/mês (E2).
+**B1 ✅ concluído (v6.88.0)** — varredura DataJud implementada e testada (13 casos); ativa junto com o deploy da LOCAWEB. Próximo da fila: **B2+B3 (e-mail digest + painel de notificações no app)** — de preferência juntos, pra reativar os e-mails já no formato bom quando vier a ordem do titular (E1). Plano completo em `docs/ROADMAP.md`. Decisões pendentes do titular: reativar e-mails (E1) e piloto de descoberta por OAB ~R$ 50–250/mês (E2).
+
+### 🛰 B1 — Varredura DataJud (v6.88.0, sessão 30/06)
+
+- `datajudVarrerCarteira()`: pra cada processo ativo com CNJ há >7 dias sem sync (MNI ou DataJud), consulta a API pública do CNJ via worker MNI (`consultarProcessoDataJud`, key embarcada) e importa os movimentos dos últimos 90 dias como eventos `movimento_mni` — reusa `mniAplicarMudancasFlow` (dedupe por identificador estável do worker → idempotente).
+- Lotes de 150 (mais antigos primeiro), delay 700ms (~85 req/min, sob o limite ~120/min do CNJ). Falha/não-encontrado marca `p.datajudTentativaEm` (volta pra fila só após o ciclo de 7d). Tribunal detectado pelo CNJ é salvo em `p.tribunal` (amortiza).
+- Gatilhos: boot silencioso (máx 1x/20h, throttle em `datajudVarreduraEm`; toast só se houver novidade) + botão "🛰 Varrer carteira agora" em Configurações → MNI (modal de progresso com cancelamento + relatório final com processos clicáveis).
+- Testes: 13 casos (filtro de elegíveis, ordenação, janela de 90d, não-encontrado, detecção de tribunal, throttle, idempotência) + parse global OK.
 
 ### ⛔ E-mails de lembrete SUSPENSOS (até segunda ordem)
 

@@ -1,5 +1,5 @@
-// Service Worker — UC Jurídico v6.87.1 (refac UX: prazos auto-agendados não geram mais banner/fila 🤖 separado na página Publicações — eram confusos. Agora vivem só no Kanban [coluna Atribuído, badge "🤖 revisar"] e na Agenda. Revisão acontece no lugar: dar ciência no Kanban OU "🤖 revisar" na Agenda confirma a leitura do parser e limpa o marcador. Card da Agenda ganha 🤖 revisar + ajustar fatal 🗓. Removida _secaoRevisaoAutoHtml; mensagens do relatório atualizadas)
-const CACHE_NAME = 'uc-juridico-v6-87-1';
+// Service Worker — UC Jurídico v6.88.0 (feat B1: 🛰 varredura DataJud da carteira — API pública do CNJ [91 tribunais, grátis] consultada pra cada processo ativo há >7 dias sem sync; movimentos dos últimos 90 dias viram eventos na linha do tempo [reusa merge+dedupe do mniAplicarMudancasFlow, idempotente]; lotes de 150 mais-antigos-primeiro, delay 700ms [~85 req/min, sob o limite do CNJ], falha/não-encontrado marca datajudTentativaEm e respeita o ciclo; roda no boot [silencioso, máx 1x/20h, toast se houver novidade] + botão "🛰 Varrer carteira agora" em Configurações→MNI com progresso/cancelamento e relatório clicável. DataJud tem defasagem — prazos continuam nascendo do DJEN)
+const CACHE_NAME = 'uc-juridico-v6-88-0';
 const APP_SHELL = [
   './',
   './index.html',

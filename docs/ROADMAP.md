@@ -35,7 +35,7 @@
 
 | # | Item | Esforço | Notas |
 |---|---|---|---|
-| B1 | **Varredura DataJud da carteira** — cron semanal consulta cada CNJ ativo na API pública do CNJ (91 tribunais) e joga movimentações novas no processo com alerta | ~1-2 dias | Fecha o gap "movimentação sem intimação fora do TJGO" de graça. Worker `uc-datajud` já existe. Rate limit 120 req/min (600 proc/semana = folga). Defasagem de dias é aceitável: prazo nasce da intimação (DJEN, já em D+1). **Melhor primeiro passo pós-deploy** |
+| B1 | ✅ **Varredura DataJud da carteira** (**v6.88.0**) — boot diário (silencioso) + botão em Configurações→MNI; consulta a API pública do CNJ (91 tribunais) pra cada processo ativo >7d sem sync e importa movimentos dos últimos 90d como eventos (dedupe idempotente) | feito 30/06 | Lotes de 150, ~85 req/min, relatório clicável. ⏳ ativa junto com o deploy da LOCAWEB (A1) |
 | B2 | **E-mail em formato digest** — ao reativar os e-mails (segunda ordem do titular): resumo diário 7h por advogado + e-mail individual só em T-0/FATAL | ~1 dia | Resolve na raiz o "lotar caixa". Reativar já no formato bom, não no modelo antigo |
 | B3 | **Painel de notificações no app** — ligar/desligar e-mail e push por marco e por pessoa em Settings, sem mexer em código | ~1 dia | A suspensão de 29/06 teria sido um clique. Mata a classe de problema "config hardcoded no .gs" |
 | B4 | **Botão WhatsApp por processo** — link `wa.me` com mensagem pronta (andamento + prazo) pro cliente | horas | Sem custo de API. Automação total (Meta API) fica pra depois, se valer |

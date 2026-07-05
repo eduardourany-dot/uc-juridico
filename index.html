@@ -18821,6 +18821,17 @@ function renderSettingsTab(tab, prompts, defaultPromptId) {
         <button class="btn btn-primary btn-sm" onclick="mniSincronizarCarteiraFlow()">🔄 Sincronizar carteira via MNI…</button>
       </div>
 
+      <div class="card mb-3" style="border-left: 3px solid var(--uc-gold);">
+        <h4 class="font-serif font-semibold smallcaps mb-2" style="color: var(--uc-black);">🛰 Varredura DataJud (CNJ · 91 tribunais · grátis)</h4>
+        <p class="help-text mb-2">
+          Consulta a API pública do CNJ pra cada processo ativo há mais de ${DATAJUD_SYNC_DIAS} dias sem sincronizar e importa as
+          movimentações dos últimos ${DATAJUD_JANELA_DIAS} dias como eventos na linha do tempo. Não precisa de credencial nem cofre.
+          Roda sozinha 1x por dia (lotes de ${DATAJUD_LOTE}); o botão força uma rodada agora.
+          <strong>Não substitui a intimação</strong> — o DataJud tem defasagem de horas a dias; prazos continuam nascendo do DJEN.
+        </p>
+        <button class="btn btn-secondary btn-sm" onclick="datajudVarrerCarteira()">🛰 Varrer carteira agora…</button>
+      </div>
+
       <div class="card mb-3">
         <h4 class="font-serif font-semibold smallcaps mb-2" style="color: var(--uc-black);">Worker MNI</h4>
         <p class="help-text mb-2">URL do Cloudflare Worker que roteia SOAP para os tribunais. Veja <code>workers/mni-worker.js</code>.</p>
@@ -20179,6 +20190,197 @@ async function _consultarViaDataJud(p, codigo, config, motivoFallback) {
   data._motivoFallback = motivoFallback;
 
   _mniShowResultModal(p, codigo, '(DataJud público)', data, Date.now() - t0);
+}
+
+// ====================================================================
+// 🛰 B1 — Varredura DataJud da carteira (movimentações · 91 tribunais)
+// ====================================================================
+// Fonte: API pública do CNJ (DataJud) via worker MNI (operação
+// consultarProcessoDataJud — API key embarcada no worker). Custo zero.
+//
+// O QUE FAZ: pra cada processo ATIVO com CNJ há mais de DATAJUD_SYNC_DIAS
+// sem sincronizar (MNI ou DataJud), consulta o DataJud e materializa como
+// eventos os movimentos dos últimos DATAJUD_JANELA_DIAS — reusa o merge
+// com dedupe do mniAplicarMudancasFlow (identificador estável do worker →
+// idempotente entre varreduras).
+//
+// LIMITES DELIBERADOS:
+//  - Lote de DATAJUD_LOTE processos por execução (mais antigos primeiro);
+//    a carteira inteira circula ao longo dos dias.
+//  - Delay entre consultas bem abaixo do rate limit do CNJ (~120 req/min).
+//  - Janela de movimentos evita despejar histórico completo na timeline
+//    (primeira varredura de um processo importa só o recente).
+//  - Falha/não-encontrado marca datajudTentativaEm — o processo só volta
+//    pra fila depois do ciclo, não entope o lote.
+//
+// DataJud NÃO é tempo real (defasagem de horas a dias, varia por tribunal):
+// serve como rede de segurança de MOVIMENTAÇÃO. Prazo continua nascendo da
+// intimação (DJEN, D+1) — nada aqui cria prazo.
+//
+// Gatilhos: boot (silencioso, no máx. 1x a cada 20h) + botão em
+// Configurações → MNI.
+const DATAJUD_SYNC_DIAS = 7;      // re-varre processo após N dias sem sync
+const DATAJUD_JANELA_DIAS = 90;   // importa movimentos até N dias pra trás
+const DATAJUD_MAX_MOVS = 30;      // máx. de movimentos importados por processo/vez
+const DATAJUD_LOTE = 150;         // máx. de processos por execução
+const DATAJUD_DELAY_MS = 700;     // ~85 req/min — folga sob o limite do CNJ
+let _datajudCancelar = false;
+
+async function datajudVarrerCarteira(opts) {
+  opts = opts || {};
+  const silencioso = !!opts.silencioso;
+  const delayMs = Number.isFinite(opts.delayMs) ? opts.delayMs : DATAJUD_DELAY_MS;
+
+  const config = await _mniGetConfig();
+  if (!config.workerUrl) {
+    if (!silencioso) toast('Worker MNI não configurada', 'Configure a URL em Configurações → MNI — a varredura DataJud usa o mesmo worker.', 'error');
+    return null;
+  }
+
+  // Throttle do boot: no máximo 1 execução a cada 20h por dispositivo/equipe.
+  if (silencioso) {
+    const ultimo = await DB.getSetting('datajudVarreduraEm', 0);
+    if (ultimo && Date.now() - ultimo < 20 * 3600 * 1000) return null;
+  }
+  await DB.setSetting('datajudVarreduraEm', Date.now());
+
+  const todos = await DB.getAllProcesses();
+  const limiteSync = Date.now() - DATAJUD_SYNC_DIAS * 86400000;
+  const candidatos = todos
+    .filter(p => !p.deletedAt && p.status !== 'archived' &&
+      String(p.cnj || '').replace(/\D/g, '').length >= 18 &&
+      (!p.mniLastSync || p.mniLastSync < limiteSync) &&
+      (!p.datajudTentativaEm || p.datajudTentativaEm < limiteSync))
+    .sort((a, b) => (a.mniLastSync || 0) - (b.mniLastSync || 0));
+
+  const lote = candidatos.slice(0, DATAJUD_LOTE);
+  if (!lote.length) {
+    if (!silencioso) toast('Carteira em dia', `Nenhum processo ativo há mais de ${DATAJUD_SYNC_DIAS} dias sem sincronizar.`, 'success');
+    return { analisados: 0, comNovidade: [], semMudanca: 0, naoEncontrados: 0, erros: 0, restantes: 0 };
+  }
+
+  _datajudCancelar = false;
+  const prog = silencioso ? null : _datajudProgressModal(lote.length);
+  const janelaISO = new Date(Date.now() - DATAJUD_JANELA_DIAS * 86400000).toISOString().slice(0, 10);
+  const res = {
+    analisados: 0, comNovidade: [], semMudanca: 0,
+    naoEncontrados: 0, erros: 0,
+    restantes: candidatos.length - lote.length,
+    cancelado: false
+  };
+
+  for (const p of lote) {
+    if (_datajudCancelar) { res.cancelado = true; break; }
+    res.analisados++;
+    if (prog) prog.update(res.analisados, p);
+    try {
+      // Tribunal: campo do processo, senão detecta pelo CNJ (e salva pro futuro)
+      let codigo = p.tribunal ? String(p.tribunal).toUpperCase().replace(/[^A-Z0-9_]/g, '') : null;
+      if (!codigo) {
+        const det = await _mniDetectarTribunal(p);
+        if (det && det.codigo) {
+          codigo = det.codigo;
+          p.tribunal = codigo;
+          await DB.saveProcess(p);
+        }
+      }
+      if (!codigo) {
+        res.erros++;
+        p.datajudTentativaEm = Date.now();
+        await DB.saveProcess(p);
+        continue;
+      }
+
+      const r = await _chamarDataJudWorker(codigo, p.cnj, config);
+      if (!r.sucesso) {
+        if (r.erro === 'nao_encontrado') res.naoEncontrados++;
+        else res.erros++;
+        p.datajudTentativaEm = Date.now();
+        await DB.saveProcess(p);
+      } else {
+        // Só movimentos da janela recente (evita despejar histórico completo)
+        const movRecentes = (r.data.movimentos || [])
+          .filter(m => (m.dataIso || '') >= janelaISO)
+          .slice(0, DATAJUD_MAX_MOVS);
+        const resumo = await mniAplicarMudancasFlow(p.id, codigo, Object.assign({}, r.data, { movimentos: movRecentes }));
+        const mNovos = parseInt((String(resumo).match(/\+(\d+) movimento/) || [])[1] || '0', 10);
+        if (mNovos > 0) res.comNovidade.push({ id: p.id, nome: p.name || '', cnj: p.cnj || '', novos: mNovos });
+        else res.semMudanca++;
+      }
+    } catch (e) {
+      res.erros++;
+      console.warn('[datajud varredura] falha', p.cnj, e);
+    }
+    await new Promise(r2 => setTimeout(r2, delayMs));
+  }
+
+  if (prog) prog.close();
+  console.log('[datajud varredura]', res);
+  if (silencioso) {
+    if (res.comNovidade.length) {
+      toast('🛰 Movimentações novas (DataJud)',
+        `${res.comNovidade.length} processo(s) com andamento novo — veja a linha do tempo de cada um.`, 'info');
+    }
+  } else {
+    _datajudRelatorioModal(res);
+  }
+  if (state.currentRoute === 'process') renderProcessDetail();
+  return res;
+}
+
+function datajudCancelarVarredura() { _datajudCancelar = true; }
+
+// Modal de progresso minimalista com cancelamento.
+function _datajudProgressModal(total) {
+  const modal = document.createElement('div');
+  modal.className = 'modal-backdrop';
+  modal.innerHTML = `
+    <div class="modal" style="max-width: 460px;">
+      <h3 class="modal-title">🛰 Varredura DataJud</h3>
+      <p class="help-text" style="margin-bottom: 10px;">Consultando a API pública do CNJ, um processo por vez (respeitando o limite do CNJ). Você pode continuar usando o sistema em outra aba.</p>
+      <div style="background: var(--uc-cream); border-radius: 6px; height: 10px; overflow: hidden; margin-bottom: 8px;">
+        <div id="_djudBar" style="height: 100%; width: 0%; background: var(--uc-gold); transition: width .3s;"></div>
+      </div>
+      <div id="_djudLabel" style="font-size: 12px; color: var(--uc-warm-gray);">0 / ${total}</div>
+      <button class="btn btn-outline" style="width: 100%; margin-top: 12px;" onclick="datajudCancelarVarredura()">⏸ Parar (mantém o que já foi varrido)</button>
+    </div>`;
+  $('modalContainer').appendChild(modal);
+  return {
+    update(n, p) {
+      const bar = document.getElementById('_djudBar');
+      const lbl = document.getElementById('_djudLabel');
+      if (bar) bar.style.width = Math.round((n / total) * 100) + '%';
+      if (lbl) lbl.textContent = `${n} / ${total} · ${normalizeCnj(p.cnj) || p.name || ''}`;
+    },
+    close() { modal.remove(); }
+  };
+}
+
+// Relatório final da varredura manual — processos com novidade são clicáveis.
+function _datajudRelatorioModal(res) {
+  const linha = (i) => `
+    <div style="font-size:12px; padding:4px 0; border-bottom:1px solid var(--uc-line); display:flex; justify-content:space-between; gap:8px;">
+      <a onclick="this.closest('.modal-backdrop').remove(); navigate('process', { currentProcessId: '${i.id}' })" style="cursor:pointer; color:var(--uc-gold); flex:1; min-width:0;">${escapeHtml(normalizeCnj(i.cnj) || i.cnj)} · ${escapeHtml(i.nome)}</a>
+      <span class="badge badge-green" style="font-size:9px; flex-shrink:0;">+${i.novos} mov.</span>
+    </div>`;
+  const modal = document.createElement('div');
+  modal.className = 'modal-backdrop';
+  modal.innerHTML = `
+    <div class="modal scroll-thin" style="max-width: 560px;">
+      <h3 class="modal-title">🛰 Varredura DataJud ${res.cancelado ? 'interrompida' : 'concluída'}</h3>
+      <div class="grid gap-2 mb-3" style="grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));">
+        <div class="stat-card"><div class="stat-label">Consultados</div><div class="stat-value">${res.analisados}</div></div>
+        <div class="stat-card" style="${res.comNovidade.length ? 'background: var(--uc-green-soft, #e8f3e8);' : ''}"><div class="stat-label">Com novidade</div><div class="stat-value">${res.comNovidade.length}</div></div>
+        <div class="stat-card"><div class="stat-label">Sem mudança</div><div class="stat-value">${res.semMudanca}</div></div>
+        <div class="stat-card"><div class="stat-label">Não encontrados</div><div class="stat-value">${res.naoEncontrados}</div></div>
+        <div class="stat-card"><div class="stat-label">Erros</div><div class="stat-value">${res.erros}</div></div>
+        <div class="stat-card"><div class="stat-label">Na fila</div><div class="stat-value">${res.restantes}</div></div>
+      </div>
+      ${res.comNovidade.length ? `<details open style="margin-bottom:10px;"><summary style="cursor:pointer;font-size:13px;font-weight:600;">📥 Movimentações novas (${res.comNovidade.length}) — clique pra abrir o processo</summary>${res.comNovidade.map(linha).join('')}</details>` : ''}
+      <p class="help-text">"Não encontrados" é normal: sigilo, tribunal com envio incompleto ao CNJ ou defasagem. ${res.restantes > 0 ? `Os ${res.restantes} restantes entram nas próximas execuções (a varredura roda sozinha, 1x por dia).` : ''} O DataJud não substitui a intimação — prazos continuam nascendo do DJEN.</p>
+      <button class="btn btn-primary" style="width:100%;margin-top:8px;" onclick="this.closest('.modal-backdrop').remove()">Fechar</button>
+    </div>`;
+  $('modalContainer').appendChild(modal);
 }
 
 // ====================================================================
@@ -25000,6 +25202,9 @@ async function bootApp() {
   // 🤖 Auto-agendamento contínuo: processa intimações novas que chegaram
   // pelo cron DJEN desde a última sessão (silencioso — só toast se criar).
   autoAgendarIntimacoes({ silencioso: true }).catch(err => console.warn('autoAgendarIntimacoes:', err));
+  // 🛰 Varredura DataJud: movimentações da carteira via API pública do CNJ
+  // (silencioso, no máx. 1x a cada 20h, lotes de 150 — só toast se achar novidade).
+  datajudVarrerCarteira({ silencioso: true }).catch(err => console.warn('datajudVarrerCarteira:', err));
 
   // Load settings
   state.settings.theme = await DB.getSetting('theme', 'light');
