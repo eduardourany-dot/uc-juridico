@@ -1,6 +1,6 @@
 # UC Jurídico — Handoff de Sessão
 
-> Documento vivo. Atualizado a cada virada de dia ou troca de dispositivo. **Última atualização:** 2026-06-29.
+> Documento vivo. Atualizado a cada virada de dia ou troca de dispositivo. **Última atualização:** 2026-07-05.
 
 ---
 
@@ -16,7 +16,11 @@
 
 ### ▶️ Próxima sessão
 
-**B1+B2+B3 ✅ concluídos (v6.88.0 e v6.89.0)** — bloco B de vitórias rápidas quase todo entregue (restam B4 WhatsApp e B5 afinamentos). Próximos da fila: **B4 (botão WhatsApp por processo, horas)** e **B5 (afinamentos do épico Prazos)**, ou pular pro **C1 (tarefas genéricas com delegação)**. Plano completo em `docs/ROADMAP.md`. Decisões pendentes do titular: **E1 reativar e-mails — agora é um CLIQUE no painel** (Configurações → Sincronização → 🔔, marcar "E-mails ativos"; já reativa no modo digest) e E2 piloto de descoberta por OAB ~R$ 50–250/mês.
+**Estado ao encerrar 05/07:** produção rodando no **Firebase Hosting** (`uc-juridico.web.app`, v6.89.0, login validado); blocos A e B1-B3 concluídos; épico Prazos inteiro no ar.
+
+Na fila (escolha do titular): **desenvolvimento** — B4 (WhatsApp, horas) · C1 (tarefas com delegação) · C8 (segmentador de autos, recomendado) — **ou fechar a migração Google** — passo ② `firebase init hosting:github` (deploy automático; até lá, publicar = `git pull` + `firebase deploy --only hosting`) e passo ③ domínio + DNS (⚠️ conferir zona DNS/MX antes de cancelar a LOCAWEB — runbook `docs/RUNBOOK_migracao_google.md`).
+
+Decisões pendentes do titular: **E1 reativar e-mails — um clique no painel 🔔** (Configurações → Sincronização; já volta no modo digest) · E2 piloto de descoberta por OAB ~R$ 50–250/mês. Lembrete pra equipe: endereço novo é `uc-juridico.web.app` (reinstalar o PWA no celular por ele).
 
 ### 🔔 B2+B3 — Digest diário + painel de notificações (v6.89.0, sessão 30/06)
 
