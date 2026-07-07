@@ -115,6 +115,14 @@ Sessão dedicada a transformar o módulo de Prazos no centro operacional do escr
 
 ---
 
+## 🗂 Contexto: spec "Organizador de Documentos Jurídicos" (parecer arquivado, jun-jul/2026)
+
+O titular trouxe de outra conversa (Claude in Chrome) uma spec de organizador de documentos com IA, derivada da **análise funcional limpa de um produto de terceiros** ("Organizador Jurídico", i.am v0.15.0 — sem código proprietário, só comportamento observável). **Decisão: descartar a arquitetura** (Next.js/PostgreSQL/Redis/multi-tenant/medição por páginas/BYOK — características herdadas do produto espiado, não requisitos do escritório) **e incorporar a funcionalidade** como módulos do UC:
+
+- **C7 Organizador do Drive** e **C8 Segmentador de autos** registrados no ROADMAP (bloco C) com escopo completo.
+- **Material aproveitado da spec**: fluxo em 4 etapas (envio→IA→revisão humana obrigatória→aplicar); taxonomia de 11 tipos de peça; prompts de classificação e de segmentação por `[PÁGINA N]` com intervalos de páginas; threshold de confiança 0,7 pra destaque na revisão; JSON validável + temperatura baixa; falha de um item não derruba o lote; relatório de processamento; minimização do que vai pra IA de terceiros.
+- Encaixe no stack real: Drive (arquivos) + Gemini/Claude via Apps Script (classificação) + tela de revisão no app (padrão 🤖 já consagrado). Custo de infra: zero.
+
 ## 🧱 Contexto: redesign do módulo Prazos (parecer arquivado)
 
 Foi avaliada uma spec externa de redesign do módulo Prazos (event sourcing + outbox em PostgreSQL, de conversa antiga que assumia v4.2.2). **Decisão: descartada a adoção literal** — incompatível com o stack (Firestore/Apps Script, sem banco relacional nem servidor pra triggers/workers) e ~70% já existia. **4 conceitos aproveitados e hoje implementados** no épico Prazos:
