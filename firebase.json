@@ -3,6 +3,7 @@
     "rules": "firestore.rules"
   },
   "hosting": {
+    "site": "uc-juridico",
     "public": ".",
     "ignore": [
       "firebase.json",
