@@ -1,7 +1,7 @@
 # UC Jurídico — Roadmap & Backlog
 
 > Última atualização: **29/06/2026** (fim do dia — plano oficial consolidado após análise de mercado)
-> Código em `main`/`sandbox`: **v6.87.1** (+ `Lembretes.gs` consolidado, e-mails suspensos por kill-switch)
+> Código em `main`/`sandbox`: **v6.89.0** · **produção em dia** (LOCAWEB + Apps Script deployados em 05/07) · e-mails suspensos via painel 🔔
 > Hospedagem: LOCAWEB (`uc.uranydecastro.adv.br`, upload manual) + GitHub Pages (auto-build de `main`)
 
 ---
@@ -14,18 +14,18 @@
 - Cron DJEN diário → push FCM · MNI.5 (protocolo SOAP TJGO Projudi)
 - Agenda com Google Calendar + Meet (auto-convidados + RSVP)
 
-**Pronto no código, ⏳ aguardando deploy manual:**
-- Épico **Prazos** (v6.85 → v6.87.1): Kanban + máquina de estados, fatal interna, auto-agendamento 🤖, Agenda como centro de controle, sync Google Calendar, e-mails consolidados por processo + **kill-switch de e-mail LIGADO** (suspensão a pedido do titular até segunda ordem)
+**Em produção desde 05/07 (épico completo no ar):**
+- Épico **Prazos** (v6.85 → v6.89.0): Kanban + máquina de estados, fatal interna, auto-agendamento 🤖, Agenda como centro de controle, sync Google Calendar, e-mails consolidados, **varredura DataJud**, **digest diário** e **painel de notificações 🔔** (e-mails seguem suspensos por padrão — reativar é um clique no painel, decisão E1 do titular)
 
 **Posição competitiva (análise de mercado 29/06):** o UC está em pé de igualdade ou à frente de Astrea/Projuris/ADVBOX/EasyJur em captura de intimações, cálculo auditável de prazos, IA e peticionamento MNI — a custo ~zero vs R$ 1.350–2.700/mês que um SaaS custaria pros 9 usuários. Os gaps reais estão listados no plano abaixo.
 
 ---
 
-## ⏳ BLOCO A — Pronto no código, só falta ativar (minutos, R$ 0)
+## ✅ BLOCO A — Deploys concluídos (05/07)
 
-- [ ] **A1. LOCAWEB (FileZilla)** — subir `index.html` + `service-worker.js` (v6.87.1). Conferir rodapé `v6-87-1`. *(`api.js` não mudou.)*
-- [ ] **A2. Apps Script** — colar `backend/Lembretes.gs` (e-mail consolidado + kill-switch; a suspensão dos e-mails só vale de fato após colar).
-- [ ] **A3. Apps Script (verificar)** — Google Calendar API habilitada em Serviços (Meet já usa; necessária pro sync de prazos).
+- [x] **A1. LOCAWEB** — v6.89.0 no ar (`index.html` + `service-worker.js`).
+- [x] **A2. Apps Script** — `Lembretes.gs` recolado (consolidado + digest + painel 🔔).
+- [x] **A3. Apps Script** — Google Calendar API verificada.
 
 ---
 
@@ -35,9 +35,9 @@
 
 | # | Item | Esforço | Notas |
 |---|---|---|---|
-| B1 | ✅ **Varredura DataJud da carteira** (**v6.88.0**) — boot diário (silencioso) + botão em Configurações→MNI; consulta a API pública do CNJ (91 tribunais) pra cada processo ativo >7d sem sync e importa movimentos dos últimos 90d como eventos (dedupe idempotente) | feito 30/06 | Lotes de 150, ~85 req/min, relatório clicável. ⏳ ativa junto com o deploy da LOCAWEB (A1) |
-| B2 | ✅ **E-mail em formato digest** (**v6.89.0**) — resumo diário por advogado após a hora configurada (default 7h), agrupado por processo (Parte·Providência·Situação·Prazo, inclui sem-ACK); individuais só T-0/FATAL/escalonamento; anti-dup por dia | feito 30/06 | ⏳ ativa ao colar `Lembretes.gs`. Reativação dos e-mails (E1) já nasce no formato digest |
-| B3 | ✅ **Painel de notificações no app** (**v6.89.0**) — Configurações→Sincronização→🔔: kill-switch de e-mail (um clique!), modo digest/porMarco, hora, marcos, opt-out push/e-mail por advogado. Backend lê `settings/notifConfig` a cada ciclo (≤30 min, sem recolar código) | feito 30/06 | ⏳ ativa com LOCAWEB (painel) + `Lembretes.gs` (leitura) |
+| B1 | ✅ **Varredura DataJud da carteira** (**v6.88.0**) — boot diário (silencioso) + botão em Configurações→MNI; consulta a API pública do CNJ (91 tribunais) pra cada processo ativo >7d sem sync e importa movimentos dos últimos 90d como eventos (dedupe idempotente) | feito 30/06 | Lotes de 150, ~85 req/min, relatório clicável. ✅ em produção 05/07 |
+| B2 | ✅ **E-mail em formato digest** (**v6.89.0**) — resumo diário por advogado após a hora configurada (default 7h), agrupado por processo (Parte·Providência·Situação·Prazo, inclui sem-ACK); individuais só T-0/FATAL/escalonamento; anti-dup por dia | feito 30/06 | ✅ em produção 05/07. Reativação dos e-mails (E1) já nasce no formato digest |
+| B3 | ✅ **Painel de notificações no app** (**v6.89.0**) — Configurações→Sincronização→🔔: kill-switch de e-mail (um clique!), modo digest/porMarco, hora, marcos, opt-out push/e-mail por advogado. Backend lê `settings/notifConfig` a cada ciclo (≤30 min, sem recolar código) | feito 30/06 | ✅ em produção 05/07 |
 | B4 | **Botão WhatsApp por processo** — link `wa.me` com mensagem pronta (andamento + prazo) pro cliente | horas | Sem custo de API. Automação total (Meta API) fica pra depois, se valer |
 | B5 | **Afinamentos do épico Prazos** — badges de dias da lista alinhados ao cálculo novo; avaliar consolidar push por processo; silenciar lembrete Google quando a régua do app já cobra | horas | Dívidas pequenas registradas no HANDOFF |
 

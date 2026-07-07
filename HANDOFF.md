@@ -9,7 +9,7 @@
 | Item | Valor |
 |---|---|
 | **Versão no código (`main`/`sandbox`)** | `v6.89.0` (B1 DataJud + B2 digest + B3 painel de notificações) |
-| **Versão em produção (LOCAWEB)** | `v6.86.0` — ⏳ **v6.89.0 pendente de upload** (e `Lembretes.gs` de recolagem) |
+| **Versão em produção (LOCAWEB)** | `v6.89.0` ✅ **em dia com o código** (deploys concluídos em 05/07, incl. `Lembretes.gs`) |
 | **Branches** | `main` = `sandbox` = `claude/continuidade-aaq0lh` (em sincronia, fast-forward) |
 | **Working tree** | Limpo |
 | **Repositório** | https://github.com/eduardourany-dot/uc-juridico |
@@ -34,15 +34,11 @@
 
 ### ⛔ E-mails de lembrete SUSPENSOS (até segunda ordem)
 
-Por decisão do titular (jun/2026), os e-mails do backend estão **desligados** enquanto o sistema de prazos não está 100% operante (estavam só lotando as caixas). Interruptor: `const EMAILS_SUSPENSOS = true;` no topo da seção de e-mail do `backend/Lembretes.gs`. **O push continua normal.** Pra **reativar**: trocar para `false` e recolar o `Lembretes.gs` no Apps Script (ou pedir ao Claude).
+Por decisão do titular (jun/2026), os e-mails do backend estão **desligados** enquanto o sistema de prazos não está 100% operante. **O push continua normal.** Desde a v6.89.0 o interruptor vive no painel: **Configurações → Sincronização → 🔔 Notificações → marcar "E-mails ativos"** (vale em ≤30 min; já reativa no modo digest). Não precisa mais mexer em código nem recolar arquivo.
 
-### ⏳ Pendências de ação manual (fazer pra colocar o épico Prazos no ar)
+### ✅ Deploys em dia (bloco A concluído em 05/07)
 
-1. **LOCAWEB (FileZilla)** — subir `index.html` + `service-worker.js` (v6.87.1). Conferir rodapé `v6-87-1`. *(`api.js` não mudou desde o último upload.)*
-2. **Apps Script ("UC Juridico Backend")** — colar `backend/Lembretes.gs` (e-mail consolidado por processo + fatal interna/FATAL/sem-ACK).
-3. **Apps Script (só verificar)** — Google Calendar API habilitada em Serviços (já usada pelo Meet; provável que sim) — necessária pro sync de prazos → Google Calendar.
-
-As três são independentes. Sem (1) a Agenda/Kanban novos não aparecem; sem (2) os e-mails continuam saindo um por parte.
+LOCAWEB na **v6.89.0** + `Lembretes.gs` recolado + Calendar API verificada. **Nenhuma pendência de deploy.** Todo o épico Prazos (v6.85→v6.89) está em produção: Kanban, fatal interna, auto-agendamento 🤖, Agenda como centro de controle, sync Google, varredura DataJud, digest e painel 🔔.
 
 ### Onde está rodando
 
@@ -106,7 +102,7 @@ Sessão dedicada a transformar o módulo de Prazos no centro operacional do escr
 
 | # | Prio | Tarefa | Estado |
 |---|---|---|---|
-| 44 | P3 | Kanban de prazos + máquina de estados + épico Prazos | ✅ implementado (v6.85→v6.87.1) — ⏳ deploy manual pendente |
+| 44 | P3 | Kanban de prazos + máquina de estados + épico Prazos | ✅ **em produção** (v6.85→v6.89.0, deploy 05/07) |
 | 34 | P3 | Petição IA: fila de revisão do advogado | pendente |
 | — | ⭐ | Calculadora Fase 2 (tab Fiscal, histórico, export) | pendente |
 | — | ⭐ | Relatórios automáticos pro cliente | pendente |
