@@ -58,7 +58,7 @@
 
 | # | Item | Notas |
 |---|---|---|
-| D1 | **Deploy automático** — Firebase Hosting/CF Pages no push (aposenta FileZilla) + backend em Cloud Functions (aposenta colar-no-Apps-Script) | **Destrava todo o resto**: hoje correção urgente espera ação manual (caso dos e-mails em 29/06) |
+| D1 | 🔶 **Deploy automático** — frontend PRONTO: Firebase Hosting configurado + workflow no push (decisão de migrar pro Google, 05/07 — ver `docs/RUNBOOK_migracao_google.md`; faltam 3 passos manuais: 1º deploy, secret, DNS). Parte 2 pendente: backend Apps Script → Cloud Functions | LOCAWEB descontinuada. ⚠️ conferir zona DNS/MX antes de cancelar |
 | D2 | **Testes no repositório + CI** — modularizar `index.html` (Vite, sem framework) pra commitar os testes (73 casos escritos em 29/06 viveram fora do repo) | Reduz custo de toda mudança futura |
 | D3 | **Um único host de produção** — encerrar dualidade GitHub Pages legado vs LOCAWEB | Decidir junto com D1 |
 

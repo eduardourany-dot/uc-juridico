@@ -40,10 +40,15 @@ Por decisão do titular (jun/2026), os e-mails do backend estão **desligados** 
 
 LOCAWEB na **v6.89.0** + `Lembretes.gs` recolado + Calendar API verificada. **Nenhuma pendência de deploy.** Todo o épico Prazos (v6.85→v6.89) está em produção: Kanban, fatal interna, auto-agendamento 🤖, Agenda como centro de controle, sync Google, varredura DataJud, digest e painel 🔔.
 
+### 🚚 Migração pro ecossistema Google (decisão do titular, 05/07)
+
+**LOCAWEB descontinuada — sem mais uploads manuais.** Produção migra pro **Firebase Hosting** (projeto `uc-juridico`), com deploy automático a cada push em `main`. Já commitados: `firebase.json` (seção hosting) + workflow `.github/workflows/firebase-hosting.yml`. **Passos manuais restantes** (runbook completo em `docs/RUNBOOK_migracao_google.md`): ① `firebase deploy --only hosting` (primeiro deploy → `uc-juridico.web.app`); ② `firebase init hosting:github` (liga o deploy automático); ③ domínio `uc.uranydecastro.adv.br` no console + DNS. ⚠️ **Antes de cancelar a LOCAWEB**: conferir se a ZONA DNS do domínio está lá — se estiver, migrar a zona (Cloudflare/registro.br) preservando os **MX do Workspace**, senão derruba site E e-mails.
+
 ### Onde está rodando
 
-- 🌐 **Produção LOCAWEB** (profissional): https://uc.uranydecastro.adv.br/ — *requer upload manual via FileZilla pra refletir cada nova versão*
-- 🌐 **Produção GitHub Pages** (legado, paralelo): https://eduardourany-dot.github.io/uc-juridico/ — auto-build do branch `main`
+- 🌐 **Firebase Hosting** (produção nova): `https://uc-juridico.web.app` — deploy automático no push em `main` (após passos ①/②) · domínio `uc.uranydecastro.adv.br` em migração
+- 🌐 **LOCAWEB** (descontinuada): https://uc.uranydecastro.adv.br/ — congelada na v6.89.0 até o DNS migrar
+- 🌐 **GitHub Pages** (espelho): https://eduardourany-dot.github.io/uc-juridico/ — auto-build de `main`, sempre atualizado
 - 🌐 **Staging** (Cloudflare Pages): `*.pages.dev` — ambiente de testes
 
 ### Stack & infra
@@ -165,8 +170,9 @@ Sempre `git pull` antes de começar e `git push` antes de parar. Se der conflito
 
 | Camada | Como |
 |---|---|
-| **GitHub Pages** | Automático no push pra `main` |
-| **LOCAWEB** | Manual via FileZilla — subir os arquivos alterados (`index.html`, `service-worker.js`, `api.js`) do raw de `main` |
+| **Firebase Hosting** (produção) | Automático no push pra `main` (workflow `firebase-hosting.yml`; requer secret — ver runbook) · manual: `firebase deploy --only hosting` |
+| **GitHub Pages** (espelho) | Automático no push pra `main` |
+| **LOCAWEB** | ⛔ descontinuada (05/07) — não subir mais nada |
 | **Apps Script** | Manual — colar o conteúdo de `backend/*.gs` no editor "UC Juridico Backend" e salvar |
 | **Firestore Rules** | `firebase deploy --only firestore:rules` (precisa `firebase login`) |
 | **Cloud Functions / Workers** | Deploy próprio (gcloud / wrangler / vercel) quando mudarem |

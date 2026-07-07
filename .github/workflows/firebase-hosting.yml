@@ -1,0 +1,26 @@
+# Deploy automático do UC Jurídico no Firebase Hosting a cada push em main.
+# Substitui o upload manual via FileZilla na LOCAWEB (descontinuada em jul/2026).
+#
+# Requisito único (uma vez): secret FIREBASE_SERVICE_ACCOUNT_UC_JURIDICO no
+# GitHub (Settings → Secrets → Actions), com o JSON de uma service account do
+# projeto uc-juridico com papel "Firebase Hosting Admin". O jeito mais fácil de
+# criar tudo é rodar `firebase init hosting:github` no terminal local — ele
+# cria a service account e grava o secret sozinho.
+name: Deploy Firebase Hosting
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: FirebaseExtended/action-hosting-deploy@v0
+        with:
+          repoToken: ${{ secrets.GITHUB_TOKEN }}
+          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_UC_JURIDICO }}
+          projectId: uc-juridico
+          channelId: live
