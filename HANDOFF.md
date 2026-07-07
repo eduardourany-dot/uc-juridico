@@ -42,7 +42,7 @@ LOCAWEB na **v6.89.0** + `Lembretes.gs` recolado + Calendar API verificada. **Ne
 
 ### 🚚 Migração pro ecossistema Google (decisão do titular, 05/07)
 
-**LOCAWEB descontinuada — sem mais uploads manuais.** Produção migra pro **Firebase Hosting** (projeto `uc-juridico`), com deploy automático a cada push em `main`. Já commitados: `firebase.json` (seção hosting) + workflow `.github/workflows/firebase-hosting.yml`. **Passos manuais restantes** (runbook completo em `docs/RUNBOOK_migracao_google.md`): ① `firebase deploy --only hosting` (primeiro deploy → `uc-juridico.web.app`); ② `firebase init hosting:github` (liga o deploy automático); ③ domínio `uc.uranydecastro.adv.br` no console + DNS. ⚠️ **Antes de cancelar a LOCAWEB**: conferir se a ZONA DNS do domínio está lá — se estiver, migrar a zona (Cloudflare/registro.br) preservando os **MX do Workspace**, senão derruba site E e-mails.
+**LOCAWEB descontinuada — sem mais uploads manuais.** Produção migrou pro **Firebase Hosting** (projeto `uc-juridico`). ① **✅ Primeiro deploy concluído em 05/07** (máquina do Marco, login `eduardourany@`): **https://uc-juridico.web.app no ar** (v6.89.0, 52 arquivos). **Passos restantes** (runbook em `docs/RUNBOOK_migracao_google.md`): ② `firebase init hosting:github` (liga o deploy automático no push — até lá, publicar = `git pull` + `firebase deploy --only hosting` na pasta do projeto); ③ domínio `uc.uranydecastro.adv.br` no console + DNS. ⚠️ **Antes de cancelar a LOCAWEB**: conferir se a ZONA DNS do domínio está lá — se estiver, migrar a zona (Cloudflare/registro.br) preservando os **MX do Workspace**, senão derruba site E e-mails.
 
 ### Onde está rodando
 
