@@ -52,7 +52,7 @@
 | C5 | **BI gerencial** — rentabilidade por cliente/área, produtividade por advogado, mapa de calor de prazos | ~1-2 dias/painel | Dados já existem |
 | C6 | **Timesheet + faturamento por hora** | ~2 dias | **Só se** o escritório passar a cobrar por hora; senão pular |
 | C7 | **Organizador de documentos do Drive** (evolui o P7) — lote de arquivos → IA classifica (taxonomia de 11 tipos de peça) e propõe nome padronizado `{CNJ}_{tipo}_{data}` + pasta do processo → revisão no app (padrão 🤖) → Apps Script aplica via Drive API + relatório | ~2-3 dias · R$ 0 | Fluxo em 4 etapas (envio→IA→revisão→aplicar) e prompts vindos do parecer "Organizador Jurídico" (ver HANDOFF). Confiança <0,7 destacada na revisão; falha de um arquivo não derruba o lote |
-| C8 | **Segmentador de autos** — PDF consolidado (Projudi/PJe) → IA gera índice de peças com intervalos `[PÁGINA N]` → revisão (ajustar cortes/renomear) → salva peças separadas na pasta do processo no Drive | ~2-4 dias · R$ 0 | A "joia" do parecer: dor real do dia a dia. Blocos com sobreposição pra autos gigantes; base: import de PDF que já existe no app |
+| C8 | ✅ **Segmentador de autos** (**v6.91.0**) — botão "✂️ Segmentar autos" nas Ações do processo: PDF consolidado → IA propõe índice de peças (`[PÁGINA N]`, taxonomia de 11 tipos) → revisão editável obrigatória → pdf-lib recorta e baixa cada peça + índice vira nota | feito 06/07 | Reusa a action gerarPeticaoIA (zero backend novo). Evolução futura: salvar peças direto no Drive (junto do C7) |
 
 ### BLOCO D — Infraestrutura (a dor operacional crônica)
 

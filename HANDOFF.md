@@ -16,9 +16,15 @@
 
 ### ▶️ Próxima sessão
 
-**Estado ao encerrar 06/07:** código em **v6.90.0** (⏳ publicar = `git pull` + `firebase deploy --only hosting`, até o passo ② da migração sair); **bloco B 100% concluído**. Próximos da fila: **C1 (tarefas com delegação)** · **C8 (segmentador de autos, recomendado)** · C7 (organizador do Drive) — ou fechar a migração Google (passos ② e ③, runbook `docs/RUNBOOK_migracao_google.md`; ⚠️ zona DNS/MX antes de cancelar a LOCAWEB).
+**Estado ao encerrar 06/07:** código em **v6.91.0** (⏳ publicar = `git pull` + `firebase deploy --only hosting`, até o passo ② da migração sair); **bloco B 100% + C8 concluídos**. Próximos da fila: **C1 (tarefas com delegação)** · C7 (organizador do Drive) — ou fechar a migração Google (passos ② e ③, runbook `docs/RUNBOOK_migracao_google.md`; ⚠️ zona DNS/MX antes de cancelar a LOCAWEB).
 
 Decisões pendentes do titular: **E1 reativar e-mails — um clique no painel 🔔** · E2 piloto de descoberta por OAB ~R$ 50–250/mês.
+
+### ✂️ C8 — Segmentador de autos (v6.91.0, sessão 06/07)
+
+- Botão "✂️ Segmentar autos (PDF)" nas Ações do processo. Pipeline: pdf.js extrai texto por página → IA segmenta em blocos de ~100k chars com `[PÁGINA N]` absolutos e sobreposição de 2 págs (via **action `gerarPeticaoIA` existente** com `modeloPromptSistema` próprio — zero backend novo) → `_segReconciliarPecas` funde os blocos (dedupe, corte de overlap, buracos viram "outros", cobertura total garantida) → **modal de revisão editável** (título/categoria/cortes; sobreposição bloqueada) → pdf-lib recorta e baixa `NN - Título (pX-Y).pdf` → índice auditável salvo como nota do processo.
+- Guardas: PDF escaneado sem camada de texto (<40% das págs com texto) aborta com orientação de OCR; só o TEXTO vai à IA; bloco com JSON inválido é pulado sem derrubar o lote; confiança <70% destacada em âmbar na revisão.
+- Testes: 18 casos (parser JSON com fences, reconciliação — buracos/duplicatas/overlap/clamp, blocos com sobreposição e marcadores absolutos, sanitização de nome) + parse global.
 
 ### 💬 B4+B5 — WhatsApp + afinamentos (v6.90.0, sessão 06/07)
 

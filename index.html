@@ -4851,6 +4851,7 @@ ${/* Card 'Parte adversa (manual)' removido em v6.64.20 — info de partes/advog
         <button class="btn btn-outline" onclick="copyProcessToClaude()">📋 Copiar contexto p/ Claude</button>
         <button class="btn btn-outline" onclick="generateProcessFiche()">📜 Gerar ficha (Word)</button>
         <button class="btn btn-outline" onclick="whatsappClienteFlow()" title="Abre o WhatsApp com uma mensagem de atualização pronta (editável) pro cliente — nada é enviado sem sua revisão">💬 WhatsApp pro cliente</button>
+        <button class="btn btn-outline" onclick="segmentarAutosFlow()" title="PDF consolidado do Projudi/PJe → IA identifica as peças (petição, decisão, laudo…) → você revisa os cortes → baixa cada peça separada + índice nas notas">✂️ Segmentar autos (PDF)</button>
         ${p.risco ? `<button class="btn btn-outline" onclick="gerarRelatorioAuditoriaIndividualFlow('${p.id}')" title="Gerar relatório técnico-jurídico para auditoria externa (CPC 25/IAS 37)">🏛 Relatório auditoria</button>` : ''}
       </div>
       <div class="grid gap-2 mt-3" style="grid-template-columns: 1fr 1fr;">
@@ -7045,6 +7046,287 @@ async function whatsappClienteFlow() {
     ? `https://wa.me/${num}?text=${encodeURIComponent(msg.trim())}`
     : `https://api.whatsapp.com/send?text=${encodeURIComponent(msg.trim())}`;
   window.open(url, '_blank');
+}
+
+// ====================================================================
+// C8 — Segmentador de autos: PDF consolidado → peças separadas
+// ====================================================================
+// Fluxo em 4 etapas com revisão humana obrigatória (parecer jul/2026):
+//   1. Upload do PDF consolidado (Projudi/PJe) no contexto do processo.
+//   2. pdf.js extrai o texto página a página; o texto vai à IA em blocos
+//      com marcadores [PÁGINA N], pela action gerarPeticaoIA já existente
+//      (prompt de sistema próprio de SEGMENTAÇÃO → JSON validável).
+//   3. Modal de revisão: títulos, categorias e cortes editáveis.
+//   4. pdf-lib recorta os intervalos e baixa cada peça como PDF; o índice
+//      vira nota no processo (auditoria).
+// Privacidade: só o TEXTO extraído vai à IA. PDF escaneado sem camada de
+// texto é detectado e aborta com orientação de OCR.
+
+const SEG_TAXONOMIA = ['peticao_inicial', 'contestacao', 'procuracao', 'decisao_judicial', 'recurso', 'documento_pessoal', 'comprovante', 'contrato', 'laudo_pericia', 'correspondencia', 'outros'];
+const SEG_MAX_CHARS_BLOCO = 100000;  // ~50 págs densas por chamada
+const SEG_OVERLAP_PAGINAS = 2;       // sobreposição entre blocos (reconciliada depois)
+
+const SEG_PROMPT_SISTEMA =
+'Você é um assistente especializado em organização de autos judiciais e administrativos brasileiros. ' +
+'Sua tarefa é SEGMENTAR um documento consolidado nas peças que o compõem.\n' +
+'Regras obrigatórias:\n' +
+'- Responda SEMPRE e SOMENTE com um objeto JSON válido, sem texto antes ou depois, sem blocos de código markdown.\n' +
+'- Uma "peça" é um documento logicamente distinto (petição, decisão, despacho, procuração, laudo, comprovante, ofício...).\n' +
+'- Use os marcadores [PÁGINA N] pra delimitar. Intervalos NÃO podem se sobrepor; cubra o trecho inteiro, na ordem.\n' +
+'- O campo "confianca" (0.0 a 1.0) deve ser honesto: limite incerto = confiança baixa. Categoria incerta = "outros".\n' +
+'- Não emita opinião jurídica, não resuma o mérito. Apenas identifique e delimite.\n' +
+'Categorias válidas: ' + SEG_TAXONOMIA.join(', ') + '.\n' +
+'FORMATO EXATO DA RESPOSTA:\n' +
+'{"pecas":[{"titulo":"<curto e descritivo>","categoria":"<da lista>","pagina_inicial":<n>,"pagina_final":<n>,"confianca":<0..1>}],"observacao":"<alertas; vazio se nenhum>"}';
+
+// Parser robusto do JSON da IA — tolera code fences e texto acidental ao redor.
+function _segParseJson(texto) {
+  let s = String(texto || '').trim();
+  s = s.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '');
+  const ini = s.indexOf('{');
+  const fim = s.lastIndexOf('}');
+  if (ini < 0 || fim <= ini) return null;
+  try {
+    const obj = JSON.parse(s.slice(ini, fim + 1));
+    return (obj && Array.isArray(obj.pecas)) ? obj : null;
+  } catch (e) { return null; }
+}
+
+// Reconcilia as peças de todos os blocos: sanitiza, ordena, corta
+// sobreposições (a peça anterior vence) e preenche buracos como "outros"
+// — cobertura total garante que o recorte não perde página nenhuma.
+function _segReconciliarPecas(listas, totalPaginas) {
+  const brutas = [];
+  for (const lista of (listas || [])) {
+    for (const pc of (lista || [])) {
+      let ini = parseInt(pc.pagina_inicial, 10);
+      let fim = parseInt(pc.pagina_final, 10);
+      if (!Number.isFinite(ini) || !Number.isFinite(fim)) continue;
+      ini = Math.max(1, Math.min(totalPaginas, ini));
+      fim = Math.max(ini, Math.min(totalPaginas, fim));
+      brutas.push({
+        titulo: String(pc.titulo || 'Peça').trim().slice(0, 120) || 'Peça',
+        categoria: SEG_TAXONOMIA.includes(pc.categoria) ? pc.categoria : 'outros',
+        ini, fim,
+        confianca: Math.max(0, Math.min(1, Number(pc.confianca) || 0))
+      });
+    }
+  }
+  brutas.sort((a, b) => a.ini - b.ini || a.fim - b.fim);
+
+  const out = [];
+  let cursor = 0; // última página coberta
+  for (const pc of brutas) {
+    let { ini, fim } = pc;
+    if (fim <= cursor) continue;            // totalmente coberta (duplicata de bloco)
+    if (ini <= cursor) ini = cursor + 1;    // corta a sobreposição (anterior vence)
+    if (ini > cursor + 1) {                 // buraco antes desta peça
+      out.push({ titulo: 'Páginas ' + (cursor + 1) + '–' + (ini - 1) + ' (não classificadas)', categoria: 'outros', ini: cursor + 1, fim: ini - 1, confianca: 0 });
+    }
+    out.push({ ...pc, ini, fim });
+    cursor = fim;
+  }
+  if (totalPaginas > 0 && cursor < totalPaginas) {
+    out.push({ titulo: cursor === 0 ? 'Documento completo' : 'Páginas ' + (cursor + 1) + '–' + totalPaginas + ' (não classificadas)', categoria: 'outros', ini: cursor + 1, fim: totalPaginas, confianca: 0 });
+  }
+  return out;
+}
+
+// Fatia o array de textos por página em blocos pra IA, com sobreposição.
+// Cada item devolve { texto (com [PÁGINA N] absolutos), de, ate }.
+function _segMontarBlocos(paginas, maxChars, overlap) {
+  maxChars = maxChars || SEG_MAX_CHARS_BLOCO;
+  overlap = (overlap === undefined) ? SEG_OVERLAP_PAGINAS : overlap;
+  const blocos = [];
+  let i = 0;
+  while (i < paginas.length) {
+    let chars = 0, j = i;
+    const partes = [];
+    while (j < paginas.length && (chars === 0 || chars + paginas[j].length < maxChars)) {
+      partes.push('[PÁGINA ' + (j + 1) + ']\n' + paginas[j]);
+      chars += paginas[j].length + 14;
+      j++;
+    }
+    blocos.push({ texto: partes.join('\n\n'), de: i + 1, ate: j });
+    if (j >= paginas.length) break;
+    i = Math.max(i + 1, j - overlap);
+  }
+  return blocos;
+}
+
+function _segSanitizarNome(s) {
+  return String(s || 'Peça').replace(/[\\/:*?"<>|]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 80) || 'Peça';
+}
+
+async function segmentarAutosFlow() {
+  const p = state._processView?.p;
+  if (!p) { toast('Abra um processo primeiro', '', 'error'); return; }
+  if (typeof pdfjsLib === 'undefined' || typeof PDFLib === 'undefined') {
+    toast('Bibliotecas de PDF não carregadas', 'Verifique a conexão e recarregue o app.', 'error'); return;
+  }
+
+  // 1. Upload
+  const file = await new Promise(resolve => {
+    const inp = document.createElement('input');
+    inp.type = 'file'; inp.accept = '.pdf,application/pdf';
+    inp.onchange = () => resolve(inp.files[0] || null);
+    inp.click();
+  });
+  if (!file) return;
+  const bytes = new Uint8Array(await file.arrayBuffer());
+
+  const prog = _segProgressModal();
+  try {
+    // 2. Extração de texto página a página
+    prog.set('Lendo o PDF…');
+    const doc = await pdfjsLib.getDocument({ data: bytes.slice(0) }).promise;
+    const total = doc.numPages;
+    const paginas = [];
+    for (let i = 1; i <= total; i++) {
+      const page = await doc.getPage(i);
+      const tc = await page.getTextContent();
+      paginas.push(tc.items.map(it => it.str).join(' ').replace(/\s+/g, ' ').trim());
+      if (i % 10 === 0 || i === total) prog.set(`Extraindo texto… página ${i}/${total}`);
+    }
+    const comTexto = paginas.filter(t => t.length >= 30).length;
+    if (comTexto / total < 0.4) {
+      prog.close();
+      toast('PDF sem camada de texto', `Só ${comTexto} de ${total} páginas têm texto extraível — parece digitalização sem OCR. Passe OCR (ex.: Adobe/ilovepdf) e tente de novo.`, 'error');
+      return;
+    }
+
+    // 3. IA por blocos (marcadores absolutos → sem ajuste de offset)
+    const blocos = _segMontarBlocos(paginas);
+    const listas = [];
+    for (let b = 0; b < blocos.length; b++) {
+      prog.set(`Analisando com IA… bloco ${b + 1}/${blocos.length} (págs ${blocos[b].de}–${blocos[b].ate})`);
+      const resp = await DB.gerarPeticaoIA(
+        'Segmente o trecho de autos abaixo (páginas ' + blocos[b].de + ' a ' + blocos[b].ate + ' de ' + total + '):\n\n' + blocos[b].texto,
+        {},
+        { modeloPromptSistema: SEG_PROMPT_SISTEMA, tipo: 'segmentacao_autos', modeloApi: 'gemini-3-flash-preview' }
+      );
+      const obj = _segParseJson(resp?.conteudo);
+      if (obj) listas.push(obj.pecas);
+      else console.warn('[seg] bloco', b + 1, 'sem JSON válido — segue sem ele');
+    }
+    prog.close();
+    if (!listas.length) { toast('A IA não retornou segmentação válida', 'Tente novamente — se persistir, o documento pode estar ilegível.', 'error'); return; }
+
+    const pecas = _segReconciliarPecas(listas, total);
+
+    // 4. Revisão humana obrigatória
+    const revisadas = await _segModalRevisao(pecas, total, file.name);
+    if (!revisadas) return;
+
+    // 5. Recorte com pdf-lib + downloads
+    const prog2 = _segProgressModal();
+    const src = await PDFLib.PDFDocument.load(bytes);
+    for (let n = 0; n < revisadas.length; n++) {
+      const pc = revisadas[n];
+      prog2.set(`Gerando peça ${n + 1}/${revisadas.length}: ${pc.titulo}`);
+      const novo = await PDFLib.PDFDocument.create();
+      const idx = [];
+      for (let pg = pc.ini - 1; pg <= pc.fim - 1; pg++) idx.push(pg);
+      const pages = await novo.copyPages(src, idx);
+      pages.forEach(pg => novo.addPage(pg));
+      const out = await novo.save();
+      downloadBlob(new Blob([out], { type: 'application/pdf' }),
+        String(n + 1).padStart(2, '0') + ' - ' + _segSanitizarNome(pc.titulo) + ' (p' + pc.ini + '-' + pc.fim + ').pdf');
+      await new Promise(r => setTimeout(r, 350)); // respiro entre downloads
+    }
+    prog2.close();
+
+    // 6. Índice auditável como nota do processo
+    const indice = revisadas.map((pc, n) =>
+      `${String(n + 1).padStart(2, '0')}. ${pc.titulo} [${pc.categoria}] — págs ${pc.ini}–${pc.fim}${pc.confianca ? ' · conf. ' + Math.round(pc.confianca * 100) + '%' : ''}`).join('\n');
+    await DB.saveNote({
+      id: uid(), processId: p.id, eventId: null,
+      text: `✂️ Autos segmentados (${file.name}, ${total} págs → ${revisadas.length} peças):\n${indice}`,
+      createdAt: Date.now()
+    });
+    toast('✂️ Autos segmentados', `${revisadas.length} peça(s) baixada(s) + índice salvo nas notas do processo.`, 'success');
+    if (state.currentRoute === 'process') renderProcessDetail();
+  } catch (e) {
+    prog.close();
+    console.error('[segmentador]', e);
+    toast('Falha na segmentação', String(e?.message || e), 'error');
+  }
+}
+
+function _segProgressModal() {
+  const modal = document.createElement('div');
+  modal.className = 'modal-backdrop';
+  modal.innerHTML = `<div class="modal" style="max-width: 420px; text-align: center;">
+    <h3 class="modal-title">✂️ Segmentador de autos</h3>
+    <p id="_segProgTxt" class="help-text" style="margin: 12px 0;">Preparando…</p>
+    <div class="spinner" style="margin: 0 auto;"></div>
+  </div>`;
+  $('modalContainer').appendChild(modal);
+  return {
+    set(t) { const el = document.getElementById('_segProgTxt'); if (el) el.textContent = t; },
+    close() { modal.remove(); }
+  };
+}
+
+// Modal de revisão: tabela editável. Resolve com as peças confirmadas ou null.
+function _segModalRevisao(pecas, totalPaginas, nomeArquivo) {
+  return new Promise(resolve => {
+    const modal = document.createElement('div');
+    modal.className = 'modal-backdrop';
+    const linha = (pc, i) => `
+      <tr data-seg-row>
+        <td style="padding:4px;"><input class="input" data-seg-titulo value="${escapeHtml(pc.titulo)}" style="font-size:12px; padding:4px 6px;"></td>
+        <td style="padding:4px;"><select class="select" data-seg-cat style="font-size:11px; padding:4px;">${SEG_TAXONOMIA.map(c => `<option value="${c}" ${c === pc.categoria ? 'selected' : ''}>${c.replace(/_/g, ' ')}</option>`).join('')}</select></td>
+        <td style="padding:4px; white-space:nowrap;"><input type="number" data-seg-ini value="${pc.ini}" min="1" max="${totalPaginas}" style="width:62px; padding:4px;" class="input"> – <input type="number" data-seg-fim value="${pc.fim}" min="1" max="${totalPaginas}" style="width:62px; padding:4px;" class="input"></td>
+        <td style="padding:4px; text-align:center;"><span class="badge ${pc.confianca >= 0.7 ? 'badge-green' : 'badge-amber'}" style="font-size:9px;">${Math.round(pc.confianca * 100)}%</span></td>
+        <td style="padding:4px;"><button class="btn btn-ghost btn-sm" onclick="this.closest('tr').remove()" title="Remover esta peça (as páginas dela viram 'não classificadas' se ninguém cobrir)">🗑</button></td>
+      </tr>`;
+    modal.innerHTML = `
+      <div class="modal scroll-thin" style="max-width: 780px;">
+        <h3 class="modal-title">✂️ Revisão da segmentação — ${escapeHtml(nomeArquivo)}</h3>
+        <p class="help-text" style="margin-bottom: 10px;">${pecas.length} peça(s) propostas pela IA em ${totalPaginas} páginas. <strong>Revise antes de gerar</strong>: ajuste títulos, categorias e cortes de página. Confiança baixa (âmbar) merece atenção. Nada é gerado sem sua confirmação.</p>
+        <div style="overflow-x:auto;">
+        <table style="width:100%; border-collapse:collapse; font-size:12px;" id="_segTabela">
+          <tr style="border-bottom:2px solid var(--uc-line);">
+            <th style="text-align:left; padding:4px; font-size:10px; text-transform:uppercase; color:var(--uc-warm-gray);">Título da peça</th>
+            <th style="text-align:left; padding:4px; font-size:10px; text-transform:uppercase; color:var(--uc-warm-gray);">Categoria</th>
+            <th style="text-align:left; padding:4px; font-size:10px; text-transform:uppercase; color:var(--uc-warm-gray);">Páginas</th>
+            <th style="text-align:center; padding:4px; font-size:10px; text-transform:uppercase; color:var(--uc-warm-gray);">IA</th>
+            <th></th>
+          </tr>
+          ${pecas.map(linha).join('')}
+        </table>
+        </div>
+        <div class="flex gap-2 mt-3">
+          <button class="btn btn-outline" id="_segCancelar" style="flex:1;">Cancelar</button>
+          <button class="btn btn-primary" id="_segGerar" style="flex:2;">✂️ Gerar ${pecas.length} peça(s) em PDF</button>
+        </div>
+      </div>`;
+    $('modalContainer').appendChild(modal);
+    document.getElementById('_segCancelar').onclick = () => { modal.remove(); resolve(null); };
+    document.getElementById('_segGerar').onclick = () => {
+      const rows = [...modal.querySelectorAll('[data-seg-row]')];
+      const out = [];
+      for (const r of rows) {
+        const ini = parseInt(r.querySelector('[data-seg-ini]').value, 10);
+        const fim = parseInt(r.querySelector('[data-seg-fim]').value, 10);
+        if (!Number.isFinite(ini) || !Number.isFinite(fim) || ini < 1 || fim > totalPaginas || ini > fim) {
+          toast('Intervalo inválido', `Confira as páginas (1–${totalPaginas}, início ≤ fim).`, 'error'); return;
+        }
+        out.push({
+          titulo: r.querySelector('[data-seg-titulo]').value.trim() || 'Peça',
+          categoria: r.querySelector('[data-seg-cat]').value,
+          ini, fim, confianca: 1 // revisado por humano
+        });
+      }
+      if (!out.length) { toast('Nenhuma peça na lista', '', 'error'); return; }
+      out.sort((a, b) => a.ini - b.ini);
+      for (let i = 1; i < out.length; i++) {
+        if (out[i].ini <= out[i - 1].fim) { toast('Peças sobrepostas', `"${out[i - 1].titulo}" e "${out[i].titulo}" dividem páginas — ajuste os cortes.`, 'error'); return; }
+      }
+      modal.remove(); resolve(out);
+    };
+  });
 }
 
 async function copyProcessToClaude() {
