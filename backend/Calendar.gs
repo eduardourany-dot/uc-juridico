@@ -66,7 +66,13 @@ function _calMontarAttendees_(convidados) {
 }
 
 // Lembretes padrão se o cliente não passar nada.
+// B5.3 (jul/2026): array VAZIO explícito = evento SEM lembrete algum — usado
+// pelo toggle "lembretes do Google no prazo" do app pra evitar alerta em
+// dobro com a régua interna. null/undefined continua caindo nos defaults.
 function _calMontarReminders_(lembretes) {
+  if (Array.isArray(lembretes) && lembretes.length === 0) {
+    return { useDefault: false, overrides: [] };
+  }
   var overrides = [];
   if (Array.isArray(lembretes) && lembretes.length > 0) {
     for (var i = 0; i < lembretes.length; i++) {

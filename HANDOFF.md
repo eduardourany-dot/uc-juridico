@@ -16,11 +16,17 @@
 
 ### ▶️ Próxima sessão
 
-**Estado ao encerrar 05/07:** produção rodando no **Firebase Hosting** (`uc-juridico.web.app`, v6.89.0, login validado); blocos A e B1-B3 concluídos; épico Prazos inteiro no ar.
+**Estado ao encerrar 06/07:** código em **v6.90.0** (⏳ publicar = `git pull` + `firebase deploy --only hosting`, até o passo ② da migração sair); **bloco B 100% concluído**. Próximos da fila: **C1 (tarefas com delegação)** · **C8 (segmentador de autos, recomendado)** · C7 (organizador do Drive) — ou fechar a migração Google (passos ② e ③, runbook `docs/RUNBOOK_migracao_google.md`; ⚠️ zona DNS/MX antes de cancelar a LOCAWEB).
 
-Na fila (escolha do titular): **desenvolvimento** — B4 (WhatsApp, horas) · C1 (tarefas com delegação) · C8 (segmentador de autos, recomendado) — **ou fechar a migração Google** — passo ② `firebase init hosting:github` (deploy automático; até lá, publicar = `git pull` + `firebase deploy --only hosting`) e passo ③ domínio + DNS (⚠️ conferir zona DNS/MX antes de cancelar a LOCAWEB — runbook `docs/RUNBOOK_migracao_google.md`).
+Decisões pendentes do titular: **E1 reativar e-mails — um clique no painel 🔔** · E2 piloto de descoberta por OAB ~R$ 50–250/mês.
 
-Decisões pendentes do titular: **E1 reativar e-mails — um clique no painel 🔔** (Configurações → Sincronização; já volta no modo digest) · E2 piloto de descoberta por OAB ~R$ 50–250/mês. Lembrete pra equipe: endereço novo é `uc-juridico.web.app` (reinstalar o PWA no celular por ele).
+### 💬 B4+B5 — WhatsApp + afinamentos (v6.90.0, sessão 06/07)
+
+- **B4**: botão "💬 WhatsApp pro cliente" nas Ações do processo — resolve o cliente vinculado (`clienteId`/`clienteIds`/nome legado), monta mensagem com o último andamento, modal com telefone e texto **editáveis**, abre `wa.me` (nada é enviado sem revisão). `_telefoneParaWa` normaliza DDD→55.
+- **B5.1**: contagem de dias dos prazos alinhada ao dia-calendário (`_diaFatalLocal`) em 5 pontos: linha de prazo do processo, lista de publicações, `recomputarStatusVisual`, agenda e pacote-Claude. Fatal hoje ao meio-dia não aparece mais como "1d".
+- **B5.3**: toggle "lembretes do próprio Google no evento do prazo" (Settings→Sincronização, default ligado). Desligado → evento criado SEM alarme do Google (evita dobro com a régua). `Calendar.gs` atualizado pra aceitar `lembretes: []` = silêncio — **recolagem do `Calendar.gs` só é necessária se alguém desligar o toggle** (default mantém comportamento atual).
+- **B5.2 (decisão)**: push permanece 1-por-prazo — o deep-link individual pro processo vale mais que a consolidação; FCM agrupa por tag e o e-mail já é consolidado/digest.
+- Testes: 12 casos (telefone→wa, gating de lembretes client, Calendar.gs [] vs null, 4 casos da contagem de dias) + parse global. O parse pegou um bug real de crase aninhada em template literal no help-text — corrigido.
 
 ### 🔔 B2+B3 — Digest diário + painel de notificações (v6.89.0, sessão 30/06)
 

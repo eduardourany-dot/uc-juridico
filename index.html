@@ -4850,6 +4850,7 @@ ${/* Card 'Parte adversa (manual)' removido em v6.64.20 — info de partes/advog
         ${/* "Adicionar publicação" removido — publicações entram via busca DJEN (auto-import); prazo agendado direto na publicação. */ ''}
         <button class="btn btn-outline" onclick="copyProcessToClaude()">📋 Copiar contexto p/ Claude</button>
         <button class="btn btn-outline" onclick="generateProcessFiche()">📜 Gerar ficha (Word)</button>
+        <button class="btn btn-outline" onclick="whatsappClienteFlow()" title="Abre o WhatsApp com uma mensagem de atualização pronta (editável) pro cliente — nada é enviado sem sua revisão">💬 WhatsApp pro cliente</button>
         ${p.risco ? `<button class="btn btn-outline" onclick="gerarRelatorioAuditoriaIndividualFlow('${p.id}')" title="Gerar relatório técnico-jurídico para auditoria externa (CPC 25/IAS 37)">🏛 Relatório auditoria</button>` : ''}
       </div>
       <div class="grid gap-2 mt-3" style="grid-template-columns: 1fr 1fr;">
@@ -5163,7 +5164,7 @@ async function djenShowFullPublicacaoFromDb(hash) {
 function renderDeadlineRow(d, p, compactInsidePub) {
   const today = new Date(); today.setHours(0,0,0,0);
   const dl = new Date(d.deadlineDate);
-  const days = Math.ceil((dl - today) / 86400000);
+  const days = Math.round((_diaFatalLocal(d.deadlineDate) - today) / 86400000);
   const visual = recomputarStatusVisual(d, today);
 
   // visual → cls (CSS) + label do badge + cor
@@ -6952,7 +6953,7 @@ function buildProcessClaudePackage(p, events, deadlines, notes, jurisprudence, p
     deadlines.filter(d => prazoEstaAtivo(d)).sort((a,b) => new Date(a.deadlineDate) - new Date(b.deadlineDate)).forEach(d => {
       const dl = new Date(d.deadlineDate);
       const today = new Date(); today.setHours(0,0,0,0);
-      const days = Math.ceil((dl - today) / 86400000);
+      const days = Math.round((_diaFatalLocal(d.deadlineDate) - today) / 86400000);
       md += `- **${d.description || d.type}** · vence ${formatDate(dl)} (${days >= 0 ? days + ' dias úteis' : 'VENCIDO há ' + Math.abs(days) + ' dias'})\n`;
     });
   }
@@ -6985,6 +6986,65 @@ function buildProcessClaudePackage(p, events, deadlines, notes, jurisprudence, p
     : DEFAULT_PROMPT_TEMPLATE.replace(/\[NÚMERO\]/g, p.cnj || '[NÚMERO]').replace(/\[ÁREA DO DIREITO\]/g, p.area || 'Direito Tributário');
   md += `\n\`\`\`\n`;
   return md;
+}
+
+// ====================================================================
+// B4 — WhatsApp pro cliente: mensagem pronta com o andamento do processo
+// ====================================================================
+// Versão leve decidida no roadmap: abre o WhatsApp (wa.me) com texto
+// pré-preenchido e EDITÁVEL — nada é enviado automaticamente; o advogado
+// revisa no modal e o envio final acontece no próprio WhatsApp. Telefone
+// vem do cliente vinculado (editável). Sem API paga/automação.
+function _telefoneParaWa(raw) {
+  let dig = String(raw || '').replace(/\D/g, '');
+  if (!dig) return '';
+  if ((dig.length === 10 || dig.length === 11) && dig.slice(0, 2) !== '55') dig = '55' + dig;
+  return dig;
+}
+
+async function whatsappClienteFlow() {
+  const view = state._processView || {};
+  const p = view.p;
+  if (!p) { toast('Abra um processo primeiro', '', 'error'); return; }
+
+  // Cliente vinculado: multi-cliente (clienteId/clienteIds) ou nome legado (p.client)
+  let cliente = null;
+  try {
+    const clientes = await DB.getAllClientes();
+    cliente = clientes.find(c => c.id === p.clienteId) ||
+              clientes.find(c => (p.clienteIds || []).includes(c.id)) ||
+              (p.client ? clientes.find(c => c.nome && _mniNormNome(c.nome) === _mniNormNome(p.client)) : null) || null;
+  } catch (e) { /* segue sem cliente — telefone fica em branco */ }
+
+  const nomeCliente = ((cliente && cliente.nome) || p.client || '').trim().split(' ')[0];
+  const evs = (view.events || []).filter(e => e.date).sort((a, b) => String(b.date).localeCompare(String(a.date)));
+  const ult = evs[0];
+  const meuEmail = (window.UC_Auth?.getUser?.() || {}).email || '';
+  const meuNome = ((typeof defaultAdvogado === 'function' ? defaultAdvogado(meuEmail) : '') || '').split(' ')[0];
+
+  const linhas = [
+    `Olá${nomeCliente ? ', ' + nomeCliente : ''}! ${meuNome ? 'Aqui é ' + meuNome + ', da' : 'Aqui é a equipe da'} Urany de Castro Advocacia.`,
+    ``,
+    `Atualização do seu processo${p.cnj ? ' ' + p.cnj : ''}:`,
+    ult
+      ? `📌 Último andamento (${formatDate(ult.date)}): ${djenTextoLegivel(ult.description || '').slice(0, 180)}`
+      : `📌 Seguimos acompanhando o processo de perto — sem movimentação nova relevante no período.`,
+    ``,
+    `Qualquer dúvida, estamos à disposição.`
+  ];
+
+  const r = await showModal('💬 WhatsApp pro cliente', [
+    { label: 'Telefone com DDD (vazio = escolher o contato no WhatsApp)', default: (cliente && cliente.telefone) || '', placeholder: '(62) 99999-9999' },
+    { label: 'Mensagem — revise antes de enviar', type: 'textarea', rows: 9, default: linhas.join('\n') }
+  ], { confirmLabel: 'Abrir WhatsApp', intro: 'Nada é enviado automaticamente: o WhatsApp abre com a mensagem pronta pra você conferir e mandar.' });
+  if (!r) return;
+  const [tel, msg] = r;
+  if (!msg || !msg.trim()) { toast('Mensagem vazia', '', 'error'); return; }
+  const num = _telefoneParaWa(tel);
+  const url = num
+    ? `https://wa.me/${num}?text=${encodeURIComponent(msg.trim())}`
+    : `https://api.whatsapp.com/send?text=${encodeURIComponent(msg.trim())}`;
+  window.open(url, '_blank');
 }
 
 async function copyProcessToClaude() {
@@ -7036,7 +7096,7 @@ async function renderDeadlines() {
   const enriched = deadlines.map(d => {
     const proc = processes.find(p => p.id === d.processId);
     const dl = new Date(d.deadlineDate);
-    const days = Math.ceil((dl - today) / 86400000);
+    const days = Math.round((_diaFatalLocal(d.deadlineDate) - today) / 86400000);
     return { ...d, processName: proc?.name || 'Processo removido', processCnj: proc?.cnj, days };
   });
   const active = enriched.filter(d => prazoEstaAtivo(d));
@@ -8092,9 +8152,9 @@ function recomputarStatusVisual(d, today) {
   if (d.status === STATUS_PRAZO.CANCELADO) return 'cancelado';
   if (d.status === STATUS_PRAZO.PERDIDO)   return 'perdido';
   if (d.status === STATUS_PRAZO.SUSPENSO)  return 'suspenso';
-  // pendente — deriva pela proximidade
-  const dl = new Date(d.deadlineDate);
-  const days = Math.ceil((dl - today) / 86400000);
+  // pendente — deriva pela proximidade (dia-calendário local, alinhado com a
+  // régua de marcos — B5.1: antes o ceil sobre timestamp ao meio-dia somava +1d)
+  const days = Math.round((_diaFatalLocal(d.deadlineDate) - today) / 86400000);
   if (days < 0)  return 'expirado';
   if (days <= 1) return 'iminente';
   if (days <= 7) return 'vincendo';
@@ -8385,7 +8445,10 @@ function _prazoGooglePayload(d, proc) {
     inicioISO: fatal.toISOString(),
     fimISO: fim.toISOString(),
     gerarMeet: false,
-    lembretes: [
+    // B5.3 — lembretes do próprio Google no evento do prazo. Desligável em
+    // Settings→Sincronização pra evitar alerta em dobro com a régua do app
+    // ([] explícito = evento SEM lembrete; requer Calendar.gs de jul/2026).
+    lembretes: (state.settings && state.settings.prazoGoogleLembretes === false) ? [] : [
       { method: 'email', minutes: 3 * 24 * 60 },
       { method: 'popup', minutes: 24 * 60 }
     ]
@@ -8474,6 +8537,14 @@ async function _prazoAutoGoogleLigado() {
   const v = !!(await DB.getSetting('prazoAutoGoogle', false));
   if (state.settings) state.settings.prazoAutoGoogle = v;
   return v;
+}
+
+async function setPrazoGoogleLembretes(on) {
+  state.settings = state.settings || {};
+  state.settings.prazoGoogleLembretes = !!on;
+  await DB.setSetting('prazoGoogleLembretes', !!on);
+  toast(on ? '🔔 Lembretes do Google ligados' : '🔕 Lembretes do Google desligados',
+    on ? 'Eventos de prazo levam e-mail 3d antes + popup 1d antes.' : 'Eventos novos de prazo saem SEM lembrete do Google — a régua do app segue cobrando. Vale pros próximos eventos criados/atualizados.', 'success');
 }
 
 async function setPrazoAutoGoogle(on) {
@@ -12477,7 +12548,7 @@ function _renderPrazoNaAgenda(d, procById, today) {
   const visual = recomputarStatusVisual(d, today);
   const dl = new Date(d.deadlineDate);
   dl.setHours(0,0,0,0);
-  const days = Math.ceil((dl - today) / 86400000);
+  const days = Math.round((_diaFatalLocal(d.deadlineDate) - today) / 86400000);
   let cor = '#4a7c4a', badgeClass = 'badge-green', label = days + 'd';
   if (visual === 'expirado') { cor = '#a8472d'; badgeClass = 'badge-red'; label = 'vencido há ' + Math.abs(days) + 'd'; }
   else if (visual === 'iminente') { cor = '#a8472d'; badgeClass = 'badge-red'; label = days === 0 ? 'HOJE' : 'AMANHÃ'; }
@@ -19157,10 +19228,15 @@ function renderSettingsTab(tab, prompts, defaultPromptId) {
           <input type="checkbox" ${state.settings?.prazoAutoGoogle ? 'checked' : ''} onchange="setPrazoAutoGoogle(this.checked)">
           Sincronizar automaticamente novos prazos da busca DJEN com o Google Calendar do escritório
         </label>
+        <label style="display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--uc-graphite); cursor: pointer; margin-top: 8px;">
+          <input type="checkbox" ${state.settings?.prazoGoogleLembretes === false ? '' : 'checked'} onchange="setPrazoGoogleLembretes(this.checked)">
+          Lembretes do próprio Google no evento do prazo (e-mail 3d antes + popup 1d antes)
+        </label>
         <p class="help-text mt-2">
-          Cria um evento simples (sem Meet) na data fatal, com lembrete por e-mail 3 dias antes e popup 1 dia antes.
-          Cumprir/cancelar/remover apaga o evento; recalcular a fatal atualiza. Para prazos já existentes (backlog),
-          use o botão <strong>📅</strong> em cada prazo na Agenda. Requer a Google Calendar API habilitada no Apps Script.
+          Cria um evento simples (sem Meet) na data fatal. Cumprir/cancelar/remover apaga o evento; recalcular a fatal atualiza.
+          Para prazos já existentes (backlog), use o botão <strong>📅</strong> em cada prazo na Agenda.
+          Desligue os lembretes do Google se os avisos estiverem <strong>em dobro</strong> com a régua do app (push/e-mail) —
+          o evento continua visível no calendário, só sem alarme próprio. <em>Silenciar requer o <code>Calendar.gs</code> de jul/2026 no Apps Script.</em>
         </p>
       </div>
       <div class="card" style="border-left: 3px solid var(--uc-gold);">
@@ -25346,6 +25422,7 @@ async function bootApp() {
   state.settings.lastBackupCloud = await DB.getSetting('lastBackup', null);
   state.settings.notificacoesAtivas = await DB.getSetting('notificacoesAtivas', true);
   state.settings.prazoAutoGoogle = await DB.getSetting('prazoAutoGoogle', false);
+  state.settings.prazoGoogleLembretes = await DB.getSetting('prazoGoogleLembretes', true);
   applyTheme(state.settings.theme);
   _updateThemeQuickToggleLabel();
   _iniciarRefreshSino();
