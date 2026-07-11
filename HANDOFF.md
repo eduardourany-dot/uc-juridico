@@ -16,9 +16,15 @@
 
 ### ▶️ Próxima sessão
 
-**Estado ao encerrar 06/07:** código em **v6.91.0** (⏳ publicar = `git pull` + `firebase deploy --only hosting`, até o passo ② da migração sair); **bloco B 100% + C8 concluídos**. Próximos da fila: **C1 (tarefas com delegação)** · C7 (organizador do Drive) — ou fechar a migração Google (passos ② e ③, runbook `docs/RUNBOOK_migracao_google.md`; ⚠️ zona DNS/MX antes de cancelar a LOCAWEB).
+**Estado ao encerrar 06/07:** código em **v6.92.0**; **bloco B 100% + C7 + C8 concluídos**. Pendências manuais: ① publicar frontend (`git pull` + `firebase deploy --only hosting`, até o passo ② da migração sair) e ② **recolar `Drive.gs` (arquivo NOVO) + `Codigo.gs` no Apps Script** (ativa o Organizador do Drive — sem isso o botão retorna "unknown_action"). Próximos da fila: **C1 (tarefas com delegação)** — ou fechar a migração Google (runbook `docs/RUNBOOK_migracao_google.md`; ⚠️ zona DNS/MX antes de cancelar a LOCAWEB).
 
 Decisões pendentes do titular: **E1 reativar e-mails — um clique no painel 🔔** · E2 piloto de descoberta por OAB ~R$ 50–250/mês.
+
+### 🗂 C7 — Organizador do Drive (v6.92.0, sessão 06/07)
+
+- Card destacado na página **Ferramentas**: cola o link/ID da pasta do Drive → `Drive.gs` lista (até 300 arquivos, não-recursivo) → seleção → **Gemini multimodal classifica um a um** (PDF/JPG/PNG vão inline ≤15MB; TXT/Google Docs como texto; DOCX não suportado) extraindo categoria (taxonomia C8), **CNJ, data e título** → modal de revisão (nome proposto `{CNJ}_{tipo}_{data}_{título}` e categoria editáveis; confiança <70% em âmbar; checkbox "agrupar em subpastas por categoria" 01-Petições…09-Outros) → `driveAplicarOrganizacao` renomeia/move em lotes de 25 com relatório item a item.
+- Backend novo: `backend/Drive.gs` (3 actions) + 3 cases no router do `Codigo.gs` + wrappers no `api.js` + stubs offline. Reusa `GEMINI_API_KEY`/`GEMINI_API_BASE` das petições e `audit_` (trilha em toda ação). Falha em um arquivo não derruba o lote; erro de acesso à pasta orienta compartilhar com a conta do Web App.
+- Testes: 16 casos (montador de nome, extração de folderId de URL, mimes, aplicar com mock DriveApp — rename/subpasta com cache/erro isolado/audit) + parse do index e do api.js.
 
 ### ✂️ C8 — Segmentador de autos (v6.91.0, sessão 06/07)
 

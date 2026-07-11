@@ -588,6 +588,9 @@ const DB = {
   async savePeticao(p) { return p; },
   async deletePeticao(_id) {},
   async gerarPeticaoIA(_b, _c, _o) { throw new Error('Geração IA exige login (precisa do backend Apps Script).'); },
+  async driveListarPasta(_p) { throw new Error('Organizador do Drive exige login (backend Apps Script).'); },
+  async driveClassificarArquivo(_f) { throw new Error('Organizador do Drive exige login (backend Apps Script).'); },
+  async driveAplicarOrganizacao(_p, _o) { throw new Error('Organizador do Drive exige login (backend Apps Script).'); },
 
   // ====== Módulo Financeiro (stubs IndexedDB — sobrescritos por UC_RemoteDB no boot) ======
   async getAllBancos() { return []; },
@@ -7325,6 +7328,212 @@ function _segModalRevisao(pecas, totalPaginas, nomeArquivo) {
         if (out[i].ini <= out[i - 1].fim) { toast('Peças sobrepostas', `"${out[i - 1].titulo}" e "${out[i].titulo}" dividem páginas — ajuste os cortes.`, 'error'); return; }
       }
       modal.remove(); resolve(out);
+    };
+  });
+}
+
+// ====================================================================
+// C7 — Organizador de documentos do Drive (IA)
+// ====================================================================
+// Fluxo em 4 etapas com revisão humana obrigatória (parecer jul/2026):
+//   1. Colar o link da pasta do Drive → backend lista os arquivos.
+//   2. Seleção → IA classifica um a um (Gemini multimodal via Drive.gs):
+//      categoria (taxonomia de 11 tipos), CNJ, data e título detectados.
+//   3. Modal de revisão: nome proposto {CNJ}_{tipo}_{data}_{título} e
+//      categoria editáveis; opção de agrupar em subpastas por categoria.
+//   4. Backend aplica (renomeia/move) e devolve relatório item a item.
+// Backend: backend/Drive.gs (actions driveListarPasta/Classificar/Aplicar).
+
+// Subpasta legível por categoria (numeração = ordem processual usual).
+const ORG_SUBPASTAS = {
+  peticao_inicial: '01 - Petições', contestacao: '01 - Petições', recurso: '02 - Recursos',
+  decisao_judicial: '03 - Decisões', procuracao: '04 - Procurações e contratos',
+  contrato: '04 - Procurações e contratos', laudo_pericia: '05 - Laudos e perícias',
+  comprovante: '06 - Comprovantes', documento_pessoal: '07 - Documentos pessoais',
+  correspondencia: '08 - Correspondências', outros: '09 - Outros'
+};
+
+// Nome padronizado {CNJ}_{tipo}_{AAAA-MM-DD}_{título}.{ext} — partes vazias saem.
+function _orgMontarNome(cls, ext) {
+  const partes = [];
+  if (cls.cnj) partes.push(String(cls.cnj).trim());
+  partes.push(String(cls.categoria || 'outros'));
+  if (cls.data) partes.push(String(cls.data));
+  if (cls.titulo) partes.push(_segSanitizarNome(cls.titulo));
+  return partes.join('_') + (ext ? '.' + ext : '');
+}
+
+function _orgExt(nome) {
+  const m = String(nome || '').match(/\.([A-Za-z0-9]{1,5})$/);
+  return m ? m[1].toLowerCase() : '';
+}
+
+async function organizadorDriveFlow() {
+  // 1. Pasta
+  const r = await showModal('🗂 Organizador do Drive (IA)', [
+    { label: 'Link (ou ID) da pasta do Google Drive', placeholder: 'https://drive.google.com/drive/folders/…' }
+  ], { confirmLabel: 'Listar arquivos', intro: 'A IA classifica cada documento da pasta e propõe nome padronizado <code>{CNJ}_{tipo}_{data}_{título}</code> + subpasta por categoria. <strong>Nada é alterado sem sua revisão.</strong> A pasta precisa estar acessível pela conta do sistema.' });
+  if (!r) return;
+  const prog = _segProgressModal();
+  let lista;
+  try {
+    prog.set('Listando a pasta…');
+    lista = await DB.driveListarPasta(r[0]);
+  } catch (e) { prog.close(); toast('Falha ao listar', String(e?.message || e), 'error'); return; }
+  prog.close();
+  if (lista?.error) { toast('Não deu pra listar', lista.message || lista.error, 'error'); return; }
+  if (!lista.arquivos?.length) { toast('Pasta vazia', 'Nenhum arquivo encontrado (subpastas não são varridas).', 'info'); return; }
+
+  // 2. Seleção
+  const selecionados = await _orgModalSelecao(lista);
+  if (!selecionados || !selecionados.length) return;
+
+  // 3. Classificação um a um (falha em um não derruba o lote)
+  const prog2 = _segProgressModal();
+  const itens = [];
+  for (let i = 0; i < selecionados.length; i++) {
+    const arq = selecionados[i];
+    prog2.set(`Classificando ${i + 1}/${selecionados.length}: ${arq.nome}`);
+    try {
+      const resp = await DB.driveClassificarArquivo(arq.id);
+      if (resp?.classificacao) {
+        const cls = resp.classificacao;
+        itens.push({ ...arq, cls, novoNome: _orgMontarNome(cls, _orgExt(arq.nome)), erro: null });
+      } else {
+        itens.push({ ...arq, cls: null, novoNome: arq.nome, erro: resp?.error || 'sem_resposta' });
+      }
+    } catch (e) {
+      itens.push({ ...arq, cls: null, novoNome: arq.nome, erro: String(e?.message || e) });
+    }
+  }
+  prog2.close();
+  const classificados = itens.filter(x => x.cls);
+  if (!classificados.length) { toast('Nenhum arquivo classificado', 'Todos falharam — verifique o acesso da conta do sistema à pasta e a GEMINI_API_KEY.', 'error'); return; }
+
+  // 4. Revisão humana obrigatória
+  const plano = await _orgModalRevisao(itens, lista.pastaNome);
+  if (!plano) return;
+
+  // 5. Aplicar em lotes
+  const prog3 = _segProgressModal();
+  const resultados = [];
+  for (let i = 0; i < plano.ops.length; i += 25) {
+    const lote = plano.ops.slice(i, i + 25);
+    prog3.set(`Aplicando ${Math.min(i + 25, plano.ops.length)}/${plano.ops.length}…`);
+    try {
+      const resp = await DB.driveAplicarOrganizacao(lista.pastaId, lote);
+      resultados.push(...(resp?.resultados || []));
+    } catch (e) {
+      lote.forEach(op => resultados.push({ fileId: op.fileId, ok: false, erro: String(e?.message || e) }));
+    }
+  }
+  prog3.close();
+
+  const ok = resultados.filter(x => x.ok).length;
+  const erros = resultados.filter(x => !x.ok);
+  const modal = document.createElement('div');
+  modal.className = 'modal-backdrop';
+  modal.innerHTML = `
+    <div class="modal scroll-thin" style="max-width: 560px;">
+      <h3 class="modal-title">🗂 Organização concluída</h3>
+      <div class="grid gap-2 mb-3" style="grid-template-columns: 1fr 1fr;">
+        <div class="stat-card" style="background: var(--uc-green-soft, #e8f3e8);"><div class="stat-label">Organizados</div><div class="stat-value">${ok}</div></div>
+        <div class="stat-card" style="${erros.length ? 'background: var(--uc-red-soft);' : ''}"><div class="stat-label">Erros</div><div class="stat-value">${erros.length}</div></div>
+      </div>
+      ${erros.length ? `<details open><summary style="cursor:pointer;font-size:13px;font-weight:600;">Erros (${erros.length})</summary>${erros.map(x => `<div style="font-size:11px;padding:3px 0;border-bottom:1px solid var(--uc-line);">${escapeHtml(x.fileId)} · ${escapeHtml(x.erro || '')}</div>`).join('')}</details>` : ''}
+      <p class="help-text" style="margin-top:10px;">Confira o resultado na própria pasta do Drive: <a href="https://drive.google.com/drive/folders/${escapeHtml(lista.pastaId)}" target="_blank" style="color:var(--uc-gold);">abrir pasta ↗</a></p>
+      <button class="btn btn-primary" style="width:100%;margin-top:8px;" onclick="this.closest('.modal-backdrop').remove()">Fechar</button>
+    </div>`;
+  $('modalContainer').appendChild(modal);
+}
+
+function _orgModalSelecao(lista) {
+  return new Promise(resolve => {
+    const modal = document.createElement('div');
+    modal.className = 'modal-backdrop';
+    const suportados = lista.arquivos.filter(a => a.suportado).length;
+    modal.innerHTML = `
+      <div class="modal scroll-thin" style="max-width: 640px;">
+        <h3 class="modal-title">🗂 ${escapeHtml(lista.pastaNome)} · ${lista.arquivos.length} arquivo(s)</h3>
+        <p class="help-text" style="margin-bottom:10px;">${suportados} classificável(is) (PDF, JPG, PNG, TXT, Google Docs ≤15MB). ${lista.truncado ? '⚠ Pasta com mais de 300 arquivos — listagem truncada.' : ''} Subpastas não são varridas.</p>
+        <div style="max-height: 45vh; overflow:auto; border:1px solid var(--uc-line); border-radius:6px; padding:6px;">
+          ${lista.arquivos.map((a, i) => `
+            <label style="display:flex; gap:8px; align-items:center; padding:4px 6px; font-size:12.5px; ${a.suportado ? 'cursor:pointer;' : 'opacity:.45;'}">
+              <input type="checkbox" data-org-sel="${i}" ${a.suportado ? 'checked' : 'disabled'}>
+              <span style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(a.nome)}</span>
+              <span class="help-text" style="font-size:10px; flex-shrink:0;">${(a.tamanho / 1024 / 1024).toFixed(1)}MB</span>
+            </label>`).join('')}
+        </div>
+        <div class="flex gap-2 mt-3">
+          <button class="btn btn-outline" id="_orgSelCancel" style="flex:1;">Cancelar</button>
+          <button class="btn btn-primary" id="_orgSelOk" style="flex:2;">🤖 Classificar selecionados</button>
+        </div>
+      </div>`;
+    $('modalContainer').appendChild(modal);
+    document.getElementById('_orgSelCancel').onclick = () => { modal.remove(); resolve(null); };
+    document.getElementById('_orgSelOk').onclick = () => {
+      const escolhidos = [...modal.querySelectorAll('[data-org-sel]:checked')].map(el => lista.arquivos[parseInt(el.getAttribute('data-org-sel'), 10)]);
+      modal.remove(); resolve(escolhidos);
+    };
+  });
+}
+
+function _orgModalRevisao(itens, pastaNome) {
+  return new Promise(resolve => {
+    const modal = document.createElement('div');
+    modal.className = 'modal-backdrop';
+    const linha = (it, i) => `
+      <tr data-org-row="${i}" ${it.erro ? 'style="opacity:.5;"' : ''}>
+        <td style="padding:4px; max-width:180px;"><div style="font-size:11px; color:var(--uc-warm-gray); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${escapeHtml(it.nome)}">${escapeHtml(it.nome)}</div></td>
+        <td style="padding:4px;">${it.erro
+          ? `<span class="badge badge-red" style="font-size:9px;">falhou: ${escapeHtml(String(it.erro).slice(0, 40))}</span>`
+          : `<input class="input" data-org-nome value="${escapeHtml(it.novoNome)}" style="font-size:11.5px; padding:4px 6px;">`}</td>
+        <td style="padding:4px;">${it.erro ? '—' : `<select class="select" data-org-cat style="font-size:10.5px; padding:3px;">${SEG_TAXONOMIA.map(c => `<option value="${c}" ${c === it.cls.categoria ? 'selected' : ''}>${c.replace(/_/g, ' ')}</option>`).join('')}</select>`}</td>
+        <td style="padding:4px; text-align:center;">${it.erro ? '' : `<span class="badge ${it.cls.confianca >= 0.7 ? 'badge-green' : 'badge-amber'}" style="font-size:9px;">${Math.round(it.cls.confianca * 100)}%</span>`}</td>
+        <td style="padding:4px;">${it.erro ? '' : `<input type="checkbox" data-org-incluir checked title="Incluir na aplicação">`}</td>
+      </tr>`;
+    modal.innerHTML = `
+      <div class="modal scroll-thin" style="max-width: 860px;">
+        <h3 class="modal-title">🗂 Revisão — ${escapeHtml(pastaNome)}</h3>
+        <p class="help-text" style="margin-bottom:8px;"><strong>Revise antes de aplicar</strong>: edite nomes e categorias. Confiança baixa (âmbar) merece atenção. Arquivos com falha ficam intocados.</p>
+        <label style="display:flex; align-items:center; gap:8px; font-size:13px; cursor:pointer; margin-bottom:8px;">
+          <input type="checkbox" id="_orgSubpastas" checked> Agrupar em subpastas por categoria (01 - Petições, 02 - Recursos…)
+        </label>
+        <div style="overflow-x:auto; max-height:50vh; overflow-y:auto;">
+        <table style="width:100%; border-collapse:collapse; font-size:12px;">
+          <tr style="border-bottom:2px solid var(--uc-line);">
+            <th style="text-align:left; padding:4px; font-size:10px; text-transform:uppercase; color:var(--uc-warm-gray);">Nome atual</th>
+            <th style="text-align:left; padding:4px; font-size:10px; text-transform:uppercase; color:var(--uc-warm-gray);">Nome proposto</th>
+            <th style="text-align:left; padding:4px; font-size:10px; text-transform:uppercase; color:var(--uc-warm-gray);">Categoria</th>
+            <th style="text-align:center; padding:4px; font-size:10px; text-transform:uppercase; color:var(--uc-warm-gray);">IA</th>
+            <th style="padding:4px; font-size:10px; color:var(--uc-warm-gray);">✓</th>
+          </tr>
+          ${itens.map(linha).join('')}
+        </table>
+        </div>
+        <div class="flex gap-2 mt-3">
+          <button class="btn btn-outline" id="_orgRevCancel" style="flex:1;">Cancelar</button>
+          <button class="btn btn-primary" id="_orgRevOk" style="flex:2;">✅ Aplicar organização</button>
+        </div>
+      </div>`;
+    $('modalContainer').appendChild(modal);
+    document.getElementById('_orgRevCancel').onclick = () => { modal.remove(); resolve(null); };
+    document.getElementById('_orgRevOk').onclick = () => {
+      const usarSub = document.getElementById('_orgSubpastas').checked;
+      const ops = [];
+      modal.querySelectorAll('[data-org-row]').forEach(row => {
+        const i = parseInt(row.getAttribute('data-org-row'), 10);
+        const it = itens[i];
+        if (it.erro) return;
+        const incluir = row.querySelector('[data-org-incluir]');
+        if (!incluir || !incluir.checked) return;
+        const nome = row.querySelector('[data-org-nome]').value.trim();
+        const cat = row.querySelector('[data-org-cat]').value;
+        if (!nome) return;
+        ops.push({ fileId: it.id, novoNome: nome, subpasta: usarSub ? (ORG_SUBPASTAS[cat] || ORG_SUBPASTAS.outros) : null });
+      });
+      if (!ops.length) { toast('Nada selecionado pra aplicar', '', 'error'); return; }
+      modal.remove(); resolve({ ops });
     };
   });
 }
@@ -18176,6 +18385,16 @@ async function renderTools() {
       <div>
         <h1 class="page-title"><span class="smallcaps-prefix">Ferramentas</span></h1>
         <p class="page-subtitle">Processamento de PDFs jurídicos · 100% local</p>
+      </div>
+    </div>
+
+    <div class="card mb-4" style="border-left: 4px solid var(--uc-gold);">
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap;">
+        <div style="flex:1; min-width:240px;">
+          <h3 class="font-serif text-lg font-semibold smallcaps" style="color: var(--uc-black); margin:0 0 4px;">🗂 Organizador do Drive (IA)</h3>
+          <p class="help-text" style="margin:0;">Aponte uma pasta do Google Drive: a IA classifica cada documento (petição, decisão, laudo…), propõe nome padronizado {CNJ}_{tipo}_{data}_{título} e agrupa em subpastas — você revisa tudo antes de aplicar.</p>
+        </div>
+        <button class="btn btn-primary" onclick="organizadorDriveFlow()" style="white-space:nowrap;">🗂 Organizar pasta…</button>
       </div>
     </div>
 

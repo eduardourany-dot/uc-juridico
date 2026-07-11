@@ -85,6 +85,9 @@ function handle_(e, method) {
       case 'atualizarEventoCalendar': return json_(actionAtualizarEventoCalendar_(ctx));
       case 'cancelarEventoCalendar':  return json_(actionCancelarEventoCalendar_(ctx));
       case 'rsvpEventoCalendar':      return json_(actionRsvpEventoCalendar_(ctx));
+      case 'driveListarPasta':        return json_(actionDriveListarPasta_(ctx));
+      case 'driveClassificarArquivo': return json_(actionDriveClassificarArquivo_(ctx));
+      case 'driveAplicarOrganizacao': return json_(actionDriveAplicarOrganizacao_(ctx));
       default: return json_({ error: 'unknown_action', action: action }, 400);
     }
   } catch (err) {

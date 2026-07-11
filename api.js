@@ -696,6 +696,20 @@ const RemoteDB = {
     });
   },
 
+  // ====== C7 — Organizador de documentos do Drive (backend Drive.gs) ======
+  // Lista uma pasta do Drive (link ou ID) → arquivos com flag de suporte.
+  async driveListarPasta(pasta) {
+    return await callAppsScript('driveListarPasta', null, { pasta });
+  },
+  // Classifica UM arquivo via Gemini multimodal (PDF/imagem inline; texto/GDoc como texto).
+  async driveClassificarArquivo(fileId) {
+    return await callAppsScript('driveClassificarArquivo', null, { fileId });
+  },
+  // Aplica a organização revisada: renomeia e (opcional) move pra subpastas.
+  async driveAplicarOrganizacao(pastaId, operacoes) {
+    return await callAppsScript('driveAplicarOrganizacao', null, { pastaId, operacoes });
+  },
+
   // ====== Google Calendar + Meet (módulo Agenda) ======
   // Cria/atualiza/cancela evento na agenda da conta do escritório
   // (uranydecastro@ · Workspace). Backend: Apps Script Calendar.gs.
