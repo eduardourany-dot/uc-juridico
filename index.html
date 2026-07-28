@@ -307,6 +307,11 @@ body.cliente-mode .nav-section { display: none !important; }
       <span>Agenda</span>
       <span id="navAgendaCount" class="nav-badge gray hidden">0</span>
     </a>
+    <a class="nav-item" data-route="tarefas">
+      <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+      <span>Tarefas</span>
+      <span id="navTarefasCount" class="nav-badge gray hidden">0</span>
+    </a>
     <a class="nav-item" data-route="financeiro">
       <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
       <span>Financeiro</span>
@@ -371,6 +376,10 @@ body.cliente-mode .nav-section { display: none !important; }
   <a class="mobile-nav-item" data-route="deadlines">
     <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
     <span>Publicações</span>
+  </a>
+  <a class="mobile-nav-item" data-route="tarefas">
+    <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+    <span>Tarefas</span>
   </a>
   <a class="mobile-nav-item" data-route="financeiro">
     <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
@@ -592,6 +601,11 @@ const DB = {
   async driveClassificarArquivo(_f) { throw new Error('Organizador do Drive exige login (backend Apps Script).'); },
   async driveAplicarOrganizacao(_p, _o) { throw new Error('Organizador do Drive exige login (backend Apps Script).'); },
 
+  // ====== C1 — Tarefas (stubs — sobrescritos por UC_RemoteDB no boot) ======
+  async getAllTarefas() { return []; },
+  async saveTarefa(t) { throw new Error('Tarefas exigem login (dados no Firestore).'); },
+  async deleteTarefa(_id) { throw new Error('Tarefas exigem login (dados no Firestore).'); },
+
   // ====== Módulo Financeiro (stubs IndexedDB — sobrescritos por UC_RemoteDB no boot) ======
   async getAllBancos() { return []; },
   async saveBanco(b) { return b; },
@@ -767,6 +781,7 @@ const routes = {
   intimacoes: renderDeadlines, // alias: intimações foram integradas em Publicações
   deadlines: renderDeadlines,
   agenda: renderAgenda,
+  tarefas: renderTarefas,
   financeiro: renderFinanceiro,
   calculadora: renderCalculadora,
   relatorio: renderRelatorio,
@@ -4855,6 +4870,7 @@ ${/* Card 'Parte adversa (manual)' removido em v6.64.20 — info de partes/advog
         <button class="btn btn-outline" onclick="generateProcessFiche()">📜 Gerar ficha (Word)</button>
         <button class="btn btn-outline" onclick="whatsappClienteFlow()" title="Abre o WhatsApp com uma mensagem de atualização pronta (editável) pro cliente — nada é enviado sem sua revisão">💬 WhatsApp pro cliente</button>
         <button class="btn btn-outline" onclick="segmentarAutosFlow()" title="PDF consolidado do Projudi/PJe → IA identifica as peças (petição, decisão, laudo…) → você revisa os cortes → baixa cada peça separada + índice nas notas">✂️ Segmentar autos (PDF)</button>
+        <button class="btn btn-outline" onclick="novaTarefaFlow({ processId: '${p.id}' })" title="Cria uma tarefa geral vinculada a este processo (ex: ligar pro cliente, pedir certidão) e delega a um responsável">✅ Nova tarefa</button>
         ${p.risco ? `<button class="btn btn-outline" onclick="gerarRelatorioAuditoriaIndividualFlow('${p.id}')" title="Gerar relatório técnico-jurídico para auditoria externa (CPC 25/IAS 37)">🏛 Relatório auditoria</button>` : ''}
       </div>
       <div class="grid gap-2 mt-3" style="grid-template-columns: 1fr 1fr;">
@@ -12622,9 +12638,251 @@ function _marcoDoCompromisso(c, hoje) {
   return null;
 }
 
+// ====================================================================
+// C1 — Tarefas com delegação (jul/2026)
+// ====================================================================
+// Tarefas GERAIS do escritório ("ligar pro cliente", "elaborar contrato",
+// "pedir certidão") — leves de propósito: sem máquina de estados pesada
+// (isso é dos prazos). Kanban de 3 colunas (A fazer → Em andamento →
+// Concluídas), delegação por responsável, prazo opcional (aparece na
+// Agenda junto dos prazos) e painel de produtividade por advogado.
+// Collection Firestore `tarefas` (rules deployadas junto) + logs[] auditável.
+
+function _tarefaAtrasada(t, today) {
+  if (!t || !t.prazoData || t.status === 'concluida' || t.status === 'cancelada') return false;
+  if (!today) { today = new Date(); today.setHours(0, 0, 0, 0); }
+  return _diaFatalLocal(t.prazoData) < today.getTime();
+}
+
+// Produtividade por advogado nos últimos N dias: abertas, atrasadas,
+// concluídas e % concluídas dentro do prazo.
+function _tarefasProdutividade(tarefas, dias) {
+  const corte = Date.now() - (dias || 30) * 86400000;
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const por = {};
+  const reg = nome => por[nome] = por[nome] || { abertas: 0, atrasadas: 0, concluidas: 0, noPrazo: 0 };
+  for (const t of (tarefas || [])) {
+    const r = reg(t.responsavel || '(sem responsável)');
+    if (t.status === 'aberta' || t.status === 'andamento') {
+      r.abertas++;
+      if (_tarefaAtrasada(t, today)) r.atrasadas++;
+    } else if (t.status === 'concluida' && (t.concluidoEm || 0) >= corte) {
+      r.concluidas++;
+      if (!t.prazoData || _diaFatalLocal(t.prazoData) >= _diaFatalLocal(new Date(t.concluidoEm).toISOString())) r.noPrazo++;
+    }
+  }
+  return por;
+}
+
+async function _atualizarBadgeTarefas() {
+  try {
+    const tarefas = await DB.getAllTarefas();
+    const abertas = tarefas.filter(t => t.status === 'aberta' || t.status === 'andamento').length;
+    const el = $('navTarefasCount');
+    if (el) {
+      if (abertas > 0) { el.textContent = abertas; el.classList.remove('hidden'); }
+      else el.classList.add('hidden');
+    }
+  } catch (e) { /* offline/sem login — badge fica oculto */ }
+}
+
+async function renderTarefas() {
+  const [tarefas, processos] = await Promise.all([DB.getAllTarefas(), DB.getAllProcesses()]);
+  const procById = {}; processos.forEach(p => { procById[p.id] = p; });
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const f = state._tarFiltro = state._tarFiltro || { responsavel: '' };
+
+  let lista = tarefas.slice();
+  if (f.responsavel) lista = lista.filter(t => t.responsavel === f.responsavel);
+
+  const abertas = lista.filter(t => t.status === 'aberta')
+    .sort((a, b) => (_diaFatalLocal(a.prazoData || '9999-12-31')) - (_diaFatalLocal(b.prazoData || '9999-12-31')));
+  const andamento = lista.filter(t => t.status === 'andamento')
+    .sort((a, b) => (_diaFatalLocal(a.prazoData || '9999-12-31')) - (_diaFatalLocal(b.prazoData || '9999-12-31')));
+  const corte14 = Date.now() - 14 * 86400000;
+  const concluidas = lista.filter(t => t.status === 'concluida' && (t.concluidoEm || 0) >= corte14)
+    .sort((a, b) => (b.concluidoEm || 0) - (a.concluidoEm || 0));
+  const atrasadas = lista.filter(t => _tarefaAtrasada(t, today)).length;
+
+  const prod = _tarefasProdutividade(tarefas, 30);
+  const prodRows = Object.keys(prod).sort()
+    .map(nome => ({ nome, ...prod[nome] }))
+    .filter(r => r.abertas || r.concluidas);
+
+  const col = (titulo, itens, corTopo) => `
+    <div style="flex:1; min-width: 260px; background: var(--uc-cream); border-radius: 8px; padding: 10px;">
+      <h4 style="margin:0 0 8px; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: ${corTopo}; font-weight: 700;">${titulo} · ${itens.length}</h4>
+      ${itens.length ? itens.map(t => _tarefaCard(t, procById, today)).join('') : '<p class="help-text" style="font-size:11px;">vazio</p>'}
+    </div>`;
+
+  $('appContent').innerHTML = `
+    <div class="page-header">
+      <div>
+        <h1 class="page-title"><span class="smallcaps-prefix">Tarefas</span></h1>
+        <p class="page-subtitle">${abertas.length + andamento.length} aberta(s)${atrasadas ? ' · <span style="color: var(--uc-red);">⚠ ' + atrasadas + ' atrasada(s)</span>' : ''}</p>
+      </div>
+      <div class="flex gap-2 items-center flex-wrap">
+        <select class="select" style="max-width: 200px; font-size: 13px;" onchange="state._tarFiltro.responsavel=this.value; renderTarefas();">
+          <option value="">Todos os responsáveis</option>
+          ${(typeof ADVOGADOS !== 'undefined' ? ADVOGADOS : []).map(n => `<option value="${escapeHtml(n)}" ${f.responsavel === n ? 'selected' : ''}>${escapeHtml(n.split(' ')[0] + ' ' + n.split(' ').slice(-1)[0])}</option>`).join('')}
+        </select>
+        <button class="btn btn-primary" onclick="novaTarefaFlow()">+ Nova tarefa</button>
+      </div>
+    </div>
+
+    ${prodRows.length ? `
+    <div class="card mb-4" style="padding: 12px;">
+      <h3 class="font-serif font-semibold smallcaps mb-2" style="color: var(--uc-black);">📈 Produtividade (30 dias)</h3>
+      <div style="overflow-x:auto;">
+      <table style="width:100%; border-collapse:collapse; font-size:12.5px;">
+        <tr style="border-bottom:2px solid var(--uc-line);">
+          <th style="text-align:left; padding:5px 8px; font-size:10px; text-transform:uppercase; color:var(--uc-warm-gray);">Advogado</th>
+          <th style="text-align:center; padding:5px 8px; font-size:10px; text-transform:uppercase; color:var(--uc-warm-gray);">Abertas</th>
+          <th style="text-align:center; padding:5px 8px; font-size:10px; text-transform:uppercase; color:var(--uc-warm-gray);">Atrasadas</th>
+          <th style="text-align:center; padding:5px 8px; font-size:10px; text-transform:uppercase; color:var(--uc-warm-gray);">Concluídas</th>
+          <th style="text-align:center; padding:5px 8px; font-size:10px; text-transform:uppercase; color:var(--uc-warm-gray);">No prazo</th>
+        </tr>
+        ${prodRows.map(r => `
+          <tr style="border-bottom:1px solid var(--uc-line-soft, var(--uc-line));">
+            <td style="padding:5px 8px;">${escapeHtml(r.nome.split(' ')[0] + ' ' + r.nome.split(' ').slice(-1)[0])}</td>
+            <td style="text-align:center; padding:5px 8px;">${r.abertas}</td>
+            <td style="text-align:center; padding:5px 8px; ${r.atrasadas ? 'color:var(--uc-red); font-weight:700;' : ''}">${r.atrasadas}</td>
+            <td style="text-align:center; padding:5px 8px;">${r.concluidas}</td>
+            <td style="text-align:center; padding:5px 8px;">${r.concluidas ? Math.round(r.noPrazo / r.concluidas * 100) + '%' : '—'}</td>
+          </tr>`).join('')}
+      </table>
+      </div>
+    </div>` : ''}
+
+    <div style="display:flex; gap:12px; align-items:flex-start; flex-wrap:wrap;">
+      ${col('📥 A fazer', abertas, 'var(--uc-amber)')}
+      ${col('⏳ Em andamento', andamento, 'var(--uc-gold)')}
+      ${col('✅ Concluídas (14d)', concluidas, 'var(--uc-green)')}
+    </div>`;
+
+  _atualizarBadgeTarefas();
+}
+
+function _tarefaCard(t, procById, today) {
+  const proc = t.processId ? procById[t.processId] : null;
+  const atrasada = _tarefaAtrasada(t, today);
+  const feita = t.status === 'concluida';
+  let acoes = '';
+  if (t.status === 'aberta') {
+    acoes = `<button class="btn btn-secondary btn-sm" style="padding:2px 8px; font-size:11px;" onclick="mudarStatusTarefa('${t.id}','andamento')">▶ Iniciar</button>
+             <button class="btn btn-outline btn-sm" style="padding:2px 8px; font-size:11px;" onclick="mudarStatusTarefa('${t.id}','concluida')">✓ Concluir</button>`;
+  } else if (t.status === 'andamento') {
+    acoes = `<button class="btn btn-primary btn-sm" style="padding:2px 8px; font-size:11px;" onclick="mudarStatusTarefa('${t.id}','concluida')">✓ Concluir</button>`;
+  } else if (feita) {
+    acoes = `<button class="btn btn-ghost btn-sm" style="padding:2px 8px; font-size:11px;" onclick="mudarStatusTarefa('${t.id}','aberta')">↩ Reabrir</button>`;
+  }
+  return `
+    <div class="card" style="margin:0 0 8px; padding:10px; background:#fff; ${feita ? 'opacity:.75;' : ''} ${atrasada ? 'border-left:3px solid var(--uc-red);' : ''}">
+      <div style="display:flex; justify-content:space-between; gap:6px; align-items:flex-start;">
+        <strong style="font-size:12.5px; color:var(--uc-black); line-height:1.35; ${feita ? 'text-decoration:line-through;' : ''}">${escapeHtml(t.titulo)}</strong>
+        ${t.prazoData && !feita ? `<span class="badge ${atrasada ? 'badge-red' : 'badge-amber'}" style="font-size:9px; flex-shrink:0;">${atrasada ? 'atrasada' : formatDate(t.prazoData)}</span>` : ''}
+      </div>
+      ${t.descricao ? `<div style="font-size:11px; color:var(--uc-warm-gray); margin-top:3px;">${escapeHtml(t.descricao.slice(0, 140))}</div>` : ''}
+      <div style="font-size:11px; color:var(--uc-warm-gray); margin-top:4px;">
+        👤 ${escapeHtml((t.responsavel || '?').split(' ')[0])}
+        ${proc ? ` · <a onclick="navigate('process', { currentProcessId: '${proc.id}' })" style="cursor:pointer; color:var(--uc-gold);">${escapeHtml(proc.cnj || proc.name || 'processo')}</a>` : ''}
+        ${feita && t.concluidoEm ? ` · ✓ ${formatDate(t.concluidoEm)}` : ''}
+      </div>
+      <div style="display:flex; gap:4px; margin-top:8px; flex-wrap:wrap; align-items:center;">
+        ${acoes}
+        <a onclick="editarTarefaFlow('${t.id}')" style="cursor:pointer; color:var(--uc-gold); font-size:11px;">✏ editar</a>
+        <a onclick="excluirTarefaFlow('${t.id}')" style="cursor:pointer; color:var(--uc-warm-gray); font-size:11px;">🗑</a>
+      </div>
+    </div>`;
+}
+
+async function novaTarefaFlow(opts) {
+  opts = opts || {};
+  const processos = await DB.getAllProcesses();
+  const me = (window.UC_Auth?.getUser?.() || {}).email || '';
+  const meuNome = (typeof defaultAdvogado === 'function' ? defaultAdvogado(me) : '') || '';
+  const advogados = (typeof ADVOGADOS !== 'undefined' ? ADVOGADOS : []);
+  const r = await showModal('✅ Nova tarefa', [
+    { label: 'O que precisa ser feito?', placeholder: 'Ex: Ligar pro cliente sobre a proposta de acordo' },
+    { label: 'Responsável', type: 'select', options: advogados.map(n => ({ value: n, label: n })), default: meuNome || advogados[0] },
+    { label: 'Prazo (opcional)', type: 'date' },
+    { label: 'Processo (opcional)', type: 'select', options: [{ value: '', label: '— sem processo —' }].concat(processos.filter(p => !p.deletedAt && p.status !== 'archived').map(p => ({ value: p.id, label: (p.name || '') + (p.cnj ? ' · ' + p.cnj : '') }))), default: opts.processId || '' },
+    { label: 'Detalhes (opcional)', type: 'textarea', rows: 3 }
+  ], { confirmLabel: 'Criar tarefa' });
+  if (!r) return;
+  const [titulo, responsavel, prazoData, processId, descricao] = r;
+  if (!titulo?.trim()) { toast('Dê um título pra tarefa', '', 'error'); return; }
+  const t = {
+    id: uid(), titulo: titulo.trim().slice(0, 200), descricao: (descricao || '').trim().slice(0, 1000),
+    responsavel: responsavel || meuNome || null, prazoData: prazoData || null,
+    processId: processId || null, status: 'aberta',
+    criadoPor: meuNome || me, createdAt: Date.now(),
+    logs: [{ evento: 'criada', ator: meuNome || me, timestamp: Date.now() }]
+  };
+  await DB.saveTarefa(t);
+  toast('Tarefa criada', t.responsavel ? 'Delegada a ' + t.responsavel.split(' ')[0] : '', 'success');
+  if (state.currentRoute === 'tarefas') renderTarefas(); else _atualizarBadgeTarefas();
+}
+
+async function editarTarefaFlow(id) {
+  const t = (await DB.getAllTarefas()).find(x => x.id === id);
+  if (!t) { toast('Tarefa não encontrada', '', 'error'); return; }
+  const advogados = (typeof ADVOGADOS !== 'undefined' ? ADVOGADOS : []);
+  const r = await showModal('✏ Editar tarefa', [
+    { label: 'Título', default: t.titulo },
+    { label: 'Responsável', type: 'select', options: advogados.map(n => ({ value: n, label: n })), default: t.responsavel || '' },
+    { label: 'Prazo', type: 'date', default: t.prazoData || '' },
+    { label: 'Detalhes', type: 'textarea', rows: 3, default: t.descricao || '' }
+  ], { confirmLabel: 'Salvar' });
+  if (!r) return;
+  const me = (window.UC_Auth?.getUser?.() || {}).email || '';
+  const meuNome = (typeof defaultAdvogado === 'function' ? defaultAdvogado(me) : '') || me;
+  const [titulo, responsavel, prazoData, descricao] = r;
+  const mudou = [];
+  if (titulo?.trim() && titulo.trim() !== t.titulo) { t.titulo = titulo.trim().slice(0, 200); mudou.push('titulo'); }
+  if (responsavel !== t.responsavel) { t.responsavel = responsavel; mudou.push('responsavel'); }
+  if ((prazoData || null) !== (t.prazoData || null)) { t.prazoData = prazoData || null; mudou.push('prazo'); }
+  if ((descricao || '') !== (t.descricao || '')) { t.descricao = (descricao || '').slice(0, 1000); mudou.push('descricao'); }
+  if (!mudou.length) return;
+  (t.logs = t.logs || []).push({ evento: 'editada', payload: { campos: mudou }, ator: meuNome, timestamp: Date.now() });
+  t.updatedAt = Date.now();
+  await DB.saveTarefa(t);
+  toast('Tarefa atualizada', '', 'success');
+  if (state.currentRoute === 'tarefas') renderTarefas();
+  else if (state.currentRoute === 'agenda') renderAgenda();
+}
+
+async function mudarStatusTarefa(id, novo) {
+  const t = (await DB.getAllTarefas()).find(x => x.id === id);
+  if (!t) { toast('Tarefa não encontrada', '', 'error'); return; }
+  const me = (window.UC_Auth?.getUser?.() || {}).email || '';
+  const meuNome = (typeof defaultAdvogado === 'function' ? defaultAdvogado(me) : '') || me;
+  const de = t.status;
+  t.status = novo;
+  if (novo === 'andamento' && !t.iniciadoEm) t.iniciadoEm = Date.now();
+  if (novo === 'concluida') { t.concluidoEm = Date.now(); t.concluidoPor = meuNome; }
+  if (novo === 'aberta') { delete t.concluidoEm; delete t.concluidoPor; }
+  (t.logs = t.logs || []).push({ evento: 'status', payload: { de, para: novo }, ator: meuNome, timestamp: Date.now() });
+  t.updatedAt = Date.now();
+  await DB.saveTarefa(t);
+  toast(novo === 'concluida' ? '✅ Tarefa concluída' : novo === 'andamento' ? '⏳ Em andamento' : '↩ Reaberta', t.titulo, 'success');
+  if (state.currentRoute === 'tarefas') renderTarefas();
+  else if (state.currentRoute === 'agenda') renderAgenda();
+  else _atualizarBadgeTarefas();
+}
+
+async function excluirTarefaFlow(id) {
+  const ok = await confirmDialog('Excluir tarefa?', 'A tarefa some da lista (soft-delete — recuperável pelo suporte).', true);
+  if (!ok) return;
+  await DB.deleteTarefa(id);
+  toast('Tarefa excluída', '', 'success');
+  if (state.currentRoute === 'tarefas') renderTarefas();
+}
+
 async function renderAgenda() {
-  const [compromissos, processos, clientes, deadlines] = await Promise.all([
-    DB.getAllCompromissos(), DB.getAllProcesses(), DB.getAllClientes(), DB.getAllDeadlines()
+  const [compromissos, processos, clientes, deadlines, tarefasAg] = await Promise.all([
+    DB.getAllCompromissos(), DB.getAllProcesses(), DB.getAllClientes(), DB.getAllDeadlines(),
+    DB.getAllTarefas().catch(() => [])
   ]);
   const procById = {}; processos.forEach(p => procById[p.id] = p);
   const cliById = {}; clientes.forEach(c => cliById[c.id] = c);
@@ -12736,6 +12994,20 @@ async function renderAgenda() {
   }).length;
 
   // Agrupa por dia (ISO YYYY-MM-DD) — compromissos + prazos misturados
+  // C1 — tarefas com prazo também entram na Agenda (mesmo gate dos prazos)
+  let tarefasOverlay = [];
+  if (f.incluirPrazos && f.tipo === 'todos') {
+    tarefasOverlay = (tarefasAg || []).filter(t => {
+      if (t.status !== 'aberta' && t.status !== 'andamento') return false;
+      if (!t.prazoData) return false;
+      if (f.responsavel && (t.responsavel || '') !== f.responsavel) return false;
+      const dia = String(t.prazoData).slice(0, 10);
+      if (dataInicioISO && dia < dataInicioISO) return false;
+      if (dataFimISO && dia > dataFimISO) return false;
+      return true;
+    });
+  }
+
   const porDia = {};
   for (const c of filtrados) {
     const dia = (c.dataHoraInicio || '').slice(0, 10);
@@ -12747,6 +13019,11 @@ async function renderAgenda() {
     if (!porDia[dia]) porDia[dia] = [];
     // Sort key: prazo aparece no fim do dia (sem hora específica)
     porDia[dia].push({ kind: 'prazo', item: d, ts: dia + 'T23:59:00' });
+  }
+  for (const t of tarefasOverlay) {
+    const dia = String(t.prazoData).slice(0, 10);
+    if (!porDia[dia]) porDia[dia] = [];
+    porDia[dia].push({ kind: 'tarefa', item: t, ts: dia + 'T23:58:00' });
   }
   // Ordenar dentro de cada dia
   Object.values(porDia).forEach(arr => arr.sort((a, b) => (a.ts || '').localeCompare(b.ts || '')));
@@ -12844,7 +13121,7 @@ async function renderAgenda() {
             <input type="text" class="input" value="${escapeHtml(f.busca || '')}" placeholder="Título, local, observações" oninput="_setAgFiltroDebounced('busca', this.value)">
           </div>
           <label style="display: flex; align-items: center; gap: 6px; font-size: 12px; cursor: pointer; white-space: nowrap;" title="Mostra os prazos do Kanban na Agenda, na data fatal, com ações inline">
-            <input type="checkbox" ${f.incluirPrazos ? 'checked' : ''} onchange="_setAgFiltro('incluirPrazos', this.checked)"> ⏰ Mostrar prazos
+            <input type="checkbox" ${f.incluirPrazos ? 'checked' : ''} onchange="_setAgFiltro('incluirPrazos', this.checked)"> ⏰ Prazos e tarefas
           </label>
         </div>
       </div>
@@ -12866,7 +13143,9 @@ async function renderAgenda() {
           </h3>
           ${porDia[dia].map(entry => entry.kind === 'compromisso'
             ? _renderCompromissoCard(entry.item, procById, cliById)
-            : _renderPrazoNaAgenda(entry.item, procById, today)
+            : entry.kind === 'tarefa'
+              ? _renderTarefaNaAgenda(entry.item, procById, today)
+              : _renderPrazoNaAgenda(entry.item, procById, today)
           ).join('')}
         </div>
       `;
@@ -12974,6 +13253,9 @@ function _renderAgendaCalendario(porDia, hoje, calRef, procById, cliById) {
                 const meta = _agTipoMeta(e.item.tipo);
                 const hora = e.item.dataHoraInicio ? new Date(e.item.dataHoraInicio).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '';
                 return `<div class="ag-cal-chip compromisso" style="border-left-color: ${meta.cor};" onclick="event.stopPropagation(); editarCompromisso('${e.item.id}')">${meta.icon} ${hora ? hora + ' ' : ''}${escapeHtml((e.item.titulo || meta.label).slice(0, 22))}</div>`;
+              } else if (e.kind === 'tarefa') {
+                const t = e.item;
+                return `<div class="ag-cal-chip" style="border-left: 3px solid var(--uc-green); background: var(--uc-cream);" onclick="event.stopPropagation(); _abrirDiaAgenda('${c.iso}')" title="✅ Tarefa">✅ ${escapeHtml((t.titulo || 'Tarefa').slice(0, 22))}</div>`;
               } else {
                 const d = e.item;
                 const dl = new Date(d.deadlineDate); dl.setHours(0,0,0,0);
@@ -13012,7 +13294,9 @@ function _abrirDiaAgenda(iso) {
           <p style="color: var(--uc-warm-gray); padding: 16px; text-align: center;">Sem eventos neste dia.</p>
         ` : eventos.map(e => e.kind === 'compromisso'
           ? _renderCompromissoCard(e.item, data.procById, data.cliById)
-          : _renderPrazoNaAgenda(e.item, data.procById, data.today)
+          : e.kind === 'tarefa'
+            ? _renderTarefaNaAgenda(e.item, data.procById, data.today)
+            : _renderPrazoNaAgenda(e.item, data.procById, data.today)
         ).join('')}
       </div>
       <div class="flex gap-2">
@@ -13034,6 +13318,35 @@ function _abrirDiaAgenda(iso) {
 // Card de prazo dentro da agenda — v6.29: botões inline pra cumprir/suspender/cancelar
 // sem precisar navegar pra /prazos. Mantém o → como atalho pra ver o histórico
 // completo do prazo no contexto do processo.
+// C1 — card compacto de tarefa dentro da Agenda (ações inline).
+function _renderTarefaNaAgenda(t, procById, today) {
+  const proc = t.processId ? procById[t.processId] : null;
+  const atrasada = _tarefaAtrasada(t, today);
+  return `
+    <div class="card" style="margin-bottom: 8px; padding: 10px 12px; border-left: 4px solid ${atrasada ? 'var(--uc-red)' : 'var(--uc-green)'}; background: var(--uc-cream);">
+      <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;">
+        <div style="flex: 1; min-width: 0;">
+          <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+            <span style="font-size: 13px;">✅</span>
+            <span class="badge badge-gray" style="font-size: 9px; background: var(--uc-graphite); color: var(--uc-cream);">TAREFA</span>
+            <strong style="color: var(--uc-black); font-size: 13.5px;">${escapeHtml(t.titulo)}</strong>
+            ${atrasada ? '<span class="badge badge-red" style="font-size: 9px;">atrasada</span>' : ''}
+            ${t.status === 'andamento' ? '<span class="badge badge-amber" style="font-size: 9px;">em andamento</span>' : ''}
+          </div>
+          <div style="font-size: 12px; color: var(--uc-warm-gray); margin-top: 2px;">
+            👤 ${escapeHtml((t.responsavel || '?').split(' ')[0])}
+            ${proc ? ` · <a onclick="event.stopPropagation(); navigate('process', { currentProcessId: '${proc.id}' })" style="cursor:pointer; color:var(--uc-gold);">${escapeHtml(proc.cnj || proc.name || 'processo')}</a>` : ''}
+          </div>
+        </div>
+        <div style="display: flex; gap: 2px; flex-shrink: 0;">
+          ${t.status === 'aberta' ? `<button class="btn btn-ghost btn-sm" onclick="event.stopPropagation(); mudarStatusTarefa('${t.id}','andamento')" title="Iniciar" style="padding: 2px 6px;">▶</button>` : ''}
+          <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation(); mudarStatusTarefa('${t.id}','concluida')" title="Concluir" style="padding: 2px 6px;">✓</button>
+          <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation(); editarTarefaFlow('${t.id}')" title="Editar" style="padding: 2px 6px;">✏</button>
+        </div>
+      </div>
+    </div>`;
+}
+
 function _renderPrazoNaAgenda(d, procById, today) {
   const proc = (d.processId && procById && typeof procById === 'object') ? procById[d.processId] : null;
   const visual = recomputarStatusVisual(d, today);
@@ -25784,6 +26097,28 @@ async function bootApp() {
     return r;
   };
 
+  // ====== Cache Tarefas (C1 — jul/2026) ======
+  const _remoteGetAllTarefas = DB.getAllTarefas.bind(DB);
+  const _remoteSaveTarefa = DB.saveTarefa.bind(DB);
+  const _remoteDeleteTarefa = DB.deleteTarefa.bind(DB);
+  let _tarCache = null, _tarCacheAt = 0;
+  DB.getAllTarefas = async () => {
+    if (_tarCache && (Date.now() - _tarCacheAt < CACHE_MS)) return _tarCache;
+    _tarCache = await _remoteGetAllTarefas();
+    _tarCacheAt = Date.now();
+    return _tarCache;
+  };
+  DB.saveTarefa = async (t) => {
+    const r = await _remoteSaveTarefa(t);
+    _tarCache = null; _tarCacheAt = 0;
+    return r;
+  };
+  DB.deleteTarefa = async (id) => {
+    const r = await _remoteDeleteTarefa(id);
+    _tarCache = null; _tarCacheAt = 0;
+    return r;
+  };
+
   // ====== Cache Modelos de Petição (v6.27 — Sprint Pet.0) ======
   const _remoteGetAllPeticaoModelos = DB.getAllPeticaoModelos.bind(DB);
   const _remoteSavePeticaoModelo = DB.savePeticaoModelo.bind(DB);
@@ -25915,6 +26250,8 @@ async function bootApp() {
   // 🛰 Varredura DataJud: movimentações da carteira via API pública do CNJ
   // (silencioso, no máx. 1x a cada 20h, lotes de 150 — só toast se achar novidade).
   datajudVarrerCarteira({ silencioso: true }).catch(err => console.warn('datajudVarrerCarteira:', err));
+  // ✅ Badge de tarefas abertas no nav (C1)
+  _atualizarBadgeTarefas().catch(() => {});
 
   // Load settings
   state.settings.theme = await DB.getSetting('theme', 'light');

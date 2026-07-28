@@ -16,7 +16,14 @@
 
 ### ▶️ Próxima sessão
 
-**Estado ao encerrar 06/07:** código em **v6.92.0**; **bloco B 100% + C7 + C8 concluídos**. Pendências manuais: ① publicar frontend (`git pull` + `firebase deploy --only hosting`, até o passo ② da migração sair) e ② **recolar `Drive.gs` (arquivo NOVO) + `Codigo.gs` no Apps Script** (ativa o Organizador do Drive — sem isso o botão retorna "unknown_action"). Próximos da fila: **C1 (tarefas com delegação)** — ou fechar a migração Google (runbook `docs/RUNBOOK_migracao_google.md`; ⚠️ zona DNS/MX antes de cancelar a LOCAWEB).
+**Estado ao encerrar 06/07:** código em **v6.93.0**; **blocos B e C (C1+C7+C8) concluídos** — só restam infra (D) e decisões (E). **Pendências manuais em UM combo** (na pasta do repo, máquina do Marco): ① `git pull origin main` · ② `firebase deploy --only hosting` (frontend v6.90→v6.93) · ③ `firebase deploy --only firestore:rules` (collection nova `tarefas` — sem isso a página Tarefas dá permission-denied) · ④ recolar no Apps Script: `Drive.gs` (arquivo NOVO) + `Codigo.gs` (ativa o Organizador do Drive). Próximo: fechar a migração Google (passos ② deploy automático e ③ domínio — runbook `docs/RUNBOOK_migracao_google.md`; ⚠️ zona DNS/MX antes de cancelar a LOCAWEB) ou bloco D.
+
+### ✅ C1 — Tarefas com delegação (v6.93.0, sessão 06/07)
+
+- Página **Tarefas** (nav desktop+mobile, badge de abertas): kanban leve **A fazer → Em andamento → Concluídas (14d)**, filtro por responsável, criação/edição/conclusão com `logs[]` auditável (quem/quando/o quê), soft-delete. Painel de **produtividade 30d** por advogado (abertas · atrasadas · concluídas · % no prazo).
+- **Agenda integrada**: tarefa com prazo aparece na lista e no calendário (chip ✅ verde) com ações inline (iniciar/concluir/editar); toggle da Agenda virou "⏰ Prazos e tarefas". Botão "✅ Nova tarefa" nas Ações do processo (vincula automaticamente).
+- Dados: collection Firestore `tarefas` via helpers genéricos do api.js (`getAll_`/`upsert_`/`softDelete_`), regra adicionada ao `firestore.rules` (padrão isInternal/canWrite), cache TTL no boot, stubs offline. **Zero backend Apps Script.**
+- Testes: 10 casos (atraso por dia-calendário, produtividade — janela 30d, atrasadas, % no prazo, cancelada não conta) + parse global.
 
 Decisões pendentes do titular: **E1 reativar e-mails — um clique no painel 🔔** · E2 piloto de descoberta por OAB ~R$ 50–250/mês.
 

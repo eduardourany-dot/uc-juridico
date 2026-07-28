@@ -45,7 +45,7 @@
 
 | # | Item | Esforço / custo | Notas |
 |---|---|---|---|
-| C1 | **Tarefas genéricas com delegação** ("ligar pro cliente", "elaborar contrato") no Kanban + produtividade por advogado | ~1-2 dias | Estilo ADVBOX Taskscore; dados de etapas/logs já existem |
+| C1 | ✅ **Tarefas com delegação** (**v6.93.0**) — página Tarefas (nav + badge): kanban A fazer→Andamento→Concluídas, delegação, prazo opcional (aparece na Agenda), vínculo a processo, produtividade 30d por advogado | feito 06/07 | ⚠️ **requer `firebase deploy --only firestore:rules`** (collection nova `tarefas`) |
 | C2 | **Cobrança automática** — boleto/PIX via gateway (Asaas ou similar) + NFS-e depois, ligado nas parcelas de honorários | ~3 dias + taxa gateway | Impacto direto em inadimplência |
 | C3 | **Assinatura eletrônica** (era o P6) — procuração/contrato → API ZapSign/Autentique → cliente assina no celular | ~1-2 dias | Autentique tem plano grátis |
 | C4 | **Descoberta de processos novos por OAB** (única coisa que EXIGE serviço pago — DataJud não busca por OAB, por LGPD) | R$ 49,90–249,90/mês | Piloto sem fidelidade: Escavador Avançado (R$ 49,90) ou Judit Plataforma Advogado (R$ 249,90). API integrada (Judit: setup R$ 5k + R$ 1k/mês) só se o piloto provar valor |

@@ -606,6 +606,11 @@ const RemoteDB = {
   async saveDeadline(d) { return await upsert_('prazos', d); },
   async deleteDeadline(id) { return await softDelete_('prazos', id); },
 
+  // ====== C1 — Tarefas com delegação (jul/2026) ======
+  async getAllTarefas() { return await getAll_('tarefas'); },
+  async saveTarefa(t) { return await upsert_('tarefas', t); },
+  async deleteTarefa(id) { return await softDelete_('tarefas', id); },
+
   // Notas
   async getNotesByProcess(pid) {
     return (await getAll_('notas')).filter(n => n.processId === pid);
