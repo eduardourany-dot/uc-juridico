@@ -612,6 +612,7 @@ const RemoteDB = {
   async deleteTarefa(id) { return await softDelete_('tarefas', id); },
 
   // Notas
+  async getAllNotes() { return await getAll_('notas'); },
   async getNotesByProcess(pid) {
     return (await getAll_('notas')).filter(n => n.processId === pid);
   },

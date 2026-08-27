@@ -282,6 +282,15 @@ body.cliente-mode .nav-section { display: none !important; }
       </video>
     </div>
 
+    <button onclick="abrirBuscaGlobal()" title="Buscar em todo o sistema (Ctrl+K)"
+      style="display:flex;align-items:center;gap:8px;margin:12px 16px 4px;padding:8px 12px;width:calc(100% - 32px);
+             background:var(--uc-cream);border:1px solid var(--uc-line);border-radius:8px;cursor:pointer;
+             color:var(--uc-warm-gray);font-family:inherit;font-size:13px;text-align:left;">
+      <span style="font-size:14px;">🔎</span>
+      <span style="flex:1;">Buscar…</span>
+      <kbd style="font-size:9.5px;border:1px solid var(--uc-line);border-radius:3px;padding:1px 5px;">Ctrl K</kbd>
+    </button>
+
     <div class="nav-section">Carteira</div>
     <a class="nav-item" data-route="dashboard">
       <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/></svg>
@@ -532,6 +541,7 @@ const DB = {
 
   // Notes
   async getNotesByProcess(pid) { return await dbPromise('notes', 'readonly', s => new Promise(res => { const r = s.index('processId').getAll(pid); r.onsuccess = () => res(r.result); })); },
+  async getAllNotes() { return await dbPromise('notes', 'readonly', s => new Promise(res => { const r = s.getAll(); r.onsuccess = () => res(r.result); })); },
   async saveNote(n) { await dbPromise('notes', 'readwrite', s => s.put(n)); return n; },
   async deleteNote(id) { await dbPromise('notes', 'readwrite', s => s.delete(id)); },
 
@@ -12684,6 +12694,230 @@ async function _atualizarBadgeTarefas() {
       else el.classList.add('hidden');
     }
   } catch (e) { /* offline/sem login — badge fica oculto */ }
+}
+
+// ====================================================================
+// C9 — Busca global (Ctrl+K)
+// ====================================================================
+// Uma caixa só que atravessa o sistema inteiro: processos, clientes,
+// prazos, tarefas, publicações, notas e agenda. Resolve a dor nº 1 do
+// escritório — "onde é que está aquilo?" — sem precisar adivinhar em
+// qual tela o dado mora. Tudo em memória (os dados já vêm do cache do
+// boot), então a resposta é instantânea e funciona offline.
+//
+// Casamento tolerante: ignora acento e caixa; número entra também como
+// dígitos puros (digitar "5142789" acha o CNJ formatado, e "12345678901"
+// acha o CPF com pontuação).
+
+const BG_GRUPOS = [
+  { chave: 'processos',    label: 'Processos',   icone: '⚖️' },
+  { chave: 'clientes',     label: 'Clientes',    icone: '👤' },
+  { chave: 'prazos',       label: 'Prazos',      icone: '⏰' },
+  { chave: 'tarefas',      label: 'Tarefas',     icone: '✅' },
+  { chave: 'publicacoes',  label: 'Publicações', icone: '📬' },
+  { chave: 'compromissos', label: 'Agenda',      icone: '📅' },
+  { chave: 'notas',        label: 'Notas',       icone: '📝' }
+];
+const BG_MAX_POR_GRUPO = 6;
+
+function _bgNorm(s) {
+  return String(s == null ? '' : s)
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .toLowerCase().replace(/\s+/g, ' ').trim();
+}
+function _bgDigitos(s) { return String(s == null ? '' : s).replace(/\D/g, ''); }
+
+// Casa o termo contra os campos. Retorna 0 (sem match), 1 (contém) ou
+// 2 (começa com / número bate) — o peso ordena os resultados.
+function _bgPeso(termoNorm, termoDig, campos, numeros) {
+  let peso = 0;
+  for (const c of (campos || [])) {
+    const v = _bgNorm(c);
+    if (!v || !termoNorm) continue;
+    if (v.startsWith(termoNorm)) return 2;
+    if (v.includes(termoNorm)) peso = Math.max(peso, 1);
+  }
+  if (termoDig && termoDig.length >= 3) {
+    for (const n of (numeros || [])) {
+      const d = _bgDigitos(n);
+      if (d && d.includes(termoDig)) return 2;
+    }
+  }
+  return peso;
+}
+
+// Filtro puro (testável): recebe o termo e os dados já carregados,
+// devolve { total, grupos:[{chave,label,icone,itens,total}] }.
+function _buscaGlobalFiltrar(termo, dados) {
+  const t = _bgNorm(termo);
+  const td = _bgDigitos(termo);
+  if (t.length < 2 && td.length < 3) return { total: 0, grupos: [] };
+  const d = dados || {};
+  const procById = {};
+  (d.processos || []).forEach(p => { procById[p.id] = p; });
+  const nomeProc = id => {
+    const p = procById[id];
+    return p ? (normalizeCnj(p.cnj) || p.cnj || p.name || 'processo') : '';
+  };
+
+  const achados = {
+    processos: (d.processos || []).filter(x => !x.deletedAt).map(p => ({
+      peso: _bgPeso(t, td, [p.name, p.client, p.parteAdversa, p.court, p.comarca, p.area], [p.cnj]),
+      titulo: p.name || normalizeCnj(p.cnj) || 'Processo',
+      sub: [normalizeCnj(p.cnj) || p.cnj, p.client, p.area].filter(Boolean).join(' · '),
+      tipo: 'processo', id: p.id
+    })),
+    clientes: (d.clientes || []).filter(x => !x.deletedAt).map(c => ({
+      peso: _bgPeso(t, td, [c.nome, c.email, c.cidade], [c.cpfCnpj, c.telefone]),
+      titulo: c.nome || 'Cliente',
+      sub: [c.cpfCnpj, c.email, c.telefone].filter(Boolean).join(' · '),
+      tipo: 'cliente', id: c.id
+    })),
+    prazos: (d.prazos || []).filter(x => !x.deletedAt && !prazoEstaResolvido(x)).map(pz => ({
+      peso: _bgPeso(t, td, [pz.description, pz.tipoEscolhidoLabel, nomeProc(pz.processId)], []),
+      titulo: pz.description || pz.tipoEscolhidoLabel || 'Prazo',
+      sub: [nomeProc(pz.processId), pz.deadlineDate ? 'fatal ' + formatDate(pz.deadlineDate) : ''].filter(Boolean).join(' · '),
+      tipo: 'prazo', id: pz.id, processId: pz.processId
+    })),
+    tarefas: (d.tarefas || []).filter(x => !x.deletedAt && x.status !== 'concluida').map(tf => ({
+      peso: _bgPeso(t, td, [tf.titulo, tf.descricao, tf.responsavel], []),
+      titulo: tf.titulo || 'Tarefa',
+      sub: [(tf.responsavel || '').split(' ')[0], tf.prazoData ? formatDate(tf.prazoData) : '', nomeProc(tf.processId)].filter(Boolean).join(' · '),
+      tipo: 'tarefa', id: tf.id
+    })),
+    publicacoes: (d.publicacoes || []).map(pb => ({
+      peso: _bgPeso(t, td, [pb.orgao, pb.tribunal, (pb.texto || '').slice(0, 600)], [pb.cnj]),
+      titulo: [pb.tipo || 'Publicação', pb.orgao].filter(Boolean).join(' · ').slice(0, 90),
+      sub: [normalizeCnj(pb.cnj) || pb.cnj, pb.dataDisponibilizacao ? formatDate(pb.dataDisponibilizacao) : ''].filter(Boolean).join(' · '),
+      tipo: 'publicacao', id: pb.hash
+    })),
+    compromissos: (d.compromissos || []).filter(x => !x.deletedAt).map(cp => ({
+      peso: _bgPeso(t, td, [cp.titulo, cp.local, cp.observacoes, cp.responsavel], []),
+      titulo: cp.titulo || 'Compromisso',
+      sub: [cp.dataHoraInicio ? formatDate(cp.dataHoraInicio) : '', cp.local].filter(Boolean).join(' · '),
+      tipo: 'compromisso', id: cp.id
+    })),
+    notas: (d.notas || []).filter(x => !x.deletedAt).map(nt => ({
+      peso: _bgPeso(t, td, [nt.text], []),
+      titulo: (nt.text || '').slice(0, 90) || 'Nota',
+      sub: [nomeProc(nt.processId), nt.createdAt ? formatDate(nt.createdAt) : ''].filter(Boolean).join(' · '),
+      tipo: 'nota', id: nt.id, processId: nt.processId
+    }))
+  };
+
+  const grupos = [];
+  let total = 0;
+  for (const g of BG_GRUPOS) {
+    const hits = (achados[g.chave] || []).filter(x => x.peso > 0)
+      .sort((a, b) => b.peso - a.peso || String(a.titulo).localeCompare(String(b.titulo), 'pt-BR'));
+    if (!hits.length) continue;
+    total += hits.length;
+    grupos.push({ chave: g.chave, label: g.label, icone: g.icone, total: hits.length, itens: hits.slice(0, BG_MAX_POR_GRUPO) });
+  }
+  return { total, grupos };
+}
+
+// Ação de navegação por tipo de resultado.
+function _bgIr(tipo, id, processId) {
+  const modal = document.querySelector('[data-busca-global]');
+  if (modal) modal.remove();
+  if (tipo === 'processo') navigate('process', { currentProcessId: id });
+  else if (tipo === 'cliente') navigate('clienteDetalhe', { currentClienteId: id });
+  else if (tipo === 'prazo' || tipo === 'nota') {
+    if (processId) navigate('process', { currentProcessId: processId });
+    else navigate('deadlines');
+  }
+  else if (tipo === 'tarefa') navigate('tarefas');
+  else if (tipo === 'publicacao') navigate('deadlines');
+  else if (tipo === 'compromisso') navigate('agenda');
+}
+
+let _bgDados = null, _bgDebounce = null;
+
+async function abrirBuscaGlobal(termoInicial) {
+  if (document.querySelector('[data-busca-global]')) return;
+  const modal = document.createElement('div');
+  modal.className = 'modal-backdrop';
+  modal.setAttribute('data-busca-global', '1');
+  modal.style.alignItems = 'flex-start';
+  modal.style.paddingTop = '10vh';
+  modal.innerHTML = `
+    <div class="modal" style="max-width: 640px; padding: 0; overflow: hidden;">
+      <div style="padding: 14px 18px; border-bottom: 1px solid var(--uc-line); display: flex; align-items: center; gap: 10px;">
+        <span style="font-size: 16px;">🔎</span>
+        <input id="_bgInput" type="text" placeholder="Buscar em todo o sistema — processo, cliente, CNJ, prazo, tarefa…"
+          style="flex: 1; border: none; outline: none; background: transparent; font-size: 15px; color: var(--uc-black); font-family: inherit;"
+          autocomplete="off" spellcheck="false">
+        <kbd style="font-size: 10px; color: var(--uc-warm-gray); border: 1px solid var(--uc-line); border-radius: 4px; padding: 2px 6px;">esc</kbd>
+      </div>
+      <div id="_bgResultados" class="scroll-thin" style="max-height: 60vh; overflow-y: auto; padding: 8px;">
+        <p class="help-text" style="padding: 18px; text-align: center;">Digite pelo menos 2 letras (ou 3 dígitos de um número).</p>
+      </div>
+    </div>`;
+  $('modalContainer').appendChild(modal);
+
+  const input = document.getElementById('_bgInput');
+  const box = document.getElementById('_bgResultados');
+  input.focus();
+  modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Escape') { modal.remove(); }
+    if (e.key === 'Enter') {
+      const primeiro = box.querySelector('[data-bg-item]');
+      if (primeiro) primeiro.click();
+    }
+  });
+
+  // Carrega uma vez por abertura (tudo já vem do cache de 5 min).
+  box.innerHTML = '<p class="help-text" style="padding:18px;text-align:center;">Carregando…</p>';
+  try {
+    const [processos, clientes, prazos, tarefas, publicacoes, compromissos, notas] = await Promise.all([
+      DB.getAllProcesses().catch(() => []),
+      DB.getAllClientes().catch(() => []),
+      DB.getAllDeadlines().catch(() => []),
+      DB.getAllTarefas().catch(() => []),
+      DB.getAllDjenPublications().catch(() => []),
+      DB.getAllCompromissos().catch(() => []),
+      DB.getAllNotes ? DB.getAllNotes().catch(() => []) : Promise.resolve([])
+    ]);
+    _bgDados = { processos, clientes, prazos, tarefas, publicacoes, compromissos, notas };
+  } catch (e) {
+    _bgDados = {};
+  }
+  box.innerHTML = '<p class="help-text" style="padding:18px;text-align:center;">Digite pelo menos 2 letras (ou 3 dígitos de um número).</p>';
+  if (termoInicial) { input.value = termoInicial; }
+  _bgRenderResultados(input.value, box);
+
+  input.addEventListener('input', () => {
+    clearTimeout(_bgDebounce);
+    _bgDebounce = setTimeout(() => _bgRenderResultados(input.value, box), 160);
+  });
+}
+
+function _bgRenderResultados(termo, box) {
+  if (!box) return;
+  const r = _buscaGlobalFiltrar(termo, _bgDados || {});
+  if (!r.grupos.length) {
+    box.innerHTML = `<p class="help-text" style="padding:18px;text-align:center;">${(_bgNorm(termo).length >= 2 || _bgDigitos(termo).length >= 3)
+      ? 'Nada encontrado para <strong>' + escapeHtml(termo) + '</strong>.'
+      : 'Digite pelo menos 2 letras (ou 3 dígitos de um número).'}</p>`;
+    return;
+  }
+  box.innerHTML = r.grupos.map(g => `
+    <div style="margin-bottom: 10px;">
+      <div style="font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: var(--uc-warm-gray); padding: 6px 10px 4px;">
+        ${g.icone} ${g.label}${g.total > g.itens.length ? ' · mostrando ' + g.itens.length + ' de ' + g.total : ''}
+      </div>
+      ${g.itens.map(it => `
+        <div data-bg-item tabindex="0" onclick="_bgIr('${it.tipo}','${it.id}','${it.processId || ''}')"
+          onkeydown="if(event.key==='Enter'){this.click()}"
+          style="padding: 8px 10px; border-radius: 6px; cursor: pointer; display: flex; flex-direction: column; gap: 2px;"
+          onmouseover="this.style.background='var(--uc-cream)'" onmouseout="this.style.background='transparent'"
+          onfocus="this.style.background='var(--uc-cream)'" onblur="this.style.background='transparent'">
+          <span style="font-size: 13.5px; font-weight: 600; color: var(--uc-black);">${escapeHtml(it.titulo)}</span>
+          ${it.sub ? `<span style="font-size: 11.5px; color: var(--uc-warm-gray);">${escapeHtml(it.sub)}</span>` : ''}
+        </div>`).join('')}
+    </div>`).join('');
 }
 
 async function renderTarefas() {
@@ -26252,6 +26486,19 @@ async function bootApp() {
   datajudVarrerCarteira({ silencioso: true }).catch(err => console.warn('datajudVarrerCarteira:', err));
   // ✅ Badge de tarefas abertas no nav (C1)
   _atualizarBadgeTarefas().catch(() => {});
+
+  // 🔎 Busca global (C9): Ctrl+K / ⌘K em qualquer tela. Ignora quando o
+  // usuário está digitando num campo (pra não roubar o atalho do navegador
+  // dentro de formulários) e quando já há modal aberto.
+  document.addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && (e.key === 'k' || e.key === 'K')) {
+      const alvo = e.target;
+      const digitando = alvo && (alvo.tagName === 'INPUT' || alvo.tagName === 'TEXTAREA' || alvo.isContentEditable);
+      if (digitando) return;
+      e.preventDefault();
+      abrirBuscaGlobal();
+    }
+  });
 
   // Load settings
   state.settings.theme = await DB.getSetting('theme', 'light');

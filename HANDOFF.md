@@ -16,7 +16,14 @@
 
 ### ▶️ Próxima sessão
 
-**Estado ao encerrar 06/07:** código em **v6.93.0**; **blocos B e C (C1+C7+C8) concluídos** — só restam infra (D) e decisões (E). **Pendências manuais em UM combo** (na pasta do repo, máquina do Marco): ① `git pull origin main` · ② `firebase deploy --only hosting` (frontend v6.90→v6.93) · ③ `firebase deploy --only firestore:rules` (collection nova `tarefas` — sem isso a página Tarefas dá permission-denied) · ④ recolar no Apps Script: `Drive.gs` (arquivo NOVO) + `Codigo.gs` (ativa o Organizador do Drive). Próximo: fechar a migração Google (passos ② deploy automático e ③ domínio — runbook `docs/RUNBOOK_migracao_google.md`; ⚠️ zona DNS/MX antes de cancelar a LOCAWEB) ou bloco D.
+**Estado ao encerrar 06/07:** código em **v6.94.0**; **bloco B completo + C1, C7, C8 e C9 entregues**. Fila do bloco C, nascida da análise das peças de mercado (imersão "sistema de gestão"): **C10 central de documentos no processo** (~1-2 dias, o gap mais legítimo) · **C11 conversa da equipe no processo** (~1 dia) · C12 e-mail no processo (avaliar). Depois: infra (D) e decisões (E). **Pendências manuais em UM combo** (na pasta do repo, máquina do Marco): ① `git pull origin main` · ② `firebase deploy --only hosting` (frontend v6.90→v6.93) · ③ `firebase deploy --only firestore:rules` (collection nova `tarefas` — sem isso a página Tarefas dá permission-denied) · ④ recolar no Apps Script: `Drive.gs` (arquivo NOVO) + `Codigo.gs` (ativa o Organizador do Drive). Próximo: fechar a migração Google (passos ② deploy automático e ③ domínio — runbook `docs/RUNBOOK_migracao_google.md`; ⚠️ zona DNS/MX antes de cancelar a LOCAWEB) ou bloco D.
+
+### 🔎 C9 — Busca global (v6.94.0, sessão 06/07)
+
+- **Ctrl+K / ⌘K** em qualquer tela + botão no topo da barra lateral. Uma caixa que atravessa **processos, clientes, prazos, tarefas, publicações, agenda e notas** — resolve a dor "informações difíceis de achar" (a nº 1 das peças de mercado analisadas).
+- Casamento tolerante: ignora acento/caixa (`_bgNorm`) e casa por **dígitos** (`5142789` acha o CNJ formatado; `12345678` acha o CNPJ pontuado). Busca dentro do **teor** da publicação e do texto da nota. Peso 2 pra "começa com", 1 pra "contém" — ordena por relevância. Exclui apagados, prazos resolvidos e tarefas concluídas.
+- Tudo em memória a partir do cache do boot (instantâneo, funciona offline). Enter abre o primeiro resultado, Esc fecha, clique fora fecha. Novo `DB.getAllNotes` (api.js + stub IndexedDB).
+- Testes: 19 casos (termo curto, nome, CNJ/CNPJ por dígitos, acento nos dois sentidos, teor de publicação e nota, exclusões, pesos) + parse do index e do api.js.
 
 ### ✅ C1 — Tarefas com delegação (v6.93.0, sessão 06/07)
 

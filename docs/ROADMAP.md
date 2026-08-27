@@ -53,6 +53,10 @@
 | C6 | **Timesheet + faturamento por hora** | ~2 dias | **Só se** o escritório passar a cobrar por hora; senão pular |
 | C7 | ✅ **Organizador de documentos do Drive** (**v6.92.0**) — card em Ferramentas: link da pasta → IA classifica cada arquivo (Gemini multimodal, 11 tipos + CNJ/data/título) → revisão editável → renomeia `{CNJ}_{tipo}_{data}_{título}` e agrupa em subpastas por categoria + relatório | feito 06/07 | ⚠️ **requer recolar `Drive.gs` (NOVO) + `Codigo.gs`** no Apps Script pra ativar |
 | C8 | ✅ **Segmentador de autos** (**v6.91.0**) — botão "✂️ Segmentar autos" nas Ações do processo: PDF consolidado → IA propõe índice de peças (`[PÁGINA N]`, taxonomia de 11 tipos) → revisão editável obrigatória → pdf-lib recorta e baixa cada peça + índice vira nota | feito 06/07 | Reusa a action gerarPeticaoIA (zero backend novo). Evolução futura: salvar peças direto no Drive (junto do C7) |
+| C9 | ✅ **Busca global** (**v6.94.0**) — Ctrl+K/⌘K + botão na barra lateral: uma caixa que atravessa processos, clientes, prazos, tarefas, publicações, agenda e notas; tolera acento e busca por dígitos (CNJ/CPF/CNPJ), varre o teor das publicações | feito 06/07 | Nasceu da análise das peças do mercado: era a dor "informações difíceis de achar" |
+| C10 | **Central de documentos no processo** — aba própria reunindo PDFs importados, peças geradas, autos segmentados e arquivos do Drive vinculados, com tipo, data, autor e link | ~1-2 dias | Hoje o documento existe mas está espalhado em três lugares; nenhuma tela responde "cadê a procuração?" |
+| C11 | **Conversa da equipe no processo** — mural de comentários com menção a advogado (vira push) e histórico no caso | ~1 dia | Hoje isso vive no WhatsApp e evapora. Fecha o "equipe alinhada"; o módulo de comunicações registra contato com o CLIENTE, não a discussão interna |
+| C12 | **E-mail dentro do processo** (avaliar) — anexar/arquivar e-mail do Workspace no caso | ~2-3 dias | Última das fontes espalhadas que ainda não capturamos. Maior custo, menor retorno imediato — deixar por último |
 
 ### BLOCO D — Infraestrutura (a dor operacional crônica)
 
