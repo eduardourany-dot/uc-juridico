@@ -48,7 +48,8 @@ const COLECOES_BACKUP = [
   'honorarios',
   'comunicacoes',
   'compromissos',
-  'peticao_modelos'
+  'peticao_modelos',
+  'tarefas'
 ];
 
 // Quantos backups manter na pasta. Os mais antigos são apagados.

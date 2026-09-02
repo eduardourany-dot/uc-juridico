@@ -1290,7 +1290,7 @@ function _torreCalcular(deadlines, processes, today, djenPubs) {
     // Pra próximas janelas, considera só ativo
     if (prazoEstaResolvido(d)) continue;
     if (!d.deadlineDate) continue;
-    const dl = new Date(d.deadlineDate); dl.setHours(0, 0, 0, 0);
+    const dl = _diaFatalLocal(d.deadlineDate);   // B5.1: uma única forma de ancorar o dia-calendário em todo o app
     const days = Math.round((dl.getTime() - t) / 86400000);
     let bucket = null;
     if (days < 0) bucket = 'vencidos';
@@ -1422,11 +1422,15 @@ async function renderDashboard() {
   try { djenPubsAll = await DB.getAllDjenPublications(); } catch (e) { /* ok */ }
   const activeDeadlines = deadlines.filter(d => prazoEstaAtivo(d));
   const today = new Date(); today.setHours(0,0,0,0);
+  // B5.1 — a data fatal é gravada ao MEIO-DIA local, então a diferença pro
+  // hoje-à-meia-noite carrega meia casa: o Math.ceil arredondava tudo pra cima
+  // e a janela "0 a 5 dias" era na prática 0 a 4. _diaFatalLocal ancora no
+  // dia-calendário e o round passa a contar dias inteiros de verdade.
   const urgentDeadlines = activeDeadlines.filter(d => {
-    const diff = Math.ceil((new Date(d.deadlineDate) - today) / 86400000);
+    const diff = Math.round((_diaFatalLocal(d.deadlineDate) - today) / 86400000);
     return diff <= 5 && diff >= 0;
   });
-  const expiredDeadlines = activeDeadlines.filter(d => new Date(d.deadlineDate) < today);
+  const expiredDeadlines = activeDeadlines.filter(d => _diaFatalLocal(d.deadlineDate) < today);
 
   // Próximos compromissos (próximos 7 dias, status agendado/confirmado/adiado)
   const semanaMs = today.getTime() + 7 * 86400000;
@@ -1460,15 +1464,11 @@ async function renderDashboard() {
     return proc?.advogadoResponsavel === meuNome;
   });
 
-  const prazosVencidos = meusPrazosAtivos.filter(d => new Date(d.deadlineDate) < today);
-  const prazosHoje = meusPrazosAtivos.filter(d => {
-    const dl = new Date(d.deadlineDate); dl.setHours(0,0,0,0);
-    return dl.getTime() === today.getTime();
-  });
-  const prazosAmanha = meusPrazosAtivos.filter(d => {
-    const dl = new Date(d.deadlineDate); dl.setHours(0,0,0,0);
-    return dl.getTime() === amanhaMs;
-  });
+  // B5.1 — mesma âncora de dia-calendário dos demais painéis (_diaFatalLocal),
+  // pra "Meu dia" não divergir da lista de prazos nem da régua de marcos.
+  const prazosVencidos = meusPrazosAtivos.filter(d => _diaFatalLocal(d.deadlineDate) < today);
+  const prazosHoje = meusPrazosAtivos.filter(d => _diaFatalLocal(d.deadlineDate).getTime() === today.getTime());
+  const prazosAmanha = meusPrazosAtivos.filter(d => _diaFatalLocal(d.deadlineDate).getTime() === amanhaMs);
 
   // Compromissos: sou responsável ou estou em participantes
   const compsHoje = (compromissosAll || []).filter(c => {
@@ -1566,8 +1566,7 @@ async function renderDashboard() {
                 <p class="text-xs smallcaps" style="color: var(--uc-red); font-weight: 600; margin: 0 0 6px;">⚠ Publicações vencidas · ${prazosVencidos.length}</p>
                 ${prazosVencidos.slice(0, 5).map(d => {
                   const proc = procsById[d.processId];
-                  const dl = new Date(d.deadlineDate); dl.setHours(0,0,0,0);
-                  const dias = Math.abs(Math.ceil((dl - today) / 86400000));
+                  const dias = Math.abs(Math.round((_diaFatalLocal(d.deadlineDate) - today) / 86400000));
                   return `
                     <div style="padding: 6px 0; border-bottom: 1px solid rgba(168, 71, 45, 0.2); font-size: 12px;">
                       <div style="display: flex; justify-content: space-between; gap: 6px;">
@@ -1785,7 +1784,7 @@ function renderDeadlineRowMini(d, processes) {
   const proc = processes.find(p => p.id === d.processId);
   const today = new Date(); today.setHours(0,0,0,0);
   const deadlineDate = new Date(d.deadlineDate);
-  const daysLeft = Math.ceil((deadlineDate - today) / 86400000);
+  const daysLeft = Math.round((_diaFatalLocal(d.deadlineDate) - today) / 86400000);   // B5.1: dia-calendário local
   let cls = 'safe', label = `${daysLeft} dias`;
   if (daysLeft < 0) { cls = 'expired'; label = `vencido há ${Math.abs(daysLeft)}d`; }
   else if (daysLeft === 0) { cls = 'urgent'; label = 'HOJE'; }
@@ -2772,7 +2771,7 @@ async function gerarRelatorioClienteFlow(clienteId) {
     const hoje0 = new Date(); hoje0.setHours(0, 0, 0, 0);
     const deadlinesRelevantes = deadlines.filter(d => {
       if (d.cumprida || d.cancelada || d.deletedAt) return false;
-      const dataFatal = new Date(d.deadlineDate || d.date);
+      const dataFatal = _diaFatalLocal(d.deadlineDate || d.date);   // B5.1: dia-calendário local
       if (isNaN(dataFatal)) return false;
       const venceu = dataFatal < hoje0;
       return incluirVencidos || !venceu;
@@ -4670,7 +4669,7 @@ function renderProcessOverview(p, events, deadlines, notes, jurisprudence) {
   const compromissos = state._processView?.compromissos || [];
   const today = new Date(); today.setHours(0,0,0,0);
   const nextDeadline = activeDeadlines
-    .map(d => ({ ...d, days: Math.ceil((new Date(d.deadlineDate) - today) / 86400000) }))
+    .map(d => ({ ...d, days: Math.round((_diaFatalLocal(d.deadlineDate) - today) / 86400000) }))   // B5.1: dia-calendário local
     .sort((a,b) => a.days - b.days)[0];
 
   return `
@@ -7205,6 +7204,7 @@ async function segmentarAutosFlow() {
   const bytes = new Uint8Array(await file.arrayBuffer());
 
   const prog = _segProgressModal();
+  let prog2 = null;   // declarado fora do try pro catch conseguir fechar (senão o spinner trava a tela)
   try {
     // 2. Extração de texto página a página
     prog.set('Lendo o PDF…');
@@ -7248,8 +7248,10 @@ async function segmentarAutosFlow() {
     if (!revisadas) return;
 
     // 5. Recorte com pdf-lib + downloads
-    const prog2 = _segProgressModal();
-    const src = await PDFLib.PDFDocument.load(bytes);
+    prog2 = _segProgressModal();
+    // ignoreEncryption: autos do Projudi/PJe vêm com proteção de impressão/cópia;
+    // sem isso o pdf-lib recusa no ÚLTIMO passo, depois da IA e da revisão manual.
+    const src = await PDFLib.PDFDocument.load(bytes.slice(0), { ignoreEncryption: true });
     for (let n = 0; n < revisadas.length; n++) {
       const pc = revisadas[n];
       prog2.set(`Gerando peça ${n + 1}/${revisadas.length}: ${pc.titulo}`);
@@ -7263,7 +7265,7 @@ async function segmentarAutosFlow() {
         String(n + 1).padStart(2, '0') + ' - ' + _segSanitizarNome(pc.titulo) + ' (p' + pc.ini + '-' + pc.fim + ').pdf');
       await new Promise(r => setTimeout(r, 350)); // respiro entre downloads
     }
-    prog2.close();
+    prog2.close(); prog2 = null;
 
     // 6. Índice auditável como nota do processo
     const indice = revisadas.map((pc, n) =>
@@ -7277,6 +7279,7 @@ async function segmentarAutosFlow() {
     if (state.currentRoute === 'process') renderProcessDetail();
   } catch (e) {
     prog.close();
+    if (prog2) prog2.close();
     console.error('[segmentador]', e);
     toast('Falha na segmentação', String(e?.message || e), 'error');
   }
@@ -7405,72 +7408,89 @@ async function organizadorDriveFlow() {
   try {
     prog.set('Listando a pasta…');
     lista = await DB.driveListarPasta(r[0]);
-  } catch (e) { prog.close(); toast('Falha ao listar', String(e?.message || e), 'error'); return; }
+  } catch (e) {
+    prog.close();
+    const msg = String(e?.message || e);
+    if (msg.includes('write_required')) toast('Sem permissão', 'O organizador altera arquivos do Drive — só perfis admin e advogado podem usar.', 'error');
+    else toast('Falha ao listar', msg, 'error');
+    return;
+  }
   prog.close();
   if (lista?.error) { toast('Não deu pra listar', lista.message || lista.error, 'error'); return; }
   if (!lista.arquivos?.length) { toast('Pasta vazia', 'Nenhum arquivo encontrado (subpastas não são varridas).', 'info'); return; }
 
-  // 2. Seleção
-  const selecionados = await _orgModalSelecao(lista);
-  if (!selecionados || !selecionados.length) return;
+  // Progressos declarados fora do try: o finally garante que nenhum spinner
+  // fique travando a tela se algo estourar no meio (só sairia recarregando).
+  let prog2 = null, prog3 = null;
+  try {
+    // 2. Seleção
+    const selecionados = await _orgModalSelecao(lista);
+    if (!selecionados || !selecionados.length) return;
 
-  // 3. Classificação um a um (falha em um não derruba o lote)
-  const prog2 = _segProgressModal();
-  const itens = [];
-  for (let i = 0; i < selecionados.length; i++) {
-    const arq = selecionados[i];
-    prog2.set(`Classificando ${i + 1}/${selecionados.length}: ${arq.nome}`);
-    try {
-      const resp = await DB.driveClassificarArquivo(arq.id);
-      if (resp?.classificacao) {
-        const cls = resp.classificacao;
-        itens.push({ ...arq, cls, novoNome: _orgMontarNome(cls, _orgExt(arq.nome)), erro: null });
-      } else {
-        itens.push({ ...arq, cls: null, novoNome: arq.nome, erro: resp?.error || 'sem_resposta' });
+    // 3. Classificação um a um (falha em um não derruba o lote)
+    prog2 = _segProgressModal();
+    const itens = [];
+    for (let i = 0; i < selecionados.length; i++) {
+      const arq = selecionados[i];
+      prog2.set(`Classificando ${i + 1}/${selecionados.length}: ${arq.nome}`);
+      try {
+        const resp = await DB.driveClassificarArquivo(arq.id);
+        if (resp?.classificacao) {
+          const cls = resp.classificacao;
+          itens.push({ ...arq, cls, novoNome: _orgMontarNome(cls, _orgExt(arq.nome)), erro: null });
+        } else {
+          itens.push({ ...arq, cls: null, novoNome: arq.nome, erro: resp?.error || 'sem_resposta' });
+        }
+      } catch (e) {
+        itens.push({ ...arq, cls: null, novoNome: arq.nome, erro: String(e?.message || e) });
       }
-    } catch (e) {
-      itens.push({ ...arq, cls: null, novoNome: arq.nome, erro: String(e?.message || e) });
     }
-  }
-  prog2.close();
-  const classificados = itens.filter(x => x.cls);
-  if (!classificados.length) { toast('Nenhum arquivo classificado', 'Todos falharam — verifique o acesso da conta do sistema à pasta e a GEMINI_API_KEY.', 'error'); return; }
+    prog2.close(); prog2 = null;
+    const classificados = itens.filter(x => x.cls);
+    if (!classificados.length) { toast('Nenhum arquivo classificado', 'Todos falharam — verifique o acesso da conta do sistema à pasta e a GEMINI_API_KEY.', 'error'); return; }
 
-  // 4. Revisão humana obrigatória
-  const plano = await _orgModalRevisao(itens, lista.pastaNome);
-  if (!plano) return;
+    // 4. Revisão humana obrigatória
+    const plano = await _orgModalRevisao(itens, lista.pastaNome);
+    if (!plano) return;
 
-  // 5. Aplicar em lotes
-  const prog3 = _segProgressModal();
-  const resultados = [];
-  for (let i = 0; i < plano.ops.length; i += 25) {
-    const lote = plano.ops.slice(i, i + 25);
-    prog3.set(`Aplicando ${Math.min(i + 25, plano.ops.length)}/${plano.ops.length}…`);
-    try {
-      const resp = await DB.driveAplicarOrganizacao(lista.pastaId, lote);
-      resultados.push(...(resp?.resultados || []));
-    } catch (e) {
-      lote.forEach(op => resultados.push({ fileId: op.fileId, ok: false, erro: String(e?.message || e) }));
+    // 5. Aplicar em lotes
+    prog3 = _segProgressModal();
+    const resultados = [];
+    for (let i = 0; i < plano.ops.length; i += 25) {
+      const lote = plano.ops.slice(i, i + 25);
+      prog3.set(`Aplicando ${Math.min(i + 25, plano.ops.length)}/${plano.ops.length}…`);
+      try {
+        const resp = await DB.driveAplicarOrganizacao(lista.pastaId, lote);
+        resultados.push(...(resp?.resultados || []));
+      } catch (e) {
+        lote.forEach(op => resultados.push({ fileId: op.fileId, ok: false, erro: String(e?.message || e) }));
+      }
     }
-  }
-  prog3.close();
+    prog3.close(); prog3 = null;
 
-  const ok = resultados.filter(x => x.ok).length;
-  const erros = resultados.filter(x => !x.ok);
-  const modal = document.createElement('div');
-  modal.className = 'modal-backdrop';
-  modal.innerHTML = `
-    <div class="modal scroll-thin" style="max-width: 560px;">
-      <h3 class="modal-title">🗂 Organização concluída</h3>
-      <div class="grid gap-2 mb-3" style="grid-template-columns: 1fr 1fr;">
-        <div class="stat-card" style="background: var(--uc-green-soft, #e8f3e8);"><div class="stat-label">Organizados</div><div class="stat-value">${ok}</div></div>
-        <div class="stat-card" style="${erros.length ? 'background: var(--uc-red-soft);' : ''}"><div class="stat-label">Erros</div><div class="stat-value">${erros.length}</div></div>
-      </div>
-      ${erros.length ? `<details open><summary style="cursor:pointer;font-size:13px;font-weight:600;">Erros (${erros.length})</summary>${erros.map(x => `<div style="font-size:11px;padding:3px 0;border-bottom:1px solid var(--uc-line);">${escapeHtml(x.fileId)} · ${escapeHtml(x.erro || '')}</div>`).join('')}</details>` : ''}
-      <p class="help-text" style="margin-top:10px;">Confira o resultado na própria pasta do Drive: <a href="https://drive.google.com/drive/folders/${escapeHtml(lista.pastaId)}" target="_blank" style="color:var(--uc-gold);">abrir pasta ↗</a></p>
-      <button class="btn btn-primary" style="width:100%;margin-top:8px;" onclick="this.closest('.modal-backdrop').remove()">Fechar</button>
-    </div>`;
-  $('modalContainer').appendChild(modal);
+    const ok = resultados.filter(x => x.ok).length;
+    const erros = resultados.filter(x => !x.ok);
+    const modal = document.createElement('div');
+    modal.className = 'modal-backdrop';
+    modal.innerHTML = `
+      <div class="modal scroll-thin" style="max-width: 560px;">
+        <h3 class="modal-title">🗂 Organização concluída</h3>
+        <div class="grid gap-2 mb-3" style="grid-template-columns: 1fr 1fr;">
+          <div class="stat-card" style="background: var(--uc-green-soft, #e8f3e8);"><div class="stat-label">Organizados</div><div class="stat-value">${ok}</div></div>
+          <div class="stat-card" style="${erros.length ? 'background: var(--uc-red-soft);' : ''}"><div class="stat-label">Erros</div><div class="stat-value">${erros.length}</div></div>
+        </div>
+        ${erros.length ? `<details open><summary style="cursor:pointer;font-size:13px;font-weight:600;">Erros (${erros.length})</summary>${erros.map(x => `<div style="font-size:11px;padding:3px 0;border-bottom:1px solid var(--uc-line);">${escapeHtml(x.fileId)} · ${escapeHtml(x.erro || '')}</div>`).join('')}</details>` : ''}
+        <p class="help-text" style="margin-top:10px;">Confira o resultado na própria pasta do Drive: <a href="https://drive.google.com/drive/folders/${escapeHtml(lista.pastaId)}" target="_blank" style="color:var(--uc-gold);">abrir pasta ↗</a></p>
+        <button class="btn btn-primary" style="width:100%;margin-top:8px;" onclick="this.closest('.modal-backdrop').remove()">Fechar</button>
+      </div>`;
+    $('modalContainer').appendChild(modal);
+  } catch (e) {
+    console.error('[organizadorDrive]', e);
+    toast('Falha ao organizar', String(e?.message || e), 'error');
+  } finally {
+    if (prog2) prog2.close();
+    if (prog3) prog3.close();
+  }
 }
 
 function _orgModalSelecao(lista) {
@@ -7481,7 +7501,7 @@ function _orgModalSelecao(lista) {
     modal.innerHTML = `
       <div class="modal scroll-thin" style="max-width: 640px;">
         <h3 class="modal-title">🗂 ${escapeHtml(lista.pastaNome)} · ${lista.arquivos.length} arquivo(s)</h3>
-        <p class="help-text" style="margin-bottom:10px;">${suportados} classificável(is) (PDF, JPG, PNG, TXT, Google Docs ≤15MB). ${lista.truncado ? '⚠ Pasta com mais de 300 arquivos — listagem truncada.' : ''} Subpastas não são varridas.</p>
+        <p class="help-text" style="margin-bottom:10px;">${suportados} classificável(is) (PDF, JPG, PNG, TXT, Google Docs ≤10MB). ${lista.truncado ? '⚠ Pasta com mais de 300 arquivos — listagem truncada.' : ''} Subpastas não são varridas.</p>
         <div style="max-height: 45vh; overflow:auto; border:1px solid var(--uc-line); border-radius:6px; padding:6px;">
           ${lista.arquivos.map((a, i) => `
             <label style="display:flex; gap:8px; align-items:center; padding:4px 6px; font-size:12.5px; ${a.suportado ? 'cursor:pointer;' : 'opacity:.45;'}">
@@ -7845,7 +7865,7 @@ async function exportDeadlinesCsv() {
   deadlines.forEach(d => {
     const p = processes.find(x => x.id === d.processId);
     const dl = new Date(d.deadlineDate);
-    const days = Math.ceil((dl - today) / 86400000);
+    const days = Math.round((_diaFatalLocal(d.deadlineDate) - today) / 86400000);   // B5.1: dia-calendário local
     const visual = recomputarStatusVisual(d, today);
     const statusLabel = prazoEstaResolvido(d) ? visual : (days < 0 ? 'expirado' : visual);
     const diasCol = prazoEstaResolvido(d) ? visual : days;
@@ -9283,9 +9303,11 @@ async function ajustarDataFatalPrazo(id) {
 async function autoMarcarPerdidos() {
   const today = new Date(); today.setHours(0,0,0,0);
   const all = await DB.getAllDeadlines();
+  // B5.1 — usa a mesma âncora de dia-calendário do resto do app. O corte segue
+  // sendo "venceu antes de hoje": prazo que vence HOJE nunca é marcado perdido.
   const expirados = all.filter(d =>
     d.status === STATUS_PRAZO.PENDENTE &&
-    new Date(d.deadlineDate) < today
+    _diaFatalLocal(d.deadlineDate) < today
   );
   let marcados = 0;
   for (const d of expirados) {
@@ -12678,7 +12700,9 @@ function _tarefasProdutividade(tarefas, dias) {
       if (_tarefaAtrasada(t, today)) r.atrasadas++;
     } else if (t.status === 'concluida' && (t.concluidoEm || 0) >= corte) {
       r.concluidas++;
-      if (!t.prazoData || _diaFatalLocal(t.prazoData) >= _diaFatalLocal(new Date(t.concluidoEm).toISOString())) r.noPrazo++;
+      // Dia da conclusão pelo relógio LOCAL. Com toISOString() o dia virava em
+      // UTC: tarefa fechada depois das 21h em Brasília contava como atrasada.
+      if (!t.prazoData || _diaFatalLocal(t.prazoData) >= _diaFatalLocal(t.concluidoEm)) r.noPrazo++;
     }
   }
   return por;
@@ -13232,7 +13256,11 @@ async function renderAgenda() {
   let tarefasOverlay = [];
   if (f.incluirPrazos && f.tipo === 'todos') {
     tarefasOverlay = (tarefasAg || []).filter(t => {
-      if (t.status !== 'aberta' && t.status !== 'andamento') return false;
+      // Mesma regra do overlay de prazos acima: 'ativos' (default) mostra só as
+      // abertas, 'todos' mostra também as concluídas, um status específico de
+      // compromisso não se aplica a tarefa e esconde todas.
+      if (f.status === 'ativos') { if (t.status !== 'aberta' && t.status !== 'andamento') return false; }
+      else if (f.status !== 'todos') return false;
       if (!t.prazoData) return false;
       if (f.responsavel && (t.responsavel || '') !== f.responsavel) return false;
       const dia = String(t.prazoData).slice(0, 10);
@@ -13492,8 +13520,7 @@ function _renderAgendaCalendario(porDia, hoje, calRef, procById, cliById) {
                 return `<div class="ag-cal-chip" style="border-left: 3px solid var(--uc-green); background: var(--uc-cream);" onclick="event.stopPropagation(); _abrirDiaAgenda('${c.iso}')" title="✅ Tarefa">✅ ${escapeHtml((t.titulo || 'Tarefa').slice(0, 22))}</div>`;
               } else {
                 const d = e.item;
-                const dl = new Date(d.deadlineDate); dl.setHours(0,0,0,0);
-                const days = Math.ceil((dl - hoje) / 86400000);
+                const days = Math.round((_diaFatalLocal(d.deadlineDate) - hoje) / 86400000);   // B5.1
                 const urgente = days <= 1;
                 return `<div class="ag-cal-chip prazo${urgente ? ' urgente' : ''}" onclick="event.stopPropagation(); _abrirDiaAgenda('${c.iso}')" title="⏰ Prazo">⏰ ${escapeHtml((d.description || d.type || 'Prazo').slice(0, 22))}</div>`;
               }
@@ -13566,6 +13593,8 @@ function _renderTarefaNaAgenda(t, procById, today) {
             <strong style="color: var(--uc-black); font-size: 13.5px;">${escapeHtml(t.titulo)}</strong>
             ${atrasada ? '<span class="badge badge-red" style="font-size: 9px;">atrasada</span>' : ''}
             ${t.status === 'andamento' ? '<span class="badge badge-amber" style="font-size: 9px;">em andamento</span>' : ''}
+            ${t.status === 'concluida' ? '<span class="badge badge-green" style="font-size: 9px;">✓ concluída</span>' : ''}
+            ${t.status === 'cancelada' ? '<span class="badge badge-gray" style="font-size: 9px;">cancelada</span>' : ''}
           </div>
           <div style="font-size: 12px; color: var(--uc-warm-gray); margin-top: 2px;">
             👤 ${escapeHtml((t.responsavel || '?').split(' ')[0])}
@@ -13574,7 +13603,7 @@ function _renderTarefaNaAgenda(t, procById, today) {
         </div>
         <div style="display: flex; gap: 2px; flex-shrink: 0;">
           ${t.status === 'aberta' ? `<button class="btn btn-ghost btn-sm" onclick="event.stopPropagation(); mudarStatusTarefa('${t.id}','andamento')" title="Iniciar" style="padding: 2px 6px;">▶</button>` : ''}
-          <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation(); mudarStatusTarefa('${t.id}','concluida')" title="Concluir" style="padding: 2px 6px;">✓</button>
+          ${(t.status === 'aberta' || t.status === 'andamento') ? `<button class="btn btn-ghost btn-sm" onclick="event.stopPropagation(); mudarStatusTarefa('${t.id}','concluida')" title="Concluir" style="padding: 2px 6px;">✓</button>` : ''}
           <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation(); editarTarefaFlow('${t.id}')" title="Editar" style="padding: 2px 6px;">✏</button>
         </div>
       </div>
@@ -13584,8 +13613,6 @@ function _renderTarefaNaAgenda(t, procById, today) {
 function _renderPrazoNaAgenda(d, procById, today) {
   const proc = (d.processId && procById && typeof procById === 'object') ? procById[d.processId] : null;
   const visual = recomputarStatusVisual(d, today);
-  const dl = new Date(d.deadlineDate);
-  dl.setHours(0,0,0,0);
   const days = Math.round((_diaFatalLocal(d.deadlineDate) - today) / 86400000);
   let cor = '#4a7c4a', badgeClass = 'badge-green', label = days + 'd';
   if (visual === 'expirado') { cor = '#a8472d'; badgeClass = 'badge-red'; label = 'vencido há ' + Math.abs(days) + 'd'; }
@@ -16731,8 +16758,7 @@ async function _exportarCarteiraExcel(btn) {
         const cli = proc?.clienteId ? cliById[proc.clienteId] : null;
         let dias = '';
         if (d.deadlineDate) {
-          const dl = new Date(d.deadlineDate); dl.setHours(0,0,0,0);
-          dias = Math.round((dl.getTime() - hojeMs) / 86400000);
+          dias = Math.round((_diaFatalLocal(d.deadlineDate).getTime() - hojeMs) / 86400000);   // B5.1
         }
         aoa.push([
           proc?.cnj || '',
@@ -18428,10 +18454,9 @@ async function renderEquipe() {
     const proc = processos.find(p => p.id === d.processId);
     return proc?.advogadoResponsavel === advogado;
   });
-  const vencidos = ativosSnapshot.filter(d => new Date(d.deadlineDate) < today);
+  const vencidos = ativosSnapshot.filter(d => _diaFatalLocal(d.deadlineDate) < today);   // B5.1: dia-calendário local
   const urgentes = ativosSnapshot.filter(d => {
-    const dl = new Date(d.deadlineDate); dl.setHours(0,0,0,0);
-    const days = Math.ceil((dl - today) / 86400000);
+    const days = Math.round((_diaFatalLocal(d.deadlineDate) - today) / 86400000);
     return days >= 0 && days <= 3;
   });
 
@@ -18554,8 +18579,7 @@ async function renderEquipe() {
         <h3 class="font-serif text-lg font-semibold smallcaps mb-3" style="color: var(--uc-red);">⚠ Publicações vencidas não-cumpridas · ${vencidos.length}</h3>
         ${vencidos.sort((a, b) => new Date(a.deadlineDate) - new Date(b.deadlineDate)).slice(0, 10).map(d => {
           const proc = processos.find(p => p.id === d.processId);
-          const dl = new Date(d.deadlineDate); dl.setHours(0,0,0,0);
-          const dias = Math.abs(Math.ceil((dl - today) / 86400000));
+          const dias = Math.abs(Math.round((_diaFatalLocal(d.deadlineDate) - today) / 86400000));   // B5.1
           return `
             <div style="display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-bottom:1px solid rgba(168, 71, 45, 0.2); font-size:13px;">
               <div style="flex:1; min-width:0;">
@@ -18578,8 +18602,7 @@ async function renderEquipe() {
         <h3 class="font-serif text-lg font-semibold smallcaps mb-3" style="color: var(--uc-black);">Próximas publicações · ${proxPrazos.length}</h3>
         ${proxPrazos.length === 0 ? '<p class="help-text">Nenhuma publicação ativa sob responsabilidade.</p>' : proxPrazos.map(d => {
           const proc = processos.find(p => p.id === d.processId);
-          const dl = new Date(d.deadlineDate); dl.setHours(0,0,0,0);
-          const days = Math.ceil((dl - today) / 86400000);
+          const days = Math.round((_diaFatalLocal(d.deadlineDate) - today) / 86400000);   // B5.1
           let cls = 'safe', label = days + 'd';
           if (days < 0) { cls = 'expired'; label = 'há ' + Math.abs(days) + 'd'; }
           else if (days === 0) { cls = 'urgent'; label = 'HOJE'; }
@@ -18682,7 +18705,7 @@ async function _renderEquipeComparativo(ano, mes) {
       const proc = processos.find(p => p.id === d.processId);
       return proc?.advogadoResponsavel === advogado;
     });
-    const vencidos = ativosSnapshot.filter(d => new Date(d.deadlineDate) < today).length;
+    const vencidos = ativosSnapshot.filter(d => _diaFatalLocal(d.deadlineDate) < today).length;   // B5.1
 
     const cumpridos = prazos.filter(d => {
       if (d.status !== 'cumprido') return false;
@@ -19431,7 +19454,7 @@ async function quickCalcDeadline() {
   const intDate = new Date(date + 'T12:00:00');
   const dl = addBusinessDays(intDate, parseInt(days));
   const today = new Date(); today.setHours(0,0,0,0);
-  const remaining = Math.ceil((dl - today) / 86400000);
+  const remaining = Math.round((_diaFatalLocal(dl) - today) / 86400000);   // B5.1: dl vem ao meio-dia; ceil somava +1
   toast(`Vencimento: ${dl.toLocaleDateString('pt-BR')}`, `${remaining > 0 ? remaining + ' dias úteis restantes' : 'EXPIRADO há ' + Math.abs(remaining) + ' dias'}`, remaining > 0 ? 'success' : 'error');
   // Show a result card too
   $('appContent').insertAdjacentHTML('afterbegin', `
@@ -25756,8 +25779,7 @@ async function _computarNotificacoesInApp() {
     deadlines.filter(prazoEstaAtivo).forEach(d => {
       const proc = procsById[d.processId];
       if (proc?.advogadoResponsavel !== meuNome) return;
-      const dl = new Date(d.deadlineDate); dl.setHours(0,0,0,0);
-      const days = Math.ceil((dl - today) / 86400000);
+      const days = Math.round((_diaFatalLocal(d.deadlineDate) - today) / 86400000);   // B5.1: mesmo dia-calendário da régua de marcos do backend
       let marco = null, icon = '⏰', color = 'var(--uc-amber)', tituloPrefix = '';
       if (days < 0)        { marco = 'T+' + Math.abs(days); icon = '🚨'; color = 'var(--uc-red)'; tituloPrefix = 'Vencido há ' + Math.abs(days) + 'd'; }
       else if (days === 0) { marco = 'T-0'; icon = '🚨'; color = 'var(--uc-red)'; tituloPrefix = 'Vence HOJE'; }

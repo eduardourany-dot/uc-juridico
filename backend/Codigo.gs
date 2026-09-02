@@ -165,6 +165,16 @@ function requireAdmin_(ctx) {
   }
 }
 
+// Espelha canWrite() do firestore.rules: admin e user escrevem; viewer e
+// cliente são somente-leitura. Use em qualquer action que ALTERE dados fora
+// do Firestore (Drive, Calendar, Sheets), onde as rules não protegem.
+function requireWrite_(ctx) {
+  const role = ctx.user ? ctx.user.role : null;
+  if (role !== 'admin' && role !== 'user') {
+    throw new Error('write_required');
+  }
+}
+
 // ============================================================
 // Action handlers
 // ============================================================
