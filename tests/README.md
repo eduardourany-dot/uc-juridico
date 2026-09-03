@@ -18,6 +18,9 @@ contra dados de mentira. Cobre hoje:
 
 | Área | O que garante |
 |---|---|
+| `_diasAteDia` | contagem em dia-calendário pra prazo, compromisso, parcela e follow-up; sem data devolve `NaN` (some das janelas) e não `null` (que entraria nelas) |
+| `_normTexto` | acento/caixa/espaço normalizados; as cópias duplicadas não voltam |
+| Log de produção | `console.log` de rotina fica atrás de `UC_debug()`; `warn`/`error` seguem diretos |
 | Contagem de prazos | dia-calendário local; fatal de hoje conta 0, janela urgente inclui o 5º dia |
 | `autoMarcarPerdidos` | nunca marca como perdido o prazo que vence hoje |
 | Produtividade das tarefas | dia da conclusão pelo relógio local (não UTC) |

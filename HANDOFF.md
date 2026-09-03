@@ -8,15 +8,15 @@
 
 | Item | Valor |
 |---|---|
-| **Versão no código (`main`/`sandbox`)** | `v6.89.0` (B1 DataJud + B2 digest + B3 painel de notificações) |
-| **Versão em produção (LOCAWEB)** | `v6.89.0` ✅ **em dia com o código** (deploys concluídos em 05/07, incl. `Lembretes.gs`) |
-| **Branches** | `main` = `sandbox` = `claude/continuidade-aaq0lh` (em sincronia, fast-forward) |
+| **Versão no código** | `v6.94.2` (blocos B e C entregues + varredura geral de código) |
+| **Versão em produção** | `v6.89.0` ⚠️ **atrás do código** — falta o combo de deploy manual abaixo (frontend, rules e Apps Script) |
+| **Branches** | trabalho em `claude/continuidade-aaq0lh` → **PR #1** aberta pra `main` |
 | **Working tree** | Limpo |
 | **Repositório** | https://github.com/eduardourany-dot/uc-juridico |
 
 ### ▶️ Próxima sessão
 
-**Estado ao encerrar 02/09:** código em **v6.94.1** (varredura geral: 9 achados corrigidos + suíte `tests/regressao.js`); **bloco B completo + C1, C7, C8 e C9 entregues**. Fila do bloco C, nascida da análise das peças de mercado (imersão "sistema de gestão"): **C10 central de documentos no processo** (~1-2 dias, o gap mais legítimo) · **C11 conversa da equipe no processo** (~1 dia) · C12 e-mail no processo (avaliar). Depois: infra (D) e decisões (E). **Pendências manuais em UM combo** (na pasta do repo, máquina do Marco): ① `git pull origin main` · ② `firebase deploy --only hosting` (frontend v6.90→v6.93) · ③ `firebase deploy --only firestore:rules` (collection nova `tarefas` — sem isso a página Tarefas dá permission-denied) · ④ recolar no Apps Script: `Drive.gs` (arquivo NOVO) + `Codigo.gs` (ativa o Organizador do Drive **e a trava de papel `requireWrite_` — enquanto não for colado, um viewer consegue mexer nos arquivos do Drive**). Próximo: fechar a migração Google (passos ② deploy automático e ③ domínio — runbook `docs/RUNBOOK_migracao_google.md`; ⚠️ zona DNS/MX antes de cancelar a LOCAWEB) ou bloco D.
+**Estado ao encerrar 02/09:** código em **v6.94.2** (varredura geral: 9 achados corrigidos + 9 pontos extras da mesma classe + dívida técnica zerada + suíte `tests/regressao.js` com 71 checagens); **bloco B completo + C1, C7, C8 e C9 entregues**. Fila do bloco C, nascida da análise das peças de mercado (imersão "sistema de gestão"): **C10 central de documentos no processo** (~1-2 dias, o gap mais legítimo) · **C11 conversa da equipe no processo** (~1 dia) · C12 e-mail no processo (avaliar). Depois: infra (D) e decisões (E). **Pendências manuais em UM combo** (na pasta do repo, máquina do Marco): ① `git pull origin main` · ② `firebase deploy --only hosting` (frontend v6.90→v6.93) · ③ `firebase deploy --only firestore:rules` (collection nova `tarefas` — sem isso a página Tarefas dá permission-denied) · ④ recolar no Apps Script: `Drive.gs` (arquivo NOVO) + `Codigo.gs` (ativa o Organizador do Drive **e a trava de papel `requireWrite_` — enquanto não for colado, um viewer consegue mexer nos arquivos do Drive**). Próximo: fechar a migração Google (passos ② deploy automático e ③ domínio — runbook `docs/RUNBOOK_migracao_google.md`; ⚠️ zona DNS/MX antes de cancelar a LOCAWEB) ou bloco D.
 
 ### 🔧 Varredura geral de código (v6.94.1, sessão 02/09)
 
@@ -36,10 +36,20 @@ Rodada de revisão do diff dos blocos B e C (`code-review` + análise manual de 
 
 **Auditado e sem problema** (registrado pra não re-revisar): reconciliação de blocos do segmentador, terminação do fatiamento, cache das tarefas, regex de acentos da busca global, regras novas do Firestore, guarda do `bytes.slice(0)` contra o pdf.js, semântica de lembrete vazio no `Calendar.gs`. Varredura de referências: 656 funções, 244 handlers, **0 indefinidas**; nenhum TODO/FIXME; nenhum XSS nos handlers gerados (só IDs do sistema são interpolados).
 
+### 🧹 Dívida técnica da varredura zerada (v6.94.2, sessão 02/09)
+
+Segunda passada, fechando tudo que a varredura deixou em aberto e que não depende de ação manual.
+
+- **`_diasAteDia(v, base)` — um helper só pra contagem de dias-calendário.** Os 15 pontos corrigidos na v6.94.1 mais **9 novos** encontrados agora passam por ele. Os novos eram a mesma classe de erro em outros tipos de data: parcela de honorário vencendo hoje contava como "1d" (e a janela "vencidas até 7 dias" era na prática 6); **compromisso das 14h de hoje aparecia como "em 1d" em vez de "HOJE"** no painel inicial, no relatório e no badge da Agenda; follow-up de comunicação e o `_diasAte` da ficha do processo idem. Ancora os dois lados à meia-noite local antes de subtrair — é a única forma certa de fazer essa conta.
+  - Contrato deliberado: **sem data devolve `NaN`, não `null`.** Comparação com `NaN` é sempre falsa, então uma data faltando *some* das janelas; com `null`, `null <= 1` seria `true` e um prazo sem fatal apareceria como "iminente". Isso saiu de um teste que eu mesmo escrevi e falhou.
+- **`_normTexto`** substitui as duas cópias idênticas (`_bgNorm` da busca global e `_mniNormNome` do MNI) que tiravam acento/caixa/espaço do mesmo jeito.
+- **Log de produção atrás de interruptor.** Os 18 `console.log` de rotina viraram `_log()`, silencioso por padrão. Pra investigar algo: **`UC_debug(true)`** no console (persiste entre recarregamentos), `UC_debug(false)` desliga. `console.warn` e `console.error` seguem diretos — erro tem de aparecer sempre. Os dois `console.log` que restam são chamados à mão (`__testarCalculo` e `UC_DB.cacheClear`).
+- **Suíte subiu pra 71 checagens** (`node tests/regressao.js`), cobrindo o helper novo, o normalizador e o gate de log — com guardas que varrem o fonte atrás dos padrões antigos.
+
 ### 🔎 C9 — Busca global (v6.94.0, sessão 06/07)
 
 - **Ctrl+K / ⌘K** em qualquer tela + botão no topo da barra lateral. Uma caixa que atravessa **processos, clientes, prazos, tarefas, publicações, agenda e notas** — resolve a dor "informações difíceis de achar" (a nº 1 das peças de mercado analisadas).
-- Casamento tolerante: ignora acento/caixa (`_bgNorm`) e casa por **dígitos** (`5142789` acha o CNJ formatado; `12345678` acha o CNPJ pontuado). Busca dentro do **teor** da publicação e do texto da nota. Peso 2 pra "começa com", 1 pra "contém" — ordena por relevância. Exclui apagados, prazos resolvidos e tarefas concluídas.
+- Casamento tolerante: ignora acento/caixa (`_normTexto`) e casa por **dígitos** (`5142789` acha o CNJ formatado; `12345678` acha o CNPJ pontuado). Busca dentro do **teor** da publicação e do texto da nota. Peso 2 pra "começa com", 1 pra "contém" — ordena por relevância. Exclui apagados, prazos resolvidos e tarefas concluídas.
 - Tudo em memória a partir do cache do boot (instantâneo, funciona offline). Enter abre o primeiro resultado, Esc fecha, clique fora fecha. Novo `DB.getAllNotes` (api.js + stub IndexedDB).
 - Testes: 19 casos (termo curto, nome, CNJ/CNPJ por dígitos, acento nos dois sentidos, teor de publicação e nota, exclusões, pesos) + parse do index e do api.js.
 
@@ -150,10 +160,10 @@ Sessão dedicada a transformar o módulo de Prazos no centro operacional do escr
 - E-mail consolidado: **20 casos** end-to-end (stub Firestore/FCM/Mail — 3 prazos mesmo CNJ → 1 e-mail; anti-spam; sem-ACK).
 - Parse global do `index.html` OK após cada bloco.
 
-### 🔧 Afinamentos do épico ainda em aberto (baixa urgência)
-- Badges de dias da LISTA de publicações ainda usam contagem antiga (+1d conservador) — alinhar com `_diaFatalLocal`.
-- Avaliar consolidar também o **push** por processo (e-mail já consolidado).
-- Opção de silenciar o lembrete do Google Calendar quando o prazo já cobra pela régua do app (evitar alerta em dobro).
+### 🔧 Afinamentos do épico — **todos fechados em 02/09**
+- ~~Badges de dias da LISTA de publicações com contagem antiga (+1d)~~ → ✅ resolvido junto com os outros 15 pontos, agora todos passando pelo helper único `_diasAteDia`.
+- ~~Consolidar o **push** por processo~~ → ✅ **decidido em B5.2:** push continua por prazo, porque cada notificação carrega deep-link individual pro prazo; consolidar tiraria a ação de um toque. O e-mail, que não tem deep-link, é o que foi consolidado.
+- ~~Silenciar o lembrete do Google Calendar~~ → ✅ **entregue em B5.3:** toggle "lembretes do Google no evento do prazo" em Configurações → Sincronização (`Calendar.gs` aceita lista de lembretes vazia = evento sem alarme).
 
 ---
 

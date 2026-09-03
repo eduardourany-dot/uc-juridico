@@ -46,11 +46,13 @@ function extrair(src, nome) {
 
 const ctxFn = new Function(
   extrair(html, '_diaFatalLocal') + '\n' +
+  extrair(html, '_diasAteDia') + '\n' +
+  extrair(html, '_normTexto') + '\n' +
   extrair(html, '_tarefaAtrasada') + '\n' +
   extrair(html, '_tarefasProdutividade') + '\n' +
   extrair(gsCod, 'requireWrite_') + '\n' +
   extrair(gsCod, 'requireAdmin_') + '\n' +
-  'return { _diaFatalLocal, _tarefaAtrasada, _tarefasProdutividade, requireWrite_, requireAdmin_ };'
+  'return { _diaFatalLocal, _diasAteDia, _normTexto, _tarefaAtrasada, _tarefasProdutividade, requireWrite_, requireAdmin_ };'
 );
 const F = ctxFn();
 
@@ -119,6 +121,97 @@ t('janela urgente com o formato real passa a incluir o 5º dia', () => {
 t('prazo que vence hoje nunca é "expirado" (nem antes nem depois da mudança)', () => {
   eq(F._diaFatalLocal(fatalReal(0)) < hoje, false);
   eq(new Date(fatalReal(0)) < hoje, false, 'comportamento preservado:');
+});
+
+// ── _diasAteDia: o helper único da contagem de dias-calendário ────────────
+console.log('\nHelper _diasAteDia:');
+const emNoon = d => { const x = new Date(hoje.getTime() + d * 86400000); x.setHours(12, 0, 0, 0); return x; };
+
+t('conta 0 pra hoje, qualquer que seja a hora', () => {
+  for (const h of [0, 9, 12, 14, 21, 23]) {
+    const x = new Date(hoje); x.setHours(h, 30, 0, 0);
+    eq(F._diasAteDia(x), 0, h + 'h:');
+  }
+});
+t('reunião das 14h de hoje é HOJE, não "em 1d"', () => {
+  const r = new Date(hoje); r.setHours(14, 30, 0, 0);
+  eq(F._diasAteDia(r, hoje), 0);
+  eq(Math.ceil((r - hoje) / 86400000), 1, 'a forma antiga dizia 1:');
+});
+t('aceita ISO com hora, ISO só-data, Date e timestamp', () => {
+  const alvo = emNoon(3);
+  const soData = iso(3);
+  eq(F._diasAteDia(alvo.toISOString()), 3, 'ISO com hora:');
+  eq(F._diasAteDia(soData), 3, 'ISO só-data:');
+  eq(F._diasAteDia(alvo), 3, 'Date:');
+  eq(F._diasAteDia(alvo.getTime()), 3, 'timestamp:');
+});
+t('base alternativa funciona com Date e com timestamp', () => {
+  eq(F._diasAteDia(emNoon(5), emNoon(2)), 3, 'base Date:');
+  eq(F._diasAteDia(emNoon(5), hoje.getTime()), 5, 'base timestamp:');
+});
+t('sem data devolve NaN — some das janelas em vez de entrar nelas', () => {
+  for (const v of ['nao é data', null, undefined, '']) {
+    if (!Number.isNaN(F._diasAteDia(v))) throw new Error(JSON.stringify(v) + ' devia dar NaN, deu ' + F._diasAteDia(v));
+  }
+  // O ponto do NaN: com null, `null <= 1` seria true e um prazo sem data fatal
+  // apareceria como "iminente". Com NaN toda comparação é falsa.
+  const n = F._diasAteDia(null);
+  eq([n < 0, n === 0, n <= 1, n <= 5].join(','), 'false,false,false,false');
+});
+t('base inválida também devolve NaN', () => {
+  if (!Number.isNaN(F._diasAteDia(emNoon(2), 'lixo'))) throw new Error('base inválida passou');
+});
+t('dias negativos contam pra trás corretamente', () => {
+  eq([F._diasAteDia(emNoon(-1)), F._diasAteDia(emNoon(-7))].join(','), '-1,-7');
+});
+t('janela de parcela (-7 a +3) pega os dois extremos', () => {
+  const dentro = d => { const n = F._diasAteDia(emNoon(d)); return n >= -7 && n <= 3; };
+  eq([dentro(-7), dentro(3), dentro(-8), dentro(4)].join(','), 'true,true,false,false');
+});
+t('não sobrou contagem de dia feita na mão sobre compromisso/parcela', () => {
+  const rx = /Math\.ceil\(\((?:dt|venc|dataPx|inicio|inicioDia|d)\s*-\s*(?:today|hoje|hoje0|ms)\)/g;
+  const achados = html.match(rx) || [];
+  if (achados.length) throw new Error(achados.length + ' resíduo(s): ' + achados.join(' | '));
+});
+
+// ── _normTexto: normalizador unificado ────────────────────────────────────
+console.log('\nNormalizador de texto (_normTexto):');
+t('tira acento e baixa a caixa', () => eq(F._normTexto('JOSÉ DA SILVA'), 'jose da silva'));
+t('colapsa espaço e apara as pontas', () => eq(F._normTexto('  Ana   Maria  '), 'ana maria'));
+t('cobre cedilha e til', () => eq(F._normTexto('Conceição Assunção'), 'conceicao assuncao'));
+t('null e undefined viram string vazia', () => {
+  eq(F._normTexto(null), ''); eq(F._normTexto(undefined), '');
+});
+t('preserva 0 e false como texto (não vira vazio)', () => {
+  eq(F._normTexto(0), '0'); eq(F._normTexto(false), 'false');
+});
+t('as cópias duplicadas sumiram do fonte', () => {
+  if (/function _bgNorm\b|function _mniNormNome\b/.test(html)) throw new Error('normalizador duplicado ainda existe');
+  if (!/function _normTexto\b/.test(html)) throw new Error('_normTexto não encontrado');
+});
+
+// ── Log de diagnóstico atrás de interruptor ───────────────────────────────
+console.log('\nLog de produção:');
+t('console.log de rotina saiu do caminho padrão', () => {
+  // Sobram só os que TÊM de imprimir sempre: o próprio UC_debug e o
+  // relatório do __testarCalculo, que é chamado à mão no console.
+  const linhas = html.split('\n').filter(l => /console\.log\(/.test(l));
+  const inesperadas = linhas.filter(l => !/UC_debug|\[UC\] debug|veredito|function _log\(/.test(l));
+  if (inesperadas.length) throw new Error(inesperadas.length + ' console.log fora do gate: ' + inesperadas.map(l => l.trim().slice(0, 60)).join(' | '));
+});
+t('_log existe, é silencioso por padrão e não recursa', () => {
+  const def = extrair(html, '_log');
+  if (!/console\.log\(/.test(def)) throw new Error('_log não chama console.log — recursão infinita?');
+  if (!/_UC_DEBUG/.test(def)) throw new Error('_log não checa o interruptor');
+});
+t('UC_debug persiste a escolha e tolera storage bloqueado', () => {
+  const def = extrair(html, 'UC_debug');
+  if (!/localStorage\.setItem/.test(def)) throw new Error('não persiste');
+  if (!/catch/.test(def)) throw new Error('sem catch — quebra em navegação privativa');
+});
+t('console.warn e console.error seguem diretos', () => {
+  if (!/console\.warn\(/.test(html) || !/console\.error\(/.test(html)) throw new Error('erros deixaram de aparecer');
 });
 
 // ── Achado 6: produtividade das tarefas em horário local ───────────────────
