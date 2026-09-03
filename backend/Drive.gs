@@ -20,7 +20,11 @@
 
 // Mantenha em sincronia com SEG_TAXONOMIA do index.html (C8).
 const ORG_TAXONOMIA = ['peticao_inicial', 'contestacao', 'procuracao', 'decisao_judicial', 'recurso', 'documento_pessoal', 'comprovante', 'contrato', 'laudo_pericia', 'correspondencia', 'outros'];
-const ORG_MAX_BYTES = 15 * 1024 * 1024;   // limite pro inline da API Gemini (folga sob os 20MB)
+// O arquivo vai inline em base64, que infla ~33% (4/3). O teto de request da
+// API do Gemini é ~20MB JÁ CODIFICADO — então 10MiB de arquivo viram ~13,3MiB
+// no corpo, com folga. Não subir pra 15MiB: estoura o teto e o arquivo, que
+// aparecia como "suportado" na listagem, falha só na hora de classificar.
+const ORG_MAX_BYTES = 10 * 1024 * 1024;
 const ORG_MAX_ARQUIVOS = 300;             // teto de listagem por pasta
 const ORG_MODELO_DEFAULT = 'gemini-3-flash-preview';
 
@@ -66,6 +70,7 @@ function _driveMimeSuportado_(mime) {
 // ------------------------------------------------------------
 
 function actionDriveListarPasta_(ctx) {
+  requireWrite_(ctx);   // organizador é ferramenta de escrita: viewer/cliente não entram nem na listagem
   const folderId = _driveExtrairFolderId_(ctx.body.pasta);
   if (!folderId) return { error: 'pasta_invalida', message: 'Cole o link (ou o ID) de uma pasta do Google Drive.' };
 
@@ -96,6 +101,7 @@ function actionDriveListarPasta_(ctx) {
 }
 
 function actionDriveClassificarArquivo_(ctx) {
+  requireWrite_(ctx);
   const fileId = String(ctx.body.fileId || '').trim();
   if (!fileId) return { error: 'fileId_obrigatorio' };
 
@@ -165,6 +171,10 @@ function actionDriveClassificarArquivo_(ctx) {
 }
 
 function actionDriveAplicarOrganizacao_(ctx) {
+  // Renomear/mover é IRREVERSÍVEL e alcança qualquer pasta cujo ID chegue no
+  // corpo — sem esta trava um viewer (somente-leitura no resto do sistema)
+  // conseguiria bagunçar todo o Drive acessível pela conta do Web App.
+  requireWrite_(ctx);
   const ops = Array.isArray(ctx.body.operacoes) ? ctx.body.operacoes : [];
   const pastaId = String(ctx.body.pastaId || '').trim();
   if (!ops.length) return { error: 'sem_operacoes' };

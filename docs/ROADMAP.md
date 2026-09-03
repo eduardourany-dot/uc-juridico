@@ -63,7 +63,7 @@
 | # | Item | Notas |
 |---|---|---|
 | D1 | 🔶 **Deploy automático** — frontend PRONTO: Firebase Hosting configurado + workflow no push (decisão de migrar pro Google, 05/07 — ver `docs/RUNBOOK_migracao_google.md`; faltam 3 passos manuais: 1º deploy, secret, DNS). Parte 2 pendente: backend Apps Script → Cloud Functions | LOCAWEB descontinuada. ⚠️ conferir zona DNS/MX antes de cancelar |
-| D2 | **Testes no repositório + CI** — modularizar `index.html` (Vite, sem framework) pra commitar os testes (73 casos escritos em 29/06 viveram fora do repo) | Reduz custo de toda mudança futura |
+| D2 | **Testes no repositório + CI** — 🟡 **meio caminho andado (02/09):** `tests/regressao.js` já está versionado, com 52 checagens sem dependência (`node tests/regressao.js`), extraindo as funções por fatiamento de string. Falta **modularizar o `index.html`** (Vite, sem framework) pra virar `import` de verdade, e pendurar a suíte num hook/CI | Reduz custo de toda mudança futura |
 | D3 | **Um único host de produção** — encerrar dualidade GitHub Pages legado vs LOCAWEB | Decidir junto com D1 |
 
 ### BLOCO E — Decisões do titular (pendentes de "segunda ordem")

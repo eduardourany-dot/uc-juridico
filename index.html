@@ -891,6 +891,42 @@ function formatBytes(b) {
   return parseFloat((b / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 }
 
+/**
+ * Log de diagnóstico. Silencioso por padrão — o console do usuário fica limpo
+ * — e ligável quando algo precisa ser investigado:
+ *
+ *   UC_debug(true)    liga (persiste entre recarregamentos)
+ *   UC_debug(false)   desliga
+ *   UC_debug()        mostra o estado atual
+ *
+ * `console.warn` e `console.error` NÃO passam por aqui: erro tem de aparecer
+ * sempre. Isto é só pro rastro de rotina (crons, migrações, sincronizações).
+ */
+let _UC_DEBUG = false;
+try { _UC_DEBUG = localStorage.getItem('uc_debug') === '1'; } catch (e) { /* storage bloqueado */ }
+
+function _log(...args) { if (_UC_DEBUG) console.log(...args); }
+
+function UC_debug(ligar) {
+  if (ligar === undefined) { console.log('[UC] debug', _UC_DEBUG ? 'LIGADO' : 'desligado'); return _UC_DEBUG; }
+  _UC_DEBUG = !!ligar;
+  try { localStorage.setItem('uc_debug', _UC_DEBUG ? '1' : '0'); } catch (e) { /* ok, vale só nesta sessão */ }
+  console.log('[UC] debug ' + (_UC_DEBUG ? 'LIGADO' : 'desligado'));
+  return _UC_DEBUG;
+}
+
+/**
+ * Normaliza texto pra COMPARAÇÃO (não pra exibição): tira acento, baixa a
+ * caixa e colapsa espaço. É o que faz "JOSÉ  DA SILVA" casar com "jose da
+ * silva" — usado pela busca global e pelo casamento de nome de advogado do
+ * MNI, que antes tinham cada um a sua cópia idêntica desta função.
+ */
+function _normTexto(s) {
+  return String(s == null ? '' : s)
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .toLowerCase().replace(/\s+/g, ' ').trim();
+}
+
 // Parser de data tolerante a 3 formatos do projeto, retornando Date local:
 //   - Date instance: passthrough
 //   - timestamp number: passthrough
@@ -1290,8 +1326,7 @@ function _torreCalcular(deadlines, processes, today, djenPubs) {
     // Pra próximas janelas, considera só ativo
     if (prazoEstaResolvido(d)) continue;
     if (!d.deadlineDate) continue;
-    const dl = new Date(d.deadlineDate); dl.setHours(0, 0, 0, 0);
-    const days = Math.round((dl.getTime() - t) / 86400000);
+    const days = _diasAteDia(d.deadlineDate, t);
     let bucket = null;
     if (days < 0) bucket = 'vencidos';
     else if (days === 0) bucket = 'hoje';
@@ -1422,11 +1457,15 @@ async function renderDashboard() {
   try { djenPubsAll = await DB.getAllDjenPublications(); } catch (e) { /* ok */ }
   const activeDeadlines = deadlines.filter(d => prazoEstaAtivo(d));
   const today = new Date(); today.setHours(0,0,0,0);
+  // B5.1 — a data fatal é gravada ao MEIO-DIA local, então a diferença pro
+  // hoje-à-meia-noite carrega meia casa: o Math.ceil arredondava tudo pra cima
+  // e a janela "0 a 5 dias" era na prática 0 a 4. _diaFatalLocal ancora no
+  // dia-calendário e o round passa a contar dias inteiros de verdade.
   const urgentDeadlines = activeDeadlines.filter(d => {
-    const diff = Math.ceil((new Date(d.deadlineDate) - today) / 86400000);
+    const diff = _diasAteDia(d.deadlineDate, today);
     return diff <= 5 && diff >= 0;
   });
-  const expiredDeadlines = activeDeadlines.filter(d => new Date(d.deadlineDate) < today);
+  const expiredDeadlines = activeDeadlines.filter(d => _diaFatalLocal(d.deadlineDate) < today);
 
   // Próximos compromissos (próximos 7 dias, status agendado/confirmado/adiado)
   const semanaMs = today.getTime() + 7 * 86400000;
@@ -1460,15 +1499,11 @@ async function renderDashboard() {
     return proc?.advogadoResponsavel === meuNome;
   });
 
-  const prazosVencidos = meusPrazosAtivos.filter(d => new Date(d.deadlineDate) < today);
-  const prazosHoje = meusPrazosAtivos.filter(d => {
-    const dl = new Date(d.deadlineDate); dl.setHours(0,0,0,0);
-    return dl.getTime() === today.getTime();
-  });
-  const prazosAmanha = meusPrazosAtivos.filter(d => {
-    const dl = new Date(d.deadlineDate); dl.setHours(0,0,0,0);
-    return dl.getTime() === amanhaMs;
-  });
+  // B5.1 — mesma âncora de dia-calendário dos demais painéis (_diaFatalLocal),
+  // pra "Meu dia" não divergir da lista de prazos nem da régua de marcos.
+  const prazosVencidos = meusPrazosAtivos.filter(d => _diaFatalLocal(d.deadlineDate) < today);
+  const prazosHoje = meusPrazosAtivos.filter(d => _diaFatalLocal(d.deadlineDate).getTime() === today.getTime());
+  const prazosAmanha = meusPrazosAtivos.filter(d => _diaFatalLocal(d.deadlineDate).getTime() === amanhaMs);
 
   // Compromissos: sou responsável ou estou em participantes
   const compsHoje = (compromissosAll || []).filter(c => {
@@ -1496,7 +1531,7 @@ async function renderDashboard() {
       if (p.status === 'pago') return;
       if (!p.vencimento) return;
       const venc = new Date(p.vencimento + 'T12:00:00');
-      const days = Math.ceil((venc - today) / 86400000);
+      const days = _diasAteDia(venc, today);
       if (days < -7 || days > 3) return;  // janela: vencidos até 7d ou próximos 3d
       // Filtra: alguma dos processos cobertos é meu (titular)?
       const procsCob = (h.processosCobertos || []).concat(h.processoId ? [h.processoId] : []);
@@ -1566,8 +1601,7 @@ async function renderDashboard() {
                 <p class="text-xs smallcaps" style="color: var(--uc-red); font-weight: 600; margin: 0 0 6px;">⚠ Publicações vencidas · ${prazosVencidos.length}</p>
                 ${prazosVencidos.slice(0, 5).map(d => {
                   const proc = procsById[d.processId];
-                  const dl = new Date(d.deadlineDate); dl.setHours(0,0,0,0);
-                  const dias = Math.abs(Math.ceil((dl - today) / 86400000));
+                  const dias = Math.abs(_diasAteDia(d.deadlineDate, today));
                   return `
                     <div style="padding: 6px 0; border-bottom: 1px solid rgba(168, 71, 45, 0.2); font-size: 12px;">
                       <div style="display: flex; justify-content: space-between; gap: 6px;">
@@ -1716,7 +1750,7 @@ async function renderDashboard() {
           ${proxComps.slice(0, 5).map(c => {
             const meta = _agTipoMeta(c.tipo);
             const dt = new Date(c.dataHoraInicio);
-            const diff = Math.ceil((dt - today) / 86400000);
+            const diff = _diasAteDia(dt, today);   // dia-calendário: reunião das 14h de hoje é HOJE, não "em 1d"
             const quando = diff === 0 ? 'HOJE' : diff === 1 ? 'AMANHÃ' : `em ${diff}d`;
             const hora = dt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
             return `
@@ -1785,7 +1819,7 @@ function renderDeadlineRowMini(d, processes) {
   const proc = processes.find(p => p.id === d.processId);
   const today = new Date(); today.setHours(0,0,0,0);
   const deadlineDate = new Date(d.deadlineDate);
-  const daysLeft = Math.ceil((deadlineDate - today) / 86400000);
+  const daysLeft = _diasAteDia(d.deadlineDate, today);   // B5.1: dia-calendário local
   let cls = 'safe', label = `${daysLeft} dias`;
   if (daysLeft < 0) { cls = 'expired'; label = `vencido há ${Math.abs(daysLeft)}d`; }
   else if (daysLeft === 0) { cls = 'urgent'; label = 'HOJE'; }
@@ -1915,7 +1949,7 @@ async function _migrarProcessosParaClientes() {
     }
 
     if (criados > 0 || vinculados > 0) {
-      console.log(`[clientes] migração: ${criados} novo(s) cliente(s), ${vinculados} processo(s) vinculado(s)`);
+      _log(`[clientes] migração: ${criados} novo(s) cliente(s), ${vinculados} processo(s) vinculado(s)`);
       if (typeof toast === 'function' && (criados > 0)) {
         toast(`${criados} cliente(s) criados pela migração`, `${vinculados} processo(s) vinculado(s)`, 'success');
       }
@@ -2772,7 +2806,7 @@ async function gerarRelatorioClienteFlow(clienteId) {
     const hoje0 = new Date(); hoje0.setHours(0, 0, 0, 0);
     const deadlinesRelevantes = deadlines.filter(d => {
       if (d.cumprida || d.cancelada || d.deletedAt) return false;
-      const dataFatal = new Date(d.deadlineDate || d.date);
+      const dataFatal = _diaFatalLocal(d.deadlineDate || d.date);   // B5.1: dia-calendário local
       if (isNaN(dataFatal)) return false;
       const venceu = dataFatal < hoje0;
       return incluirVencidos || !venceu;
@@ -2791,13 +2825,8 @@ async function gerarRelatorioClienteFlow(clienteId) {
       return `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}`;
     } catch { return iso; }
   };
-  const _diasAte = iso => {
-    if (!iso) return null;
-    const d = new Date(iso);
-    if (isNaN(d)) return null;
-    const hoje0 = new Date(); hoje0.setHours(0, 0, 0, 0);
-    return Math.ceil((d - hoje0) / 86400000);
-  };
+  // Este relatório espera null (e não NaN) quando não há data.
+  const _diasAte = iso => { const n = _diasAteDia(iso); return Number.isNaN(n) ? null : n; };
   const _statusLabel = s => ({ active: 'Ativo', archived: 'Arquivado', suspended: 'Suspenso' }[s] || s || 'Ativo');
   const _riscoLabel = r => ({ baixo: 'Provável êxito', medio: 'Médio', alto: 'Provável insucesso' }[r] || r || '—');
 
@@ -4670,7 +4699,7 @@ function renderProcessOverview(p, events, deadlines, notes, jurisprudence) {
   const compromissos = state._processView?.compromissos || [];
   const today = new Date(); today.setHours(0,0,0,0);
   const nextDeadline = activeDeadlines
-    .map(d => ({ ...d, days: Math.ceil((new Date(d.deadlineDate) - today) / 86400000) }))
+    .map(d => ({ ...d, days: _diasAteDia(d.deadlineDate, today) }))   // B5.1: dia-calendário local
     .sort((a,b) => a.days - b.days)[0];
 
   return `
@@ -5194,7 +5223,7 @@ async function djenShowFullPublicacaoFromDb(hash) {
 function renderDeadlineRow(d, p, compactInsidePub) {
   const today = new Date(); today.setHours(0,0,0,0);
   const dl = new Date(d.deadlineDate);
-  const days = Math.round((_diaFatalLocal(d.deadlineDate) - today) / 86400000);
+  const days = _diasAteDia(d.deadlineDate, today);
   const visual = recomputarStatusVisual(d, today);
 
   // visual → cls (CSS) + label do badge + cor
@@ -6205,7 +6234,7 @@ async function editProcessFlow() {
           if (generico) {
             cred = generico;
             usedAdvogado = generico.advogado;
-            console.log('[MNI edit] usando credencial genérica do tribunal:', { trib, advogado: generico.advogado, candidatosTentados: candidatos });
+            _log('[MNI edit] usando credencial genérica do tribunal:', { trib, advogado: generico.advogado, candidatosTentados: candidatos });
           }
         }
         if (!cred) throw new Error(`Nenhum advogado cadastrado tem credencial pro ${codigo}. Configure em Configurações → MNI.`);
@@ -6983,7 +7012,7 @@ function buildProcessClaudePackage(p, events, deadlines, notes, jurisprudence, p
     deadlines.filter(d => prazoEstaAtivo(d)).sort((a,b) => new Date(a.deadlineDate) - new Date(b.deadlineDate)).forEach(d => {
       const dl = new Date(d.deadlineDate);
       const today = new Date(); today.setHours(0,0,0,0);
-      const days = Math.round((_diaFatalLocal(d.deadlineDate) - today) / 86400000);
+      const days = _diasAteDia(d.deadlineDate, today);
       md += `- **${d.description || d.type}** · vence ${formatDate(dl)} (${days >= 0 ? days + ' dias úteis' : 'VENCIDO há ' + Math.abs(days) + ' dias'})\n`;
     });
   }
@@ -7043,7 +7072,7 @@ async function whatsappClienteFlow() {
     const clientes = await DB.getAllClientes();
     cliente = clientes.find(c => c.id === p.clienteId) ||
               clientes.find(c => (p.clienteIds || []).includes(c.id)) ||
-              (p.client ? clientes.find(c => c.nome && _mniNormNome(c.nome) === _mniNormNome(p.client)) : null) || null;
+              (p.client ? clientes.find(c => c.nome && _normTexto(c.nome) === _normTexto(p.client)) : null) || null;
   } catch (e) { /* segue sem cliente — telefone fica em branco */ }
 
   const nomeCliente = ((cliente && cliente.nome) || p.client || '').trim().split(' ')[0];
@@ -7205,6 +7234,7 @@ async function segmentarAutosFlow() {
   const bytes = new Uint8Array(await file.arrayBuffer());
 
   const prog = _segProgressModal();
+  let prog2 = null;   // declarado fora do try pro catch conseguir fechar (senão o spinner trava a tela)
   try {
     // 2. Extração de texto página a página
     prog.set('Lendo o PDF…');
@@ -7248,8 +7278,10 @@ async function segmentarAutosFlow() {
     if (!revisadas) return;
 
     // 5. Recorte com pdf-lib + downloads
-    const prog2 = _segProgressModal();
-    const src = await PDFLib.PDFDocument.load(bytes);
+    prog2 = _segProgressModal();
+    // ignoreEncryption: autos do Projudi/PJe vêm com proteção de impressão/cópia;
+    // sem isso o pdf-lib recusa no ÚLTIMO passo, depois da IA e da revisão manual.
+    const src = await PDFLib.PDFDocument.load(bytes.slice(0), { ignoreEncryption: true });
     for (let n = 0; n < revisadas.length; n++) {
       const pc = revisadas[n];
       prog2.set(`Gerando peça ${n + 1}/${revisadas.length}: ${pc.titulo}`);
@@ -7263,7 +7295,7 @@ async function segmentarAutosFlow() {
         String(n + 1).padStart(2, '0') + ' - ' + _segSanitizarNome(pc.titulo) + ' (p' + pc.ini + '-' + pc.fim + ').pdf');
       await new Promise(r => setTimeout(r, 350)); // respiro entre downloads
     }
-    prog2.close();
+    prog2.close(); prog2 = null;
 
     // 6. Índice auditável como nota do processo
     const indice = revisadas.map((pc, n) =>
@@ -7277,6 +7309,7 @@ async function segmentarAutosFlow() {
     if (state.currentRoute === 'process') renderProcessDetail();
   } catch (e) {
     prog.close();
+    if (prog2) prog2.close();
     console.error('[segmentador]', e);
     toast('Falha na segmentação', String(e?.message || e), 'error');
   }
@@ -7405,72 +7438,89 @@ async function organizadorDriveFlow() {
   try {
     prog.set('Listando a pasta…');
     lista = await DB.driveListarPasta(r[0]);
-  } catch (e) { prog.close(); toast('Falha ao listar', String(e?.message || e), 'error'); return; }
+  } catch (e) {
+    prog.close();
+    const msg = String(e?.message || e);
+    if (msg.includes('write_required')) toast('Sem permissão', 'O organizador altera arquivos do Drive — só perfis admin e advogado podem usar.', 'error');
+    else toast('Falha ao listar', msg, 'error');
+    return;
+  }
   prog.close();
   if (lista?.error) { toast('Não deu pra listar', lista.message || lista.error, 'error'); return; }
   if (!lista.arquivos?.length) { toast('Pasta vazia', 'Nenhum arquivo encontrado (subpastas não são varridas).', 'info'); return; }
 
-  // 2. Seleção
-  const selecionados = await _orgModalSelecao(lista);
-  if (!selecionados || !selecionados.length) return;
+  // Progressos declarados fora do try: o finally garante que nenhum spinner
+  // fique travando a tela se algo estourar no meio (só sairia recarregando).
+  let prog2 = null, prog3 = null;
+  try {
+    // 2. Seleção
+    const selecionados = await _orgModalSelecao(lista);
+    if (!selecionados || !selecionados.length) return;
 
-  // 3. Classificação um a um (falha em um não derruba o lote)
-  const prog2 = _segProgressModal();
-  const itens = [];
-  for (let i = 0; i < selecionados.length; i++) {
-    const arq = selecionados[i];
-    prog2.set(`Classificando ${i + 1}/${selecionados.length}: ${arq.nome}`);
-    try {
-      const resp = await DB.driveClassificarArquivo(arq.id);
-      if (resp?.classificacao) {
-        const cls = resp.classificacao;
-        itens.push({ ...arq, cls, novoNome: _orgMontarNome(cls, _orgExt(arq.nome)), erro: null });
-      } else {
-        itens.push({ ...arq, cls: null, novoNome: arq.nome, erro: resp?.error || 'sem_resposta' });
+    // 3. Classificação um a um (falha em um não derruba o lote)
+    prog2 = _segProgressModal();
+    const itens = [];
+    for (let i = 0; i < selecionados.length; i++) {
+      const arq = selecionados[i];
+      prog2.set(`Classificando ${i + 1}/${selecionados.length}: ${arq.nome}`);
+      try {
+        const resp = await DB.driveClassificarArquivo(arq.id);
+        if (resp?.classificacao) {
+          const cls = resp.classificacao;
+          itens.push({ ...arq, cls, novoNome: _orgMontarNome(cls, _orgExt(arq.nome)), erro: null });
+        } else {
+          itens.push({ ...arq, cls: null, novoNome: arq.nome, erro: resp?.error || 'sem_resposta' });
+        }
+      } catch (e) {
+        itens.push({ ...arq, cls: null, novoNome: arq.nome, erro: String(e?.message || e) });
       }
-    } catch (e) {
-      itens.push({ ...arq, cls: null, novoNome: arq.nome, erro: String(e?.message || e) });
     }
-  }
-  prog2.close();
-  const classificados = itens.filter(x => x.cls);
-  if (!classificados.length) { toast('Nenhum arquivo classificado', 'Todos falharam — verifique o acesso da conta do sistema à pasta e a GEMINI_API_KEY.', 'error'); return; }
+    prog2.close(); prog2 = null;
+    const classificados = itens.filter(x => x.cls);
+    if (!classificados.length) { toast('Nenhum arquivo classificado', 'Todos falharam — verifique o acesso da conta do sistema à pasta e a GEMINI_API_KEY.', 'error'); return; }
 
-  // 4. Revisão humana obrigatória
-  const plano = await _orgModalRevisao(itens, lista.pastaNome);
-  if (!plano) return;
+    // 4. Revisão humana obrigatória
+    const plano = await _orgModalRevisao(itens, lista.pastaNome);
+    if (!plano) return;
 
-  // 5. Aplicar em lotes
-  const prog3 = _segProgressModal();
-  const resultados = [];
-  for (let i = 0; i < plano.ops.length; i += 25) {
-    const lote = plano.ops.slice(i, i + 25);
-    prog3.set(`Aplicando ${Math.min(i + 25, plano.ops.length)}/${plano.ops.length}…`);
-    try {
-      const resp = await DB.driveAplicarOrganizacao(lista.pastaId, lote);
-      resultados.push(...(resp?.resultados || []));
-    } catch (e) {
-      lote.forEach(op => resultados.push({ fileId: op.fileId, ok: false, erro: String(e?.message || e) }));
+    // 5. Aplicar em lotes
+    prog3 = _segProgressModal();
+    const resultados = [];
+    for (let i = 0; i < plano.ops.length; i += 25) {
+      const lote = plano.ops.slice(i, i + 25);
+      prog3.set(`Aplicando ${Math.min(i + 25, plano.ops.length)}/${plano.ops.length}…`);
+      try {
+        const resp = await DB.driveAplicarOrganizacao(lista.pastaId, lote);
+        resultados.push(...(resp?.resultados || []));
+      } catch (e) {
+        lote.forEach(op => resultados.push({ fileId: op.fileId, ok: false, erro: String(e?.message || e) }));
+      }
     }
-  }
-  prog3.close();
+    prog3.close(); prog3 = null;
 
-  const ok = resultados.filter(x => x.ok).length;
-  const erros = resultados.filter(x => !x.ok);
-  const modal = document.createElement('div');
-  modal.className = 'modal-backdrop';
-  modal.innerHTML = `
-    <div class="modal scroll-thin" style="max-width: 560px;">
-      <h3 class="modal-title">🗂 Organização concluída</h3>
-      <div class="grid gap-2 mb-3" style="grid-template-columns: 1fr 1fr;">
-        <div class="stat-card" style="background: var(--uc-green-soft, #e8f3e8);"><div class="stat-label">Organizados</div><div class="stat-value">${ok}</div></div>
-        <div class="stat-card" style="${erros.length ? 'background: var(--uc-red-soft);' : ''}"><div class="stat-label">Erros</div><div class="stat-value">${erros.length}</div></div>
-      </div>
-      ${erros.length ? `<details open><summary style="cursor:pointer;font-size:13px;font-weight:600;">Erros (${erros.length})</summary>${erros.map(x => `<div style="font-size:11px;padding:3px 0;border-bottom:1px solid var(--uc-line);">${escapeHtml(x.fileId)} · ${escapeHtml(x.erro || '')}</div>`).join('')}</details>` : ''}
-      <p class="help-text" style="margin-top:10px;">Confira o resultado na própria pasta do Drive: <a href="https://drive.google.com/drive/folders/${escapeHtml(lista.pastaId)}" target="_blank" style="color:var(--uc-gold);">abrir pasta ↗</a></p>
-      <button class="btn btn-primary" style="width:100%;margin-top:8px;" onclick="this.closest('.modal-backdrop').remove()">Fechar</button>
-    </div>`;
-  $('modalContainer').appendChild(modal);
+    const ok = resultados.filter(x => x.ok).length;
+    const erros = resultados.filter(x => !x.ok);
+    const modal = document.createElement('div');
+    modal.className = 'modal-backdrop';
+    modal.innerHTML = `
+      <div class="modal scroll-thin" style="max-width: 560px;">
+        <h3 class="modal-title">🗂 Organização concluída</h3>
+        <div class="grid gap-2 mb-3" style="grid-template-columns: 1fr 1fr;">
+          <div class="stat-card" style="background: var(--uc-green-soft, #e8f3e8);"><div class="stat-label">Organizados</div><div class="stat-value">${ok}</div></div>
+          <div class="stat-card" style="${erros.length ? 'background: var(--uc-red-soft);' : ''}"><div class="stat-label">Erros</div><div class="stat-value">${erros.length}</div></div>
+        </div>
+        ${erros.length ? `<details open><summary style="cursor:pointer;font-size:13px;font-weight:600;">Erros (${erros.length})</summary>${erros.map(x => `<div style="font-size:11px;padding:3px 0;border-bottom:1px solid var(--uc-line);">${escapeHtml(x.fileId)} · ${escapeHtml(x.erro || '')}</div>`).join('')}</details>` : ''}
+        <p class="help-text" style="margin-top:10px;">Confira o resultado na própria pasta do Drive: <a href="https://drive.google.com/drive/folders/${escapeHtml(lista.pastaId)}" target="_blank" style="color:var(--uc-gold);">abrir pasta ↗</a></p>
+        <button class="btn btn-primary" style="width:100%;margin-top:8px;" onclick="this.closest('.modal-backdrop').remove()">Fechar</button>
+      </div>`;
+    $('modalContainer').appendChild(modal);
+  } catch (e) {
+    console.error('[organizadorDrive]', e);
+    toast('Falha ao organizar', String(e?.message || e), 'error');
+  } finally {
+    if (prog2) prog2.close();
+    if (prog3) prog3.close();
+  }
 }
 
 function _orgModalSelecao(lista) {
@@ -7481,7 +7531,7 @@ function _orgModalSelecao(lista) {
     modal.innerHTML = `
       <div class="modal scroll-thin" style="max-width: 640px;">
         <h3 class="modal-title">🗂 ${escapeHtml(lista.pastaNome)} · ${lista.arquivos.length} arquivo(s)</h3>
-        <p class="help-text" style="margin-bottom:10px;">${suportados} classificável(is) (PDF, JPG, PNG, TXT, Google Docs ≤15MB). ${lista.truncado ? '⚠ Pasta com mais de 300 arquivos — listagem truncada.' : ''} Subpastas não são varridas.</p>
+        <p class="help-text" style="margin-bottom:10px;">${suportados} classificável(is) (PDF, JPG, PNG, TXT, Google Docs ≤10MB). ${lista.truncado ? '⚠ Pasta com mais de 300 arquivos — listagem truncada.' : ''} Subpastas não são varridas.</p>
         <div style="max-height: 45vh; overflow:auto; border:1px solid var(--uc-line); border-radius:6px; padding:6px;">
           ${lista.arquivos.map((a, i) => `
             <label style="display:flex; gap:8px; align-items:center; padding:4px 6px; font-size:12.5px; ${a.suportado ? 'cursor:pointer;' : 'opacity:.45;'}">
@@ -7612,8 +7662,7 @@ async function renderDeadlines() {
   const today = new Date(); today.setHours(0,0,0,0);
   const enriched = deadlines.map(d => {
     const proc = processes.find(p => p.id === d.processId);
-    const dl = new Date(d.deadlineDate);
-    const days = Math.round((_diaFatalLocal(d.deadlineDate) - today) / 86400000);
+    const days = _diasAteDia(d.deadlineDate, today);
     return { ...d, processName: proc?.name || 'Processo removido', processCnj: proc?.cnj, days };
   });
   const active = enriched.filter(d => prazoEstaAtivo(d));
@@ -7768,8 +7817,8 @@ function _kanbanCardPrazo(d, procById, today) {
   const proc = procById[d.processId];
   const resolvido = prazoEstaResolvido(d);
   const interna = d.deadlineInternaDate || null;
-  const diasReal = Math.round((_diaFatalLocal(d.deadlineDate) - today) / 86400000);
-  const diasInterna = interna ? Math.round((_diaFatalLocal(interna) - today) / 86400000) : diasReal;
+  const diasReal = _diasAteDia(d.deadlineDate, today);
+  const diasInterna = interna ? _diasAteDia(interna, today) : diasReal;
   const corBadge = diasInterna < 0 ? 'badge-red' : diasInterna <= 2 ? 'badge-red' : diasInterna <= 5 ? 'badge-amber' : 'badge-green';
   const badge = resolvido ? '' : `<span class="badge ${corBadge}" style="font-size: 10px;">${diasInterna < 0 ? 'interna há ' + Math.abs(diasInterna) + 'd' : diasInterna === 0 ? 'interna HOJE' : 'interna em ' + diasInterna + 'd'}</span>`;
   const suspenso = d.status === STATUS_PRAZO.SUSPENSO;
@@ -7845,7 +7894,7 @@ async function exportDeadlinesCsv() {
   deadlines.forEach(d => {
     const p = processes.find(x => x.id === d.processId);
     const dl = new Date(d.deadlineDate);
-    const days = Math.ceil((dl - today) / 86400000);
+    const days = _diasAteDia(d.deadlineDate, today);   // B5.1: dia-calendário local
     const visual = recomputarStatusVisual(d, today);
     const statusLabel = prazoEstaResolvido(d) ? visual : (days < 0 ? 'expirado' : visual);
     const diasCol = prazoEstaResolvido(d) ? visual : days;
@@ -8671,7 +8720,7 @@ function recomputarStatusVisual(d, today) {
   if (d.status === STATUS_PRAZO.SUSPENSO)  return 'suspenso';
   // pendente — deriva pela proximidade (dia-calendário local, alinhado com a
   // régua de marcos — B5.1: antes o ceil sobre timestamp ao meio-dia somava +1d)
-  const days = Math.round((_diaFatalLocal(d.deadlineDate) - today) / 86400000);
+  const days = _diasAteDia(d.deadlineDate, today);
   if (days < 0)  return 'expirado';
   if (days <= 1) return 'iminente';
   if (days <= 7) return 'vincendo';
@@ -8815,7 +8864,7 @@ async function autoAgendarIntimacoes(opts) {
     }
   }
 
-  console.log('[auto-agendar]', res);
+  _log('[auto-agendar]', res);
   if (res.prazosCriados || res.expiradas || res.vinculadas || !silencioso) {
     _mostrarRelatorioAutoAgendamento(res, silencioso);
   }
@@ -9161,7 +9210,7 @@ async function garantirCamposKanban() {
       catch (e) { console.warn('garantirCamposKanban', d.id, e); }
     }
   }
-  if (alterados) console.log(`[kanban] ${alterados} prazo(s) migrado(s) (etapa/fatal interna)`);
+  if (alterados) _log(`[kanban] ${alterados} prazo(s) migrado(s) (etapa/fatal interna)`);
 }
 
 // Transições válidas da etapa. Avançar pode pular etapas (ir direto pra
@@ -9283,9 +9332,11 @@ async function ajustarDataFatalPrazo(id) {
 async function autoMarcarPerdidos() {
   const today = new Date(); today.setHours(0,0,0,0);
   const all = await DB.getAllDeadlines();
+  // B5.1 — usa a mesma âncora de dia-calendário do resto do app. O corte segue
+  // sendo "venceu antes de hoje": prazo que vence HOJE nunca é marcado perdido.
   const expirados = all.filter(d =>
     d.status === STATUS_PRAZO.PENDENTE &&
-    new Date(d.deadlineDate) < today
+    _diaFatalLocal(d.deadlineDate) < today
   );
   let marcados = 0;
   for (const d of expirados) {
@@ -9437,6 +9488,32 @@ function _diaFatalLocal(v) {
   const d = new Date(v); d.setHours(0, 0, 0, 0); return d;
 }
 
+/**
+ * Diferença em DIAS-CALENDÁRIO entre `v` e `base` (padrão: hoje).
+ *
+ * Ancora os DOIS lados à meia-noite local antes de subtrair. É isso que evita
+ * o "+1 dia" clássico que já apareceu em vários pontos do app: a data fatal é
+ * gravada ao meio-dia e um compromisso tem hora real, então subtrair direto da
+ * meia-noite de hoje deixa meia casa que o Math.ceil arredondava pra cima —
+ * prazo de hoje virava "1d", reunião das 14h de hoje virava "em 1d".
+ *
+ * Aceita ISO com ou sem hora, Date e timestamp.
+ *
+ * Sem data devolve NaN, não null, de propósito: comparação com NaN é sempre
+ * falsa, então uma data faltando some das janelas ("vence em até 5 dias") em
+ * vez de entrar nelas. Com null, `null <= 1` seria TRUE e um prazo sem data
+ * fatal apareceria como iminente. Quem precisa de null converte na saída.
+ */
+function _diasAteDia(v, base) {
+  if (v == null || v === '') return NaN;
+  const alvo = _diaFatalLocal(v);
+  if (isNaN(alvo)) return NaN;
+  let b;
+  if (base == null) { b = new Date(); b.setHours(0, 0, 0, 0); }
+  else { b = _diaFatalLocal(base); if (isNaN(b)) return NaN; }
+  return Math.round((alvo - b) / 86400000);
+}
+
 function marcoDoPrazo(d, hoje) {
   if (!d || !d.deadlineDate) return null;
   if (!prazoEstaAtivo(d)) return null;
@@ -9447,11 +9524,10 @@ function marcoDoPrazo(d, hoje) {
   // quando o prazo a tem; a fatal real vira o marco absoluto 'FATAL'.
   const temInterna = !!(d.deadlineInternaDate && d.deadlineInternaDate !== d.deadlineDate);
   if (temInterna) {
-    const daysReal = Math.round((_diaFatalLocal(d.deadlineDate) - today) / 86400000);
+    const daysReal = _diasAteDia(d.deadlineDate, today);
     if (daysReal <= 0) return 'FATAL'; // dia da fatal real (auto_perdido pega depois)
   }
-  const dl = _diaFatalLocal(temInterna ? d.deadlineInternaDate : d.deadlineDate);
-  const days = Math.round((dl - today) / 86400000);
+  const days = _diasAteDia(temInterna ? d.deadlineInternaDate : d.deadlineDate, today);
   if (days >= 4 && days <= 7) return 'T-7';
   if (days === 3) return 'T-3';
   if (days === 2) return 'T-2';
@@ -9590,7 +9666,7 @@ async function verificarLembretesPendentes() {
   }
 
   if (disparados > 0) {
-    console.log(`[lembretes] ${disparados} notificação(ões) disparadas`);
+    _log(`[lembretes] ${disparados} notificação(ões) disparadas`);
   }
   return disparados;
 }
@@ -9640,7 +9716,7 @@ async function registrarFcmTokenSeNecessario() {
   } else {
     fcmTokens[me] = { token, ua, lastSeen: Date.now(), registeredAt: Date.now() };
     await DB.setSetting('fcmTokens', fcmTokens);
-    console.log('[FCM] Token registrado/atualizado para', me);
+    _log('[FCM] Token registrado/atualizado para', me);
   }
   return token;
 }
@@ -10442,7 +10518,7 @@ async function _migrarHonorariosParaClientes() {
     }
 
     if (migrados > 0) {
-      console.log(`[honorarios] migração: ${migrados} honorário(s) migrado(s)`);
+      _log(`[honorarios] migração: ${migrados} honorário(s) migrado(s)`);
       if (semCliente > 0 && typeof toast === 'function') {
         toast(`${semCliente} honorário(s) sem cliente`,
           'O processo vinculado não tem clienteId — cadastre o cliente em /clientes e re-edite o honorário', 'info');
@@ -12639,9 +12715,7 @@ function _marcoDoCompromisso(c, hoje) {
   if (!c || !c.dataHoraInicio) return null;
   if (c.status === 'realizado' || c.status === 'cancelado') return null;
   const today = hoje || (() => { const t = new Date(); t.setHours(0,0,0,0); return t; })();
-  const inicio = new Date(c.dataHoraInicio);
-  inicio.setHours(0, 0, 0, 0);
-  const days = Math.ceil((inicio - today) / 86400000);
+  const days = _diasAteDia(c.dataHoraInicio, today);
   if (days === 1) return 'T-1';
   if (days === 0) return 'T-0';
   if (days === -1) return 'T+1';
@@ -12678,7 +12752,9 @@ function _tarefasProdutividade(tarefas, dias) {
       if (_tarefaAtrasada(t, today)) r.atrasadas++;
     } else if (t.status === 'concluida' && (t.concluidoEm || 0) >= corte) {
       r.concluidas++;
-      if (!t.prazoData || _diaFatalLocal(t.prazoData) >= _diaFatalLocal(new Date(t.concluidoEm).toISOString())) r.noPrazo++;
+      // Dia da conclusão pelo relógio LOCAL. Com toISOString() o dia virava em
+      // UTC: tarefa fechada depois das 21h em Brasília contava como atrasada.
+      if (!t.prazoData || _diaFatalLocal(t.prazoData) >= _diaFatalLocal(t.concluidoEm)) r.noPrazo++;
     }
   }
   return por;
@@ -12720,11 +12796,6 @@ const BG_GRUPOS = [
 ];
 const BG_MAX_POR_GRUPO = 6;
 
-function _bgNorm(s) {
-  return String(s == null ? '' : s)
-    .normalize('NFD').replace(/[̀-ͯ]/g, '')
-    .toLowerCase().replace(/\s+/g, ' ').trim();
-}
 function _bgDigitos(s) { return String(s == null ? '' : s).replace(/\D/g, ''); }
 
 // Casa o termo contra os campos. Retorna 0 (sem match), 1 (contém) ou
@@ -12732,7 +12803,7 @@ function _bgDigitos(s) { return String(s == null ? '' : s).replace(/\D/g, ''); }
 function _bgPeso(termoNorm, termoDig, campos, numeros) {
   let peso = 0;
   for (const c of (campos || [])) {
-    const v = _bgNorm(c);
+    const v = _normTexto(c);
     if (!v || !termoNorm) continue;
     if (v.startsWith(termoNorm)) return 2;
     if (v.includes(termoNorm)) peso = Math.max(peso, 1);
@@ -12749,7 +12820,7 @@ function _bgPeso(termoNorm, termoDig, campos, numeros) {
 // Filtro puro (testável): recebe o termo e os dados já carregados,
 // devolve { total, grupos:[{chave,label,icone,itens,total}] }.
 function _buscaGlobalFiltrar(termo, dados) {
-  const t = _bgNorm(termo);
+  const t = _normTexto(termo);
   const td = _bgDigitos(termo);
   if (t.length < 2 && td.length < 3) return { total: 0, grupos: [] };
   const d = dados || {};
@@ -12898,7 +12969,7 @@ function _bgRenderResultados(termo, box) {
   if (!box) return;
   const r = _buscaGlobalFiltrar(termo, _bgDados || {});
   if (!r.grupos.length) {
-    box.innerHTML = `<p class="help-text" style="padding:18px;text-align:center;">${(_bgNorm(termo).length >= 2 || _bgDigitos(termo).length >= 3)
+    box.innerHTML = `<p class="help-text" style="padding:18px;text-align:center;">${(_normTexto(termo).length >= 2 || _bgDigitos(termo).length >= 3)
       ? 'Nada encontrado para <strong>' + escapeHtml(termo) + '</strong>.'
       : 'Digite pelo menos 2 letras (ou 3 dígitos de um número).'}</p>`;
     return;
@@ -13125,8 +13196,7 @@ async function renderAgenda() {
   const today = new Date(); today.setHours(0,0,0,0);
   const proximos7 = compromissos.filter(c => {
     if (c.status === 'cancelado' || c.status === 'realizado') return false;
-    const dt = new Date(c.dataHoraInicio || 0);
-    const diff = Math.ceil((dt - today) / 86400000);
+    const diff = _diasAteDia(c.dataHoraInicio, today);   // dia-calendário; sem data vira NaN e cai fora
     return diff >= 0 && diff <= 7;
   });
   const navBadge = $('navAgendaCount');
@@ -13232,7 +13302,11 @@ async function renderAgenda() {
   let tarefasOverlay = [];
   if (f.incluirPrazos && f.tipo === 'todos') {
     tarefasOverlay = (tarefasAg || []).filter(t => {
-      if (t.status !== 'aberta' && t.status !== 'andamento') return false;
+      // Mesma regra do overlay de prazos acima: 'ativos' (default) mostra só as
+      // abertas, 'todos' mostra também as concluídas, um status específico de
+      // compromisso não se aplica a tarefa e esconde todas.
+      if (f.status === 'ativos') { if (t.status !== 'aberta' && t.status !== 'andamento') return false; }
+      else if (f.status !== 'todos') return false;
       if (!t.prazoData) return false;
       if (f.responsavel && (t.responsavel || '') !== f.responsavel) return false;
       const dia = String(t.prazoData).slice(0, 10);
@@ -13492,8 +13566,7 @@ function _renderAgendaCalendario(porDia, hoje, calRef, procById, cliById) {
                 return `<div class="ag-cal-chip" style="border-left: 3px solid var(--uc-green); background: var(--uc-cream);" onclick="event.stopPropagation(); _abrirDiaAgenda('${c.iso}')" title="✅ Tarefa">✅ ${escapeHtml((t.titulo || 'Tarefa').slice(0, 22))}</div>`;
               } else {
                 const d = e.item;
-                const dl = new Date(d.deadlineDate); dl.setHours(0,0,0,0);
-                const days = Math.ceil((dl - hoje) / 86400000);
+                const days = _diasAteDia(d.deadlineDate, hoje);   // B5.1
                 const urgente = days <= 1;
                 return `<div class="ag-cal-chip prazo${urgente ? ' urgente' : ''}" onclick="event.stopPropagation(); _abrirDiaAgenda('${c.iso}')" title="⏰ Prazo">⏰ ${escapeHtml((d.description || d.type || 'Prazo').slice(0, 22))}</div>`;
               }
@@ -13566,6 +13639,8 @@ function _renderTarefaNaAgenda(t, procById, today) {
             <strong style="color: var(--uc-black); font-size: 13.5px;">${escapeHtml(t.titulo)}</strong>
             ${atrasada ? '<span class="badge badge-red" style="font-size: 9px;">atrasada</span>' : ''}
             ${t.status === 'andamento' ? '<span class="badge badge-amber" style="font-size: 9px;">em andamento</span>' : ''}
+            ${t.status === 'concluida' ? '<span class="badge badge-green" style="font-size: 9px;">✓ concluída</span>' : ''}
+            ${t.status === 'cancelada' ? '<span class="badge badge-gray" style="font-size: 9px;">cancelada</span>' : ''}
           </div>
           <div style="font-size: 12px; color: var(--uc-warm-gray); margin-top: 2px;">
             👤 ${escapeHtml((t.responsavel || '?').split(' ')[0])}
@@ -13574,7 +13649,7 @@ function _renderTarefaNaAgenda(t, procById, today) {
         </div>
         <div style="display: flex; gap: 2px; flex-shrink: 0;">
           ${t.status === 'aberta' ? `<button class="btn btn-ghost btn-sm" onclick="event.stopPropagation(); mudarStatusTarefa('${t.id}','andamento')" title="Iniciar" style="padding: 2px 6px;">▶</button>` : ''}
-          <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation(); mudarStatusTarefa('${t.id}','concluida')" title="Concluir" style="padding: 2px 6px;">✓</button>
+          ${(t.status === 'aberta' || t.status === 'andamento') ? `<button class="btn btn-ghost btn-sm" onclick="event.stopPropagation(); mudarStatusTarefa('${t.id}','concluida')" title="Concluir" style="padding: 2px 6px;">✓</button>` : ''}
           <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation(); editarTarefaFlow('${t.id}')" title="Editar" style="padding: 2px 6px;">✏</button>
         </div>
       </div>
@@ -13584,9 +13659,7 @@ function _renderTarefaNaAgenda(t, procById, today) {
 function _renderPrazoNaAgenda(d, procById, today) {
   const proc = (d.processId && procById && typeof procById === 'object') ? procById[d.processId] : null;
   const visual = recomputarStatusVisual(d, today);
-  const dl = new Date(d.deadlineDate);
-  dl.setHours(0,0,0,0);
-  const days = Math.round((_diaFatalLocal(d.deadlineDate) - today) / 86400000);
+  const days = _diasAteDia(d.deadlineDate, today);
   let cor = '#4a7c4a', badgeClass = 'badge-green', label = days + 'd';
   if (visual === 'expirado') { cor = '#a8472d'; badgeClass = 'badge-red'; label = 'vencido há ' + Math.abs(days) + 'd'; }
   else if (visual === 'iminente') { cor = '#a8472d'; badgeClass = 'badge-red'; label = days === 0 ? 'HOJE' : 'AMANHÃ'; }
@@ -16731,8 +16804,7 @@ async function _exportarCarteiraExcel(btn) {
         const cli = proc?.clienteId ? cliById[proc.clienteId] : null;
         let dias = '';
         if (d.deadlineDate) {
-          const dl = new Date(d.deadlineDate); dl.setHours(0,0,0,0);
-          dias = Math.round((dl.getTime() - hojeMs) / 86400000);
+          dias = _diasAteDia(d.deadlineDate, hojeMs);
         }
         aoa.push([
           proc?.cnj || '',
@@ -18428,10 +18500,9 @@ async function renderEquipe() {
     const proc = processos.find(p => p.id === d.processId);
     return proc?.advogadoResponsavel === advogado;
   });
-  const vencidos = ativosSnapshot.filter(d => new Date(d.deadlineDate) < today);
+  const vencidos = ativosSnapshot.filter(d => _diaFatalLocal(d.deadlineDate) < today);   // B5.1: dia-calendário local
   const urgentes = ativosSnapshot.filter(d => {
-    const dl = new Date(d.deadlineDate); dl.setHours(0,0,0,0);
-    const days = Math.ceil((dl - today) / 86400000);
+    const days = _diasAteDia(d.deadlineDate, today);
     return days >= 0 && days <= 3;
   });
 
@@ -18554,8 +18625,7 @@ async function renderEquipe() {
         <h3 class="font-serif text-lg font-semibold smallcaps mb-3" style="color: var(--uc-red);">⚠ Publicações vencidas não-cumpridas · ${vencidos.length}</h3>
         ${vencidos.sort((a, b) => new Date(a.deadlineDate) - new Date(b.deadlineDate)).slice(0, 10).map(d => {
           const proc = processos.find(p => p.id === d.processId);
-          const dl = new Date(d.deadlineDate); dl.setHours(0,0,0,0);
-          const dias = Math.abs(Math.ceil((dl - today) / 86400000));
+          const dias = Math.abs(_diasAteDia(d.deadlineDate, today));   // B5.1
           return `
             <div style="display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-bottom:1px solid rgba(168, 71, 45, 0.2); font-size:13px;">
               <div style="flex:1; min-width:0;">
@@ -18578,8 +18648,7 @@ async function renderEquipe() {
         <h3 class="font-serif text-lg font-semibold smallcaps mb-3" style="color: var(--uc-black);">Próximas publicações · ${proxPrazos.length}</h3>
         ${proxPrazos.length === 0 ? '<p class="help-text">Nenhuma publicação ativa sob responsabilidade.</p>' : proxPrazos.map(d => {
           const proc = processos.find(p => p.id === d.processId);
-          const dl = new Date(d.deadlineDate); dl.setHours(0,0,0,0);
-          const days = Math.ceil((dl - today) / 86400000);
+          const days = _diasAteDia(d.deadlineDate, today);   // B5.1
           let cls = 'safe', label = days + 'd';
           if (days < 0) { cls = 'expired'; label = 'há ' + Math.abs(days) + 'd'; }
           else if (days === 0) { cls = 'urgent'; label = 'HOJE'; }
@@ -18603,7 +18672,7 @@ async function renderEquipe() {
         ${proxComps.length === 0 ? '<p class="help-text">Nenhum compromisso futuro.</p>' : proxComps.map(c => {
           const meta = _agTipoMeta(c.tipo);
           const dt = new Date(c.dataHoraInicio);
-          const days = Math.ceil((dt - today) / 86400000);
+          const days = _diasAteDia(dt, today);   // dia-calendário: sem isso "HOJE" nunca aparecia
           const dataLabel = days === 0 ? 'HOJE' : days === 1 ? 'AMANHÃ' : days + 'd · ' + formatDate(dt);
           const hora = dt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
           return `
@@ -18682,7 +18751,7 @@ async function _renderEquipeComparativo(ano, mes) {
       const proc = processos.find(p => p.id === d.processId);
       return proc?.advogadoResponsavel === advogado;
     });
-    const vencidos = ativosSnapshot.filter(d => new Date(d.deadlineDate) < today).length;
+    const vencidos = ativosSnapshot.filter(d => _diaFatalLocal(d.deadlineDate) < today).length;   // B5.1
 
     const cumpridos = prazos.filter(d => {
       if (d.status !== 'cumprido') return false;
@@ -19431,7 +19500,7 @@ async function quickCalcDeadline() {
   const intDate = new Date(date + 'T12:00:00');
   const dl = addBusinessDays(intDate, parseInt(days));
   const today = new Date(); today.setHours(0,0,0,0);
-  const remaining = Math.ceil((dl - today) / 86400000);
+  const remaining = _diasAteDia(dl, today);   // B5.1: dl vem ao meio-dia; ceil somava +1
   toast(`Vencimento: ${dl.toLocaleDateString('pt-BR')}`, `${remaining > 0 ? remaining + ' dias úteis restantes' : 'EXPIRADO há ' + Math.abs(remaining) + ' dias'}`, remaining > 0 ? 'success' : 'error');
   // Show a result card too
   $('appContent').insertAdjacentHTML('afterbegin', `
@@ -21243,28 +21312,21 @@ async function _mniDetectarTribunal(p) {
 // nos processos (p.advogadoResponsavel) podem ter casing/acentuação
 // diferente do que está no dropdown ADVOGADOS usado pra cadastrar
 // credencial (ex: "EDUARDO URANY DE CASTRO" vs "Eduardo Urany de Castro").
-function _mniNormNome(s) {
-  return String(s || '')
-    .normalize('NFD').replace(/[̀-ͯ]/g, '')
-    .toLowerCase()
-    .replace(/\s+/g, ' ')
-    .trim();
-}
 
 async function _mniBuscarCredencial(advogadoNome, tribunalCodigo) {
   const credentials = (await DB.getSetting('mniCredentials', [])) || [];
-  const advNorm = _mniNormNome(advogadoNome);
+  const advNorm = _normTexto(advogadoNome);
   const tribNorm = String(tribunalCodigo || '').toUpperCase().trim();
   const found = credentials.find(c =>
-    _mniNormNome(c.advogado) === advNorm &&
+    _normTexto(c.advogado) === advNorm &&
     String(c.tribunal || '').toUpperCase().trim() === tribNorm
   ) || null;
   if (!found && credentials.length > 0) {
     // Log diagnóstico só quando há credenciais cadastradas (sem ruído
     // pro caso "cofre vazio" que é legítimo).
-    console.log('[MNI cred lookup miss]', {
+    _log('[MNI cred lookup miss]', {
       pedido: { advogado: advogadoNome, advogadoNorm: advNorm, tribunal: tribunalCodigo, tribunalNorm: tribNorm },
-      cofre: credentials.map(c => ({ advogado: c.advogado, advogadoNorm: _mniNormNome(c.advogado), tribunal: c.tribunal }))
+      cofre: credentials.map(c => ({ advogado: c.advogado, advogadoNorm: _normTexto(c.advogado), tribunal: c.tribunal }))
     });
   }
   return found;
@@ -21335,7 +21397,7 @@ async function mniBuscarProcessoFlow(processId) {
     if (generico) {
       cred = generico;
       usedAdvogado = generico.advogado;
-      console.log('[MNI] usando credencial genérica do tribunal:', { trib, advogado: generico.advogado, candidatosTentados: candidatos });
+      _log('[MNI] usando credencial genérica do tribunal:', { trib, advogado: generico.advogado, candidatosTentados: candidatos });
     }
   }
   if (!cred) {
@@ -21572,7 +21634,7 @@ async function datajudVarrerCarteira(opts) {
   }
 
   if (prog) prog.close();
-  console.log('[datajud varredura]', res);
+  _log('[datajud varredura]', res);
   if (silencioso) {
     if (res.comNovidade.length) {
       toast('🛰 Movimentações novas (DataJud)',
@@ -23652,7 +23714,7 @@ function djenDedupePublications(pubs) {
 async function djenClassify(publications) {
   // Dedupe ANTES de classificar — evita gastar lookup do DB e renderizar 2x.
   const dedup = djenDedupePublications(publications);
-  if (dedup.removed > 0) console.log(`[DJEN] dedupe interno: ${dedup.removed} de ${publications.length} colapsadas`);
+  if (dedup.removed > 0) _log(`[DJEN] dedupe interno: ${dedup.removed} de ${publications.length} colapsadas`);
 
   const processes = await DB.getAllProcesses();
   const cnjMap = new Map();
@@ -25454,7 +25516,7 @@ async function djenMaybeAutoCheck() {
 
       const n = finalMatched.length, o = finalUnmatched.length;
       if (n > 0 || o > 0) _djenMostrarBannerAutoCheck(n, o);
-      console.log(`[DJEN auto] cron pré-fetch: ${n} vinculadas + ${o} órfãs (skip API fetch)`);
+      _log(`[DJEN auto] cron pré-fetch: ${n} vinculadas + ${o} órfãs (skip API fetch)`);
       return; // skipa API fetch — cron já trouxe
     }
   } catch (e) {
@@ -25467,14 +25529,14 @@ async function djenMaybeAutoCheck() {
   const last = await DB.getSetting('djenLastAutoCheck', 0);
   const minIntervalMs = hours * 60 * 60 * 1000;
   if (last && (Date.now() - last) < minIntervalMs) {
-    console.log(`[DJEN auto] pulando — último check há ${Math.round((Date.now() - last) / 1000 / 60)} min, intervalo mínimo ${hours}h`);
+    _log(`[DJEN auto] pulando — último check há ${Math.round((Date.now() - last) / 1000 / 60)} min, intervalo mínimo ${hours}h`);
     return;
   }
   // Guard 3: OABs cadastradas + ativas
   const allOabs = await DB.getSetting('djenOabs', DJEN_DEFAULT_OABS);
   const oabs = (allOabs || []).filter(o => o.enabled !== false);
   if (oabs.length === 0) {
-    console.log('[DJEN auto] sem OABs ativas — pulando');
+    _log('[DJEN auto] sem OABs ativas — pulando');
     return;
   }
 
@@ -25488,7 +25550,7 @@ async function djenMaybeAutoCheck() {
 
   const buscarNomeAuto = await DB.getSetting('djenBuscarPorNome', true);
   const nomesAuto = buscarNomeAuto ? _djenNomesMonitorados(oabs) : [];
-  console.log(`[DJEN auto] consultando ${oabs.length} OAB(s)${nomesAuto.length ? ' + ' + nomesAuto.length + ' nome(s)' : ''} · período ${fmtDate(inicioDate)} → ${fmtDate(fim)}`);
+  _log(`[DJEN auto] consultando ${oabs.length} OAB(s)${nomesAuto.length ? ' + ' + nomesAuto.length + ' nome(s)' : ''} · período ${fmtDate(inicioDate)} → ${fmtDate(fim)}`);
   try {
     const pubs = await djenFetchAll(oabs, fmtDate(inicioDate), fmtDate(fim), null, nomesAuto);
     const classified = await djenClassify(pubs);
@@ -25500,7 +25562,7 @@ async function djenMaybeAutoCheck() {
     if (novas > 0 || orfas > 0) {
       _djenMostrarBannerAutoCheck(novas, orfas);
     }
-    console.log(`[DJEN auto] ${novas} vinculadas + ${orfas} órfãs encontradas`);
+    _log(`[DJEN auto] ${novas} vinculadas + ${orfas} órfãs encontradas`);
   } catch (e) {
     console.warn('[DJEN auto] falhou (silencioso pro user):', e);
   }
@@ -25738,7 +25800,6 @@ async function _computarNotificacoesInApp() {
   if (!meuNome) return [];
 
   const today = new Date(); today.setHours(0, 0, 0, 0);
-  const ms = today.getTime();
   const items = [];
 
   try {
@@ -25756,8 +25817,7 @@ async function _computarNotificacoesInApp() {
     deadlines.filter(prazoEstaAtivo).forEach(d => {
       const proc = procsById[d.processId];
       if (proc?.advogadoResponsavel !== meuNome) return;
-      const dl = new Date(d.deadlineDate); dl.setHours(0,0,0,0);
-      const days = Math.ceil((dl - today) / 86400000);
+      const days = _diasAteDia(d.deadlineDate, today);   // B5.1: mesmo dia-calendário da régua de marcos do backend
       let marco = null, icon = '⏰', color = 'var(--uc-amber)', tituloPrefix = '';
       if (days < 0)        { marco = 'T+' + Math.abs(days); icon = '🚨'; color = 'var(--uc-red)'; tituloPrefix = 'Vencido há ' + Math.abs(days) + 'd'; }
       else if (days === 0) { marco = 'T-0'; icon = '🚨'; color = 'var(--uc-red)'; tituloPrefix = 'Vence HOJE'; }
@@ -25783,8 +25843,7 @@ async function _computarNotificacoesInApp() {
       if (c.responsavel !== meuNome && !(c.participantes || []).includes(meuNome)) return;
       if (!c.dataHoraInicio) return;
       const inicio = new Date(c.dataHoraInicio);
-      const inicioDia = new Date(inicio); inicioDia.setHours(0,0,0,0);
-      const days = Math.ceil((inicioDia - today) / 86400000);
+      const days = _diasAteDia(inicio, today);
       let marco = null, icon = '📅', color = 'var(--uc-graphite)', tituloPrefix = '';
       if (days === 0) { marco = 'T-0'; icon = '📅'; color = 'var(--uc-red)'; tituloPrefix = 'HOJE'; }
       else if (days === 1) { marco = 'T-1'; icon = '📅'; color = 'var(--uc-amber)'; tituloPrefix = 'AMANHÃ'; }
@@ -25809,7 +25868,7 @@ async function _computarNotificacoesInApp() {
       if (!c.proximaAcao || c.proximaAcaoFeita) return;
       if (!c.proximaAcaoData || c.proximaAcaoData > hojeISO) return;
       const dataPx = new Date(c.proximaAcaoData + 'T12:00:00');
-      const days = Math.ceil((dataPx.getTime() - ms) / 86400000);
+      const days = _diasAteDia(dataPx, today);
       items.push({
         id: 'followup:' + c.id,
         ts: dataPx.getTime(),
@@ -25826,7 +25885,7 @@ async function _computarNotificacoesInApp() {
       (h.parcelas || []).forEach(p => {
         if (p.status === 'pago' || !p.vencimento) return;
         const venc = new Date(p.vencimento + 'T12:00:00');
-        const days = Math.ceil((venc - today) / 86400000);
+        const days = _diasAteDia(venc, today);
         if (days < -7 || days > 3) return;
         const procsCob = (h.processosCobertos || []).concat(h.processoId ? [h.processoId] : []);
         const ehMeu = procsCob.some(pid => procsById[pid]?.advogadoResponsavel === meuNome);
@@ -26470,7 +26529,7 @@ async function bootApp() {
     _settingsCache.clear();
     _settingsCacheAt.clear();
     Object.keys(_finCaches).forEach(k => _finCacheBust(k));
-    console.log('[cache] invalidado manualmente');
+    _log('[cache] invalidado manualmente');
   };
 
   // Auto-marca como "perdido" prazos pendentes cuja data fatal já passou
