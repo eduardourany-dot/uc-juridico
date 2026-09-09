@@ -111,6 +111,24 @@ async function _loadFcmTokens(db) {
   }
 }
 
+// Lista e-mails de admins ativos — usados como fallback quando o
+// responsável do doc não tem token FCM cadastrado. Melhor cobrar
+// admin do que perder a cobrança em silêncio.
+async function _loadAdminEmails(db) {
+  try {
+    const snap = await db.collection('users').where('role', '==', 'admin').get();
+    const emails = [];
+    snap.forEach(doc => {
+      const u = doc.data();
+      if (u && u.ativo !== false) emails.push(String(doc.id).toLowerCase());
+    });
+    return emails;
+  } catch (e) {
+    logger.warn('[cobranca] falha ao carregar admins: ' + (e.message || e));
+    return [];
+  }
+}
+
 // Nome → email via quadro; se falhar, tenta prefixo do primeiro nome.
 function _emailPorNome(nome, byNome) {
   if (!nome) return null;
@@ -138,14 +156,14 @@ async function _enviarPush(messaging, token, dataPayload) {
 // CORE
 // =====================================================================
 
-async function _processarColecao(db, messaging, colecao, cfg, byNome, fcmTokens, agora) {
+async function _processarColecao(db, messaging, colecao, cfg, byNome, fcmTokens, adminEmails, agora) {
   const agoraMs = agora.getTime();
   const intervaloMs = cfg.intervaloHoras * 60 * 60 * 1000;
   const campoData = CAMPO_DATA[colecao];
   const terminais = STATUS_TERMINAIS[colecao];
 
   const snap = await db.collection(colecao).get();
-  let cobrados = 0, semToken = 0, marcadosInsistente = 0;
+  let cobrados = 0, semToken = 0, viaFallbackAdmin = 0, marcadosInsistente = 0;
 
   for (const doc of snap.docs) {
     const d = doc.data();
@@ -170,32 +188,58 @@ async function _processarColecao(db, messaging, colecao, cfg, byNome, fcmTokens,
     const cobrancasNova = (Number(d.cobrancas) || 0) + 1;
     const responsavelNome = d.responsavel || d.responsavelNome || null;
     const emailResp = _emailPorNome(responsavelNome, byNome);
-    let pushEnviado = false;
+    const titulo = d.titulo || d.description || d.type || d.assunto || 'Pendência';
+    const dataStr = colecao === 'compromissos'
+      ? dataVenc.toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })
+      : dataVenc.toLocaleDateString('pt-BR');
 
+    // Monta lista de destinatários. Prioridade:
+    // 1. Responsável do doc (se tem email + token + não é opt-out)
+    // 2. Fallback: TODOS os admins ativos com token (melhor cobrar admin
+    //    do que perder a cobrança em silêncio quando responsável não
+    //    tem device registrado)
+    const destinatarios = [];
     if (emailResp && !cfg.optOutEmails.includes(emailResp)) {
       const tokenInfo = fcmTokens[emailResp];
-      const token = tokenInfo && tokenInfo.token;
-      if (token) {
-        const titulo = d.titulo || d.description || d.type || d.assunto || 'Pendência';
-        const dataStr = colecao === 'compromissos'
-          ? dataVenc.toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })
-          : dataVenc.toLocaleDateString('pt-BR');
-        pushEnviado = await _enviarPush(messaging, token, {
+      if (tokenInfo && tokenInfo.token) destinatarios.push({ email: emailResp, token: tokenInfo.token, isFallback: false });
+    }
+    if (destinatarios.length === 0) {
+      // Fallback admin: cobrança escalada por falta de token do dono
+      for (const adminEmail of adminEmails) {
+        if (cfg.optOutEmails.includes(adminEmail)) continue;
+        const tokenInfo = fcmTokens[adminEmail];
+        if (tokenInfo && tokenInfo.token) destinatarios.push({ email: adminEmail, token: tokenInfo.token, isFallback: true });
+      }
+    }
+
+    let pushEnviado = false;
+    if (destinatarios.length === 0) {
+      semToken++;
+    } else {
+      for (const dest of destinatarios) {
+        const tituloPush = dest.isFallback
+          ? `[fallback] ${cobrancasNova}ª cobrança — ${titulo}`
+          : `${cobrancasNova}ª cobrança — ${titulo}`;
+        const bodyPush = dest.isFallback
+          ? `Vencido em ${dataStr} · segue pendente · dono sem device (${responsavelNome || '?'})`
+          : `Vencido em ${dataStr} · segue pendente`;
+        const ok = await _enviarPush(messaging, dest.token, {
           type: 'cobranca_insistente',
-          title: `${cobrancasNova}ª cobrança — ${titulo}`.slice(0, 240),
-          body: `Vencido em ${dataStr} · segue pendente`,
+          title: tituloPush.slice(0, 240),
+          body: bodyPush,
           cobrancas: String(cobrancasNova),
           colecao,
           docId: doc.id,
+          fallback: String(dest.isFallback),
           insistente: String(cobrancasNova >= cfg.insistenteLimite),
           timestamp: String(agoraMs),
           tag: `cobranca-${colecao}-${doc.id}`
         });
-      } else {
-        semToken++;
+        if (ok) {
+          pushEnviado = true;
+          if (dest.isFallback) viaFallbackAdmin++;
+        }
       }
-    } else {
-      semToken++;
     }
 
     const update = {
@@ -215,7 +259,7 @@ async function _processarColecao(db, messaging, colecao, cfg, byNome, fcmTokens,
     }
   }
 
-  return { cobrados, semToken, marcadosInsistente, total: snap.size };
+  return { cobrados, semToken, viaFallbackAdmin, marcadosInsistente, total: snap.size };
 }
 
 async function runCobrancaInsistente(dryRun = false) {
@@ -235,22 +279,23 @@ async function runCobrancaInsistente(dryRun = false) {
     return { skipped: 'silencio_noturno', horaSP };
   }
 
-  const [byNome, fcmTokens] = await Promise.all([
+  const [byNome, fcmTokens, adminEmails] = await Promise.all([
     _loadQuadroAdvogados(db),
-    _loadFcmTokens(db)
+    _loadFcmTokens(db),
+    _loadAdminEmails(db)
   ]);
 
-  logger.info(`[cobranca] iniciando · advogados no quadro: ${Object.keys(byNome).length} · tokens FCM: ${Object.keys(fcmTokens).length} · intervalo: ${cfg.intervaloHoras}h`);
+  logger.info(`[cobranca] iniciando · advogados no quadro: ${Object.keys(byNome).length} · tokens FCM: ${Object.keys(fcmTokens).length} · admins ativos: ${adminEmails.length} · intervalo: ${cfg.intervaloHoras}h`);
 
   const resultado = { prazos: null, compromissos: null, tarefas: null, horaSP };
   if (cfg.escopo.prazos) {
-    resultado.prazos = await _processarColecao(db, messaging, 'prazos', cfg, byNome, fcmTokens, agora);
+    resultado.prazos = await _processarColecao(db, messaging, 'prazos', cfg, byNome, fcmTokens, adminEmails, agora);
   }
   if (cfg.escopo.compromissos) {
-    resultado.compromissos = await _processarColecao(db, messaging, 'compromissos', cfg, byNome, fcmTokens, agora);
+    resultado.compromissos = await _processarColecao(db, messaging, 'compromissos', cfg, byNome, fcmTokens, adminEmails, agora);
   }
   if (cfg.escopo.tarefas) {
-    resultado.tarefas = await _processarColecao(db, messaging, 'tarefas', cfg, byNome, fcmTokens, agora);
+    resultado.tarefas = await _processarColecao(db, messaging, 'tarefas', cfg, byNome, fcmTokens, adminEmails, agora);
   }
 
   logger.info('[cobranca] resultado: ' + JSON.stringify(resultado));

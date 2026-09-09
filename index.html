@@ -7776,7 +7776,8 @@ function _kanbanCardPrazo(d, procById, today) {
   const diasReal = Math.round((_diaFatalLocal(d.deadlineDate) - today) / 86400000);
   const diasInterna = interna ? Math.round((_diaFatalLocal(interna) - today) / 86400000) : diasReal;
   const corBadge = diasInterna < 0 ? 'badge-red' : diasInterna <= 2 ? 'badge-red' : diasInterna <= 5 ? 'badge-amber' : 'badge-green';
-  const badge = resolvido ? '' : `<span class="badge ${corBadge}" style="font-size: 10px;">${diasInterna < 0 ? 'interna há ' + Math.abs(diasInterna) + 'd' : diasInterna === 0 ? 'interna HOJE' : 'interna em ' + diasInterna + 'd'}</span>`;
+  const carimbo = resolvido ? '' : _cobrancaCarimbo(d);
+  const badge = resolvido ? '' : `<span class="badge ${corBadge}" style="font-size: 10px;">${diasInterna < 0 ? 'interna há ' + Math.abs(diasInterna) + 'd' : diasInterna === 0 ? 'interna HOJE' : 'interna em ' + diasInterna + 'd'}</span>${carimbo ? ' ' + carimbo : ''}`;
   const suspenso = d.status === STATUS_PRAZO.SUSPENSO;
 
   const etapa = PRAZO_ETAPAS.indexOf(d.etapa) >= 0 ? d.etapa : 'atribuido';
@@ -9463,6 +9464,19 @@ async function _cobrancaSalvarPorTipo(tipo, doc) {
   if (tipo === 'prazo') return DB.saveDeadline(doc);
   if (tipo === 'compromisso') return DB.saveCompromisso(doc);
   if (tipo === 'tarefa') return DB.saveTarefa(doc);
+}
+
+// Carimbo compacto pra colocar em cards (Torre, Kanban, compromisso,
+// tarefa). Retorna string vazia quando doc não tem cobranças — nunca
+// injeta ruído visual desnecessário. Cores escalonam com o número:
+// 1x amber, 2x laranja, 3+ vermelho (mesmo momento em que a tela
+// travante já entra em cena).
+function _cobrancaCarimbo(doc) {
+  if (!doc || !doc.cobrancas || doc.cobrancas < 1) return '';
+  const n = Number(doc.cobrancas) || 0;
+  const cor = n >= 3 ? 'var(--uc-red,#a33)' : n >= 2 ? '#d97a1d' : 'var(--uc-amber,#b87f1c)';
+  const titulo = `${n}ª cobrança automática · vencido não cumprido`;
+  return `<span title="${titulo}" style="display:inline-flex;align-items:center;gap:3px;font-size:9px;font-weight:700;padding:1px 6px;border-radius:10px;background:${cor};color:#fff;letter-spacing:.04em;text-transform:uppercase;flex-shrink:0;">📣 ${n}ª cob.</span>`;
 }
 
 async function _cobrancaAcao(item, acao, minutos) {
@@ -13582,7 +13596,10 @@ function _tarefaCard(t, procById, today) {
     <div class="card" style="margin:0 0 8px; padding:10px; background:#fff; ${feita ? 'opacity:.75;' : ''} ${atrasada ? 'border-left:3px solid var(--uc-red);' : ''}">
       <div style="display:flex; justify-content:space-between; gap:6px; align-items:flex-start;">
         <strong style="font-size:12.5px; color:var(--uc-black); line-height:1.35; ${feita ? 'text-decoration:line-through;' : ''}">${escapeHtml(t.titulo)}</strong>
-        ${t.prazoData && !feita ? `<span class="badge ${atrasada ? 'badge-red' : 'badge-amber'}" style="font-size:9px; flex-shrink:0;">${atrasada ? 'atrasada' : formatDate(t.prazoData)}</span>` : ''}
+        <div style="display:flex; gap:4px; flex-shrink:0; flex-wrap:wrap; justify-content:flex-end;">
+          ${!feita ? _cobrancaCarimbo(t) : ''}
+          ${t.prazoData && !feita ? `<span class="badge ${atrasada ? 'badge-red' : 'badge-amber'}" style="font-size:9px; flex-shrink:0;">${atrasada ? 'atrasada' : formatDate(t.prazoData)}</span>` : ''}
+        </div>
       </div>
       ${t.descricao ? `<div style="font-size:11px; color:var(--uc-warm-gray); margin-top:3px;">${escapeHtml(t.descricao.slice(0, 140))}</div>` : ''}
       <div style="font-size:11px; color:var(--uc-warm-gray); margin-top:4px;">
@@ -14270,6 +14287,7 @@ function _renderCompromissoCard(c, procById, cliById) {
             <span style="font-size: 14px;">${tipo.icon}</span>
             <strong style="color: var(--uc-black); font-size: 14px;">${escapeHtml(c.titulo || '—')}</strong>
             <span class="badge ${status.badgeClass}" style="font-size: 9px;">${status.label}</span>
+            ${!['cancelado','realizado'].includes(c.status) ? _cobrancaCarimbo(c) : ''}
             <span style="font-size: 12px; color: var(--uc-warm-gray);">⏰ ${horario}</span>
           </div>
           ${c.local ? `<div style="font-size: 12px; color: var(--uc-warm-gray); margin-bottom: 4px;">📍 ${escapeHtml(c.local)}</div>` : ''}
