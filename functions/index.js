@@ -19,7 +19,13 @@ const { onSchedule } = require('firebase-functions/v2/scheduler');
 const { onRequest } = require('firebase-functions/v2/https');
 const { logger } = require('firebase-functions/v2');
 const { defineSecret } = require('firebase-functions/params');
-const admin = require('firebase-admin');
+const { initializeApp } = require('firebase-admin/app');
+const { getFirestore } = require('firebase-admin/firestore');
+const { getMessaging } = require('firebase-admin/messaging');
+
+// firebase-admin@13 removeu os namespaces monolíticos (admin.firestore(),
+// admin.messaging()) — API agora é modular. Migração feita em 2026-09-08
+// (deploy quebrou com "admin.firestore is not a function").
 
 // Secret do Secret Manager pra autenticar o trigger HTTP manual.
 // Precisa ser criado antes do deploy:
@@ -28,9 +34,9 @@ const admin = require('firebase-admin');
 // runtime (v2 não expõe secrets via process.env sem declaração).
 const DJEN_HTTP_SECRET = defineSecret('DJEN_HTTP_SECRET');
 
-admin.initializeApp();
-const db = admin.firestore();
-const messaging = admin.messaging();
+initializeApp();
+const db = getFirestore();
+const messaging = getMessaging();
 
 // =====================================================================
 // CONFIG
