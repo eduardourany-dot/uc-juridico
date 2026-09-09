@@ -38,6 +38,11 @@ initializeApp();
 const db = getFirestore();
 const messaging = getMessaging();
 
+// Cobrança insistente (F1a — portada da Agenda UC). Vive em módulo
+// próprio pra não engordar este arquivo. Exporta cobrancaInsistenteCron.
+const cobrancaInsistente = require('./cobranca-insistente');
+exports.cobrancaInsistenteCron = cobrancaInsistente.cobrancaInsistenteCron;
+
 // =====================================================================
 // CONFIG
 // =====================================================================

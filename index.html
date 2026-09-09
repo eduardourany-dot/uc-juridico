@@ -26554,6 +26554,31 @@ async function bootApp() {
     await DB.setSetting('djenOabs', []);
   }
 
+  // Bootstrap: quadro de advogados (nome → email) que a Cloud Function
+  // usa pra rotear cobranças insistentes. Seed a partir do
+  // ADVOGADO_BY_EMAIL local — em uma futura iteração podemos remover
+  // este mapeamento do repo público (mesma linha da auditoria S6).
+  const existingQuadro = await DB.getSetting('quadroAdvogados', null);
+  if (!existingQuadro) {
+    await DB.setSetting('quadroAdvogados', ADVOGADO_BY_EMAIL);
+  }
+
+  // Bootstrap: config da cobrança insistente (F1a). Defaults conservadores:
+  // intervalo 4h entre cobranças; silêncio 22h–06h Brasília; 3+ cobranças
+  // acionam tela travante (Fase B). Editável em Ajustes futuramente.
+  const existingCobranca = await DB.getSetting('cobrancaConfig', null);
+  if (!existingCobranca) {
+    await DB.setSetting('cobrancaConfig', {
+      enabled: true,
+      intervaloHoras: 4,
+      silencioInicioHora: 22,
+      silencioFimHora: 6,
+      insistenteLimite: 3,
+      escopo: { prazos: true, compromissos: true, tarefas: true },
+      optOutEmails: []
+    });
+  }
+
   // Setup nav clicks
   document.querySelectorAll('[data-route]').forEach(el => {
     el.addEventListener('click', (e) => {
