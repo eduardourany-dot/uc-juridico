@@ -1823,6 +1823,11 @@ function updateNavBadges() {
 
   // Badge unificado do menu "Publicações" (async — lê o DB de intimações).
   _atualizarBadgePublicacoes().catch(() => {});
+
+  // Cobrança insistente — overlay travante quando há prazo/compromisso/
+  // tarefa com insistenteAcionado=true (Fase B da F1a). Anti-flood 60s
+  // interno; noop se overlay já aberto.
+  _cobrancaVerificarAcionadas().catch(err => console.warn('[cobranca] check:', err));
 }
 
 // Conta intimações pendentes de ciência: status 'pending' sem cienteEm.
@@ -9312,6 +9317,316 @@ async function autoMarcarPerdidos() {
     }
   }
   return marcados;
+}
+
+// =====================================================================
+// COBRANÇA INSISTENTE — F1a Fase B (overlay travante)
+// =====================================================================
+// Complementa a Cloud Function cobrancaInsistenteCron (Fase A).
+// Quando um doc atinge insistenteAcionado=true (3+ cobranças sem
+// resolução), este módulo mostra overlay full-screen na próxima abertura
+// do app, oferecendo 5 saídas: cumprir, adiar 15 min, adiar 1 h, passar
+// pra amanhã ou desligar cobrança neste item específico.
+//
+// Portado do espírito da Agenda UC (função telaCobranca() em
+// AGENDA_UC/agenda-uc/index.html:1539) — adaptado pro modelo UCJ.
+
+async function _cobrancaBuscarAcionadas() {
+  const [prazos, compromissos, tarefas] = await Promise.all([
+    DB.getAllDeadlines().catch(() => []),
+    DB.getAllCompromissos().catch(() => []),
+    DB.getAllTarefas().catch(() => [])
+  ]);
+
+  const meu = window.UC_Auth?.getUser?.() || {};
+  const meuNome = (typeof defaultAdvogado === 'function' ? defaultAdvogado(meu.email) : '') || '';
+
+  const acionadas = [];
+
+  // Prazos: qualquer prazo acionado do escritório (não filtra por responsável
+  // — visibilidade cai pelas Firestore rules; se você vê, é seu ou é
+  // legítimo). Filtra terminais e sem cobrança.
+  prazos.forEach(d => {
+    if (!d || !d.insistenteAcionado || d.deletedAt) return;
+    if (d.cobrar === false) return;
+    if (['cumprido', 'perdido', 'cancelado'].includes(d.status)) return;
+    acionadas.push({ tipo: 'prazo', doc: d });
+  });
+
+  compromissos.forEach(c => {
+    if (!c || !c.insistenteAcionado || c.deletedAt) return;
+    if (c.cobrar === false) return;
+    if (['cancelado', 'realizado'].includes(c.status)) return;
+    // Compromissos só cobram se eu sou responsável ou participante
+    if (meuNome) {
+      const responsavelMeu = c.responsavel === meuNome;
+      const participanteMeu = (c.participantes || []).includes(meuNome);
+      if (!responsavelMeu && !participanteMeu) return;
+    }
+    acionadas.push({ tipo: 'compromisso', doc: c });
+  });
+
+  tarefas.forEach(t => {
+    if (!t || !t.insistenteAcionado || t.deletedAt) return;
+    if (t.cobrar === false) return;
+    if (['concluida', 'cancelada'].includes(t.status)) return;
+    if (meuNome && t.responsavel && t.responsavel !== meuNome) return;
+    acionadas.push({ tipo: 'tarefa', doc: t });
+  });
+
+  return acionadas;
+}
+
+async function _cobrancaVerificarAcionadas() {
+  // Anti-loop: se overlay já aberto, sai
+  if (document.getElementById('cobrancaOverlay')) return;
+  // Anti-flood: 1x por 60s por sessão
+  const agora = Date.now();
+  if (state._cobrancaUltVerif && (agora - state._cobrancaUltVerif) < 60000) return;
+  state._cobrancaUltVerif = agora;
+
+  try {
+    const acionadas = await _cobrancaBuscarAcionadas();
+    if (acionadas.length > 0) _cobrancaAbrirOverlay(acionadas[0], acionadas.length);
+  } catch (e) {
+    console.warn('[cobranca] verificar acionadas:', e);
+  }
+}
+
+function _cobrancaAbrirOverlay(item, totalPendentes) {
+  if (document.getElementById('cobrancaOverlay')) return;
+  const doc = item.doc;
+  const tipo = item.tipo;
+
+  const meta = {
+    prazo:       { rot: 'Prazo',       campoData: 'deadlineDate',   titFallback: 'Prazo' },
+    compromisso: { rot: 'Compromisso', campoData: 'dataHoraInicio', titFallback: 'Compromisso' },
+    tarefa:      { rot: 'Tarefa',      campoData: 'prazoData',      titFallback: 'Tarefa' }
+  }[tipo];
+
+  const titRaw = doc.titulo || doc.description || doc.type || doc.assunto || meta.titFallback;
+  const titulo = escapeHtml(String(titRaw).slice(0, 120));
+  const dataVenc = doc[meta.campoData];
+  let dataStr = '—';
+  if (dataVenc) {
+    const dv = new Date(dataVenc);
+    if (!isNaN(dv)) {
+      dataStr = dv.toLocaleDateString('pt-BR');
+      if (tipo === 'compromisso' && String(dataVenc).includes('T')) {
+        dataStr += ' ' + dv.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+      }
+    }
+  }
+  const cobrancas = doc.cobrancas || 0;
+
+  const restante = totalPendentes > 1
+    ? `<p style="margin: 12px 0 0; font-size: 12px; color: var(--uc-warm-gray, #6b6b68); font-style: italic;">+ ${totalPendentes - 1} pendência${totalPendentes - 1 > 1 ? 's' : ''} depois desta</p>`
+    : '';
+
+  const overlay = document.createElement('div');
+  overlay.id = 'cobrancaOverlay';
+  overlay.setAttribute('role', 'dialog');
+  overlay.setAttribute('aria-modal', 'true');
+  overlay.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(22,51,42,.88);display:grid;place-items:center;padding:22px;text-align:center;';
+  overlay.innerHTML = `
+    <div style="max-width:520px;width:100%;background:var(--uc-paper,#FEFEFC);color:var(--uc-black,#1a1a1a);border-radius:18px;padding:26px 22px;border:3px double var(--uc-gold,#b87f1c);box-shadow:0 20px 40px rgba(0,0,0,.3);font-family:system-ui,sans-serif;">
+      <div style="font-family:ui-monospace,monospace;font-size:11px;letter-spacing:.28em;text-transform:uppercase;color:var(--uc-gold,#b87f1c);">${cobrancas}ª cobrança · ${meta.rot}</div>
+      <h2 style="font-family:'EB Garamond',serif;font-size:26px;margin:10px 0 8px;font-weight:600;line-height:1.25;">${titulo}</h2>
+      <p style="color:var(--uc-warm-gray,#6b6b68);font-size:14px;margin:0 0 6px;">Vencido em ${dataStr} · segue pendente</p>
+      ${restante}
+      <div style="display:flex;flex-direction:column;gap:8px;margin-top:22px;">
+        <button id="_cobBtnCump" style="padding:12px 20px;border:1px solid var(--uc-gold,#b87f1c);background:var(--uc-gold,#b87f1c);color:#fff;border-radius:6px;font-size:14px;font-weight:600;cursor:pointer;">✓ Marcar como cumprido</button>
+        <div style="display:flex;gap:8px;">
+          <button id="_cobBtnAdiar15" style="flex:1;padding:10px;border:1px solid var(--uc-line,#d4cfc0);background:transparent;border-radius:6px;font-size:13px;cursor:pointer;color:inherit;">Adiar 15 min</button>
+          <button id="_cobBtnAdiar60" style="flex:1;padding:10px;border:1px solid var(--uc-line,#d4cfc0);background:transparent;border-radius:6px;font-size:13px;cursor:pointer;color:inherit;">Adiar 1 h</button>
+        </div>
+        <button id="_cobBtnAmanha" style="padding:10px 20px;border:1px solid var(--uc-line,#d4cfc0);background:transparent;border-radius:6px;font-size:13px;cursor:pointer;color:inherit;">Passar pra amanhã</button>
+        <button id="_cobBtnDesligar" style="padding:8px;border:none;background:transparent;color:var(--uc-warm-gray,#6b6b68);font-size:12px;text-decoration:underline;cursor:pointer;margin-top:4px;">Desligar cobrança neste item</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+
+  document.getElementById('_cobBtnCump').onclick = () => _cobrancaAcao(item, 'cumprido');
+  document.getElementById('_cobBtnAdiar15').onclick = () => _cobrancaAcao(item, 'adiar', 15);
+  document.getElementById('_cobBtnAdiar60').onclick = () => _cobrancaAcao(item, 'adiar', 60);
+  document.getElementById('_cobBtnAmanha').onclick = () => _cobrancaAcao(item, 'amanha');
+  document.getElementById('_cobBtnDesligar').onclick = () => _cobrancaAcao(item, 'desligar');
+}
+
+function _cobrancaFecharOverlay() {
+  const el = document.getElementById('cobrancaOverlay');
+  if (el) el.remove();
+}
+
+async function _cobrancaSalvarPorTipo(tipo, doc) {
+  if (tipo === 'prazo') return DB.saveDeadline(doc);
+  if (tipo === 'compromisso') return DB.saveCompromisso(doc);
+  if (tipo === 'tarefa') return DB.saveTarefa(doc);
+}
+
+async function _cobrancaAcao(item, acao, minutos) {
+  const doc = item.doc;
+  const tipo = item.tipo;
+  const agora = Date.now();
+
+  try {
+    if (acao === 'cumprido') {
+      // Fecha overlay ANTES do modal específico do domínio (prazo tem
+      // modal complexo com protocolo; compromisso/tarefa vão direto).
+      _cobrancaFecharOverlay();
+      // Reset dos campos de cobrança em qualquer caso.
+      doc.insistenteAcionado = false;
+      doc.cobrancas = 0;
+      doc.ultimaCobrancaAt = null;
+      doc.silencioAte = null;
+      if (tipo === 'prazo') {
+        return abrirModalCumprimento(doc.id);
+      }
+      if (tipo === 'compromisso') {
+        doc.status = 'realizado';
+        doc.updatedAt = agora;
+        await DB.saveCompromisso(doc);
+        toast('Compromisso realizado', doc.titulo || '', 'success');
+      }
+      if (tipo === 'tarefa') {
+        return mudarStatusTarefa(doc.id, 'concluida');
+      }
+    } else if (acao === 'adiar') {
+      doc.silencioAte = agora + minutos * 60 * 1000;
+      doc.updatedAt = agora;
+      await _cobrancaSalvarPorTipo(tipo, doc);
+      toast(`Adiado ${minutos} min`, 'Cobrança pausada até lá', 'info');
+      _cobrancaFecharOverlay();
+    } else if (acao === 'amanha') {
+      const campoData = { prazo: 'deadlineDate', compromisso: 'dataHoraInicio', tarefa: 'prazoData' }[tipo];
+      const atualStr = doc[campoData];
+      const atual = atualStr ? new Date(atualStr) : new Date();
+      atual.setDate(atual.getDate() + 1);
+      doc[campoData] = tipo === 'compromisso' ? atual.toISOString() : atual.toISOString().slice(0, 10);
+      doc.cobrancas = 0;
+      doc.ultimaCobrancaAt = null;
+      doc.silencioAte = null;
+      doc.insistenteAcionado = false;
+      doc.updatedAt = agora;
+      await _cobrancaSalvarPorTipo(tipo, doc);
+      toast('Passado pra amanhã', 'Cobrança reiniciada', 'info');
+      _cobrancaFecharOverlay();
+    } else if (acao === 'desligar') {
+      doc.cobrar = false;
+      doc.insistenteAcionado = false;
+      doc.updatedAt = agora;
+      await _cobrancaSalvarPorTipo(tipo, doc);
+      toast('Cobrança desligada neste item', '', 'info');
+      _cobrancaFecharOverlay();
+    }
+
+    // Reforça verificação após 500ms — se ainda houver outras acionadas,
+    // reabre com a próxima. Zera anti-flood pra permitir chamada imediata.
+    setTimeout(() => { state._cobrancaUltVerif = 0; _cobrancaVerificarAcionadas(); }, 500);
+  } catch (e) {
+    console.error('[cobranca] ação falhou:', e);
+    toast('Erro', e.message || String(e), 'error');
+  }
+}
+
+// UI de configuração — vive em Ajustes → Sincronização.
+// Cache em memória evita async na função sync de renderSettings.
+const _COBRANCA_DEFAULTS = {
+  enabled: true,
+  intervaloHoras: 4,
+  silencioInicioHora: 22,
+  silencioFimHora: 6,
+  insistenteLimite: 3,
+  escopo: { prazos: true, compromissos: true, tarefas: true },
+  optOutEmails: []
+};
+
+async function _cobrancaConfigLoad() {
+  try {
+    const cfg = await DB.getSetting('cobrancaConfig', _COBRANCA_DEFAULTS);
+    state._cobrancaConfigCache = { ..._COBRANCA_DEFAULTS, ...cfg, escopo: { ..._COBRANCA_DEFAULTS.escopo, ...(cfg.escopo || {}) } };
+    return state._cobrancaConfigCache;
+  } catch (e) {
+    state._cobrancaConfigCache = { ..._COBRANCA_DEFAULTS };
+    return state._cobrancaConfigCache;
+  }
+}
+
+async function _cobrancaConfigSet(patch) {
+  const cur = state._cobrancaConfigCache || await _cobrancaConfigLoad();
+  const novo = { ...cur, ...patch };
+  if (patch.escopo) novo.escopo = { ...cur.escopo, ...patch.escopo };
+  state._cobrancaConfigCache = novo;
+  await DB.setSetting('cobrancaConfig', novo);
+  toast('Cobrança atualizada', '', 'success');
+  if (state.currentRoute === 'settings') renderSettings();
+}
+
+function _cobrancaConfigHtml(cfg) {
+  cfg = cfg || _COBRANCA_DEFAULTS;
+  const isAdmin = window.UC_Auth?.getUser?.()?.role === 'admin';
+  if (!isAdmin) return '';
+  // Trigger lazy load da config real (evita mostrar defaults quando doc já existe)
+  if (!state._cobrancaConfigCache) {
+    _cobrancaConfigLoad().then(() => { if (state.currentRoute === 'settings') renderSettings(); });
+  }
+  return `
+    <div class="card mb-3" style="border-left: 3px solid var(--uc-gold);">
+      <h4 class="font-serif font-semibold smallcaps mb-2" style="color: var(--uc-black);">📣 Cobrança insistente</h4>
+      <p class="help-text" style="margin-bottom: 12px;">
+        Prazos, compromissos e tarefas vencidos e não cumpridos disparam push escalado ao responsável. Depois de <strong>${cfg.insistenteLimite}</strong> cobranças, tela travante ao entrar no app.
+      </p>
+
+      <label style="display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--uc-graphite); cursor: pointer;">
+        <input type="checkbox" ${cfg.enabled ? 'checked' : ''} onchange="_cobrancaConfigSet({ enabled: this.checked })">
+        <strong>Cobrança ativa</strong>
+      </label>
+
+      <div style="margin-top: 14px; display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: center;">
+        <span style="font-size: 13px;">Intervalo entre cobranças</span>
+        <div>
+          <input type="number" min="1" max="24" value="${cfg.intervaloHoras}" style="width: 60px; padding: 4px 6px; border: 1px solid var(--uc-line); border-radius: 4px;" onchange="_cobrancaConfigSet({ intervaloHoras: Math.max(1, Math.min(24, Number(this.value) || 4)) })">
+          <span style="font-size: 12px; color: var(--uc-warm-gray);">horas</span>
+        </div>
+
+        <span style="font-size: 13px;">Silêncio noturno</span>
+        <div>
+          <input type="number" min="0" max="23" value="${cfg.silencioInicioHora}" style="width: 50px; padding: 4px 6px; border: 1px solid var(--uc-line); border-radius: 4px;" onchange="_cobrancaConfigSet({ silencioInicioHora: Math.max(0, Math.min(23, Number(this.value) || 22)) })">
+          <span style="font-size: 12px;">h até</span>
+          <input type="number" min="0" max="23" value="${cfg.silencioFimHora}" style="width: 50px; padding: 4px 6px; border: 1px solid var(--uc-line); border-radius: 4px;" onchange="_cobrancaConfigSet({ silencioFimHora: Math.max(0, Math.min(23, Number(this.value) || 6)) })">
+          <span style="font-size: 12px;">h Brasília</span>
+        </div>
+
+        <span style="font-size: 13px;">Tela travante após</span>
+        <div>
+          <input type="number" min="1" max="10" value="${cfg.insistenteLimite}" style="width: 50px; padding: 4px 6px; border: 1px solid var(--uc-line); border-radius: 4px;" onchange="_cobrancaConfigSet({ insistenteLimite: Math.max(1, Math.min(10, Number(this.value) || 3)) })">
+          <span style="font-size: 12px; color: var(--uc-warm-gray);">cobranças</span>
+        </div>
+      </div>
+
+      <div style="margin-top: 14px;">
+        <div style="font-size: 13px; margin-bottom: 6px;">O que cobrar</div>
+        <div style="display: flex; gap: 12px; flex-wrap: wrap;">
+          <label style="display: inline-flex; align-items: center; gap: 6px; font-size: 13px; cursor: pointer;">
+            <input type="checkbox" ${cfg.escopo.prazos ? 'checked' : ''} onchange="_cobrancaConfigSet({ escopo: { prazos: this.checked } })"> Prazos
+          </label>
+          <label style="display: inline-flex; align-items: center; gap: 6px; font-size: 13px; cursor: pointer;">
+            <input type="checkbox" ${cfg.escopo.compromissos ? 'checked' : ''} onchange="_cobrancaConfigSet({ escopo: { compromissos: this.checked } })"> Compromissos
+          </label>
+          <label style="display: inline-flex; align-items: center; gap: 6px; font-size: 13px; cursor: pointer;">
+            <input type="checkbox" ${cfg.escopo.tarefas ? 'checked' : ''} onchange="_cobrancaConfigSet({ escopo: { tarefas: this.checked } })"> Tarefas
+          </label>
+        </div>
+      </div>
+
+      <p class="help-text" style="margin-top: 12px; font-size: 11px;">
+        Cron roda a cada 30 min em São Paulo (Cloud Function <code>cobrancaInsistenteCron</code>).
+        Silêncio noturno atravessa meia-noite (${cfg.silencioInicioHora}h → ${cfg.silencioFimHora}h).
+        Rota do push: responsável do item → <code>settings/quadroAdvogados</code> → token FCM.
+      </p>
+    </div>
+  `;
 }
 
 // Renderiza banner sticky no topo do app quando há prazos iminentes ou perdidos.
@@ -20293,6 +20608,8 @@ function renderSettingsTab(tab, prompts, defaultPromptId) {
           Manter 100% dos dados no seu dispositivo é uma escolha deliberada para preservar sigilo profissional e segredo de justiça. Nenhum dado de cliente sai do seu controle, mesmo em caso de comprometimento de servidor.
         </p>
       </div>
+
+      ${_cobrancaConfigHtml(state._cobrancaConfigCache)}
     `;
   }
   if (tab === 'acessos') {
