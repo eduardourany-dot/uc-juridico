@@ -4881,6 +4881,7 @@ ${/* Card 'Parte adversa (manual)' removido em v6.64.20 — info de partes/advog
         <button class="btn btn-outline" onclick="importPdfToProcess()">📄 Importar PDF do auto</button>
         <button class="btn btn-outline" onclick="addNoteFlow()">📝 Nova nota</button>
         <button class="btn btn-outline" onclick="_recorderProcesso(state.currentProcessId, state._processView?.p?.name || '')" title="Grava áudio (áudio local no dispositivo) e transcrição ao vivo — vira nota do processo">🎙 Gravar áudio</button>
+        <button class="btn btn-outline" onclick="_folhaProcesso(state.currentProcessId, state._processView?.p?.name || '')" title="Rabisco à mão (S Pen, touch, mouse) — imagem embutida em nota do processo">🖊 Folha manuscrita</button>
         ${/* "Adicionar publicação" removido — publicações entram via busca DJEN (auto-import); prazo agendado direto na publicação. */ ''}
         <button class="btn btn-outline" onclick="copyProcessToClaude()">📋 Copiar contexto p/ Claude</button>
         <button class="btn btn-outline" onclick="generateProcessFiche()">📜 Gerar ficha (Word)</button>
@@ -5696,19 +5697,27 @@ function renderProcessNotes(p, notes) {
       <div class="empty-state">
         <p class="empty-state-msg">Nenhuma nota ainda. Adicione observações estratégicas, lembretes ou anotações sobre eventos específicos.</p>
       </div>
-    ` : notes.sort((a,b) => b.createdAt - a.createdAt).map(n => `
+    ` : notes.sort((a,b) => b.createdAt - a.createdAt).map(n => {
+      const origemBadge = n.origem === 'gravacao'
+        ? '<span class="badge" style="font-size: 9px; background: var(--uc-gold); color: #fff; margin-left: 6px;">🎙 áudio</span>'
+        : n.origem === 'folha-manuscrita'
+          ? '<span class="badge" style="font-size: 9px; background: var(--uc-argila,#c96442); color: #fff; margin-left: 6px;">🖊 folha</span>'
+          : '';
+      return `
       <div class="note-item">
         <div class="note-meta">
           ${formatDateTime(n.createdAt)}
           ${n.eventId ? ` · vinculada a evento` : ''}
+          ${origemBadge}
         </div>
         <div style="white-space: pre-wrap;">${escapeHtml(n.text)}</div>
+        ${n.imagemBase64 ? `<div style="margin-top: 8px;"><img src="${n.imagemBase64}" alt="Folha manuscrita" style="max-width: 100%; border: 1px solid var(--uc-line); border-radius: 6px; background: #fff; display: block;"></div>` : ''}
         <div style="margin-top: 6px; display: flex; gap: 8px;">
           <button class="btn btn-ghost btn-sm" onclick="editNote('${n.id}')">Editar</button>
           <button class="btn btn-ghost btn-sm" onclick="deleteNote('${n.id}')">Remover</button>
         </div>
       </div>
-    `).join('')}
+    `;}).join('')}
   `;
 }
 
@@ -10141,6 +10150,259 @@ function _recorderCompromisso(compromissoId, compromissoTitulo, processoId) {
   });
 }
 
+// =====================================================================
+// FOLHA MANUSCRITA — F1c (portada da Agenda UC)
+// =====================================================================
+// Canvas HTML5 com PointerEvents — suporta S Pen (pressão), caneta
+// touch, mouse. Imagem sai como PNG base64 (data URL) e é salva
+// embutida na nota, junto de um texto de descrição opcional. Chega
+// aos outros aparelhos via Firestore automaticamente.
+//
+// PNG típico de rabisco em 800x600 fica ~50-200KB — cabe folgadamente
+// no doc Firestore (limite 1MB) e é servido junto da nota como
+// data URL, sem depender de Storage.
+
+async function _folhaAbrir(opts) {
+  opts = opts || {};
+  if (document.getElementById('_folhaModal')) return;
+
+  const backdrop = document.createElement('div');
+  backdrop.id = '_folhaModal';
+  backdrop.className = 'modal-backdrop';
+  backdrop.innerHTML = `
+    <div class="modal" style="max-width: 860px; width: 96vw;">
+      <h3 class="modal-title">🖊 ${escapeHtml(opts.titulo || 'Folha manuscrita')}</h3>
+      <p style="font-size: 12px; color: var(--uc-warm-gray); margin: 0 0 10px;">
+        Canvas de anotação à mão. Suporta S Pen (pressão), toque e mouse. Salva como imagem embutida numa nota.
+      </p>
+
+      <div style="display: flex; gap: 6px; flex-wrap: wrap; align-items: center; padding: 6px 8px; background: var(--uc-cream); border: 1px solid var(--uc-line); border-radius: 6px 6px 0 0; border-bottom: none;">
+        <div style="display: flex; gap: 4px;" role="group" aria-label="Ferramenta">
+          <button id="_flTPen"    class="btn btn-primary btn-sm" style="padding: 3px 8px; font-size: 11px;" title="Caneta">🖊 Caneta</button>
+          <button id="_flTErase"  class="btn btn-outline btn-sm" style="padding: 3px 8px; font-size: 11px;" title="Borracha">🩹 Borracha</button>
+        </div>
+        <div style="width: 1px; height: 20px; background: var(--uc-line);"></div>
+        <div style="display: flex; gap: 4px;" role="group" aria-label="Cor">
+          <button data-cor="#111" class="_flCor" title="Preto" style="width: 22px; height: 22px; border-radius: 50%; border: 2px solid var(--uc-gold); background: #111; cursor: pointer;"></button>
+          <button data-cor="#134a7c" class="_flCor" title="Azul" style="width: 22px; height: 22px; border-radius: 50%; border: 2px solid transparent; background: #134a7c; cursor: pointer;"></button>
+          <button data-cor="#a33"   class="_flCor" title="Vermelho" style="width: 22px; height: 22px; border-radius: 50%; border: 2px solid transparent; background: #a33; cursor: pointer;"></button>
+          <button data-cor="#0a7a3f" class="_flCor" title="Verde" style="width: 22px; height: 22px; border-radius: 50%; border: 2px solid transparent; background: #0a7a3f; cursor: pointer;"></button>
+        </div>
+        <div style="width: 1px; height: 20px; background: var(--uc-line);"></div>
+        <label style="font-size: 11px; color: var(--uc-warm-gray); display: inline-flex; align-items: center; gap: 4px;">
+          Espessura <input id="_flEsp" type="range" min="1" max="12" value="2" style="width: 90px;">
+        </label>
+        <div style="margin-left: auto; display: flex; gap: 6px;">
+          <button id="_flUndo"   class="btn btn-outline btn-sm" style="padding: 3px 8px; font-size: 11px;" title="Desfazer">↶ Desfazer</button>
+          <button id="_flLimpar" class="btn btn-outline btn-sm" style="padding: 3px 8px; font-size: 11px; color: var(--uc-red);" title="Limpar tudo">🗑 Limpar</button>
+        </div>
+      </div>
+      <div style="border: 1px solid var(--uc-line); border-radius: 0 0 6px 6px; overflow: hidden; background: #fff; touch-action: none;">
+        <canvas id="_flCanvas" width="1200" height="700" style="display: block; width: 100%; height: auto; cursor: crosshair; touch-action: none; background: #fff;"></canvas>
+      </div>
+
+      <div style="margin-top: 10px;">
+        <label style="font-size: 11px; color: var(--uc-warm-gray); text-transform: uppercase; letter-spacing: 0.06em;">Descrição (opcional)</label>
+        <input id="_flDescricao" type="text" placeholder="Ex: rabisco de audiência · esboço de tese" style="width: 100%; padding: 8px; border: 1px solid var(--uc-line); border-radius: 4px; margin-top: 4px; font-size: 13px;">
+      </div>
+
+      <div style="display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap;">
+        <button class="btn btn-primary" id="_flSalvar">💾 Salvar como nota</button>
+        <button class="btn btn-outline" id="_flBaixar">⬇ Baixar .png</button>
+        <button class="btn btn-ghost" id="_flCancelar" style="margin-left: auto;">Fechar</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(backdrop);
+
+  const $ = (s) => backdrop.querySelector(s);
+  const canvas = $('#_flCanvas');
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+
+  // Estado
+  const st = { cor: '#111', espessuraBase: 2, ferramenta: 'pen', desenhando: false, ultimoX: 0, ultimoY: 0, undoStack: [] };
+
+  const _snapshot = () => {
+    try { st.undoStack.push(ctx.getImageData(0, 0, canvas.width, canvas.height)); }
+    catch (_) { /* origem cruzada não acontece aqui, mas seguro */ }
+    if (st.undoStack.length > 20) st.undoStack.shift();
+  };
+  const _undo = () => {
+    if (!st.undoStack.length) return;
+    ctx.putImageData(st.undoStack.pop(), 0, 0);
+  };
+
+  // Coordenadas em espaço do canvas (ajusta pelo scale via width vs offsetWidth)
+  const _xy = (ev) => {
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    return { x: (ev.clientX - rect.left) * scaleX, y: (ev.clientY - rect.top) * scaleY };
+  };
+
+  const _onDown = (ev) => {
+    if (ev.pointerType === 'mouse' && ev.button !== 0) return;
+    canvas.setPointerCapture(ev.pointerId);
+    _snapshot();
+    st.desenhando = true;
+    const p = _xy(ev);
+    st.ultimoX = p.x; st.ultimoY = p.y;
+    ctx.beginPath();
+    ctx.moveTo(p.x, p.y);
+    // Traça um ponto pra caneta que só toca e solta
+    const espessura = _espessuraCom(ev);
+    ctx.strokeStyle = st.ferramenta === 'pen' ? st.cor : '#fff';
+    ctx.lineWidth = espessura * (st.ferramenta === 'pen' ? 1 : 4);
+    ctx.lineTo(p.x + 0.01, p.y + 0.01);
+    ctx.stroke();
+  };
+
+  const _espessuraCom = (ev) => {
+    // Se S Pen manda pressure real (>0 e !=0.5 default) usa; senão base.
+    const p = (typeof ev.pressure === 'number' && ev.pressure > 0 && ev.pressure !== 0.5) ? ev.pressure : 0.5;
+    return st.espessuraBase * (0.5 + p);
+  };
+
+  const _onMove = (ev) => {
+    if (!st.desenhando) return;
+    // Coalesce: usa getCoalescedEvents pra traço mais suave se disponível
+    const events = (typeof ev.getCoalescedEvents === 'function') ? ev.getCoalescedEvents() : [ev];
+    for (const e of events) {
+      const p = _xy(e);
+      const espessura = _espessuraCom(e);
+      ctx.strokeStyle = st.ferramenta === 'pen' ? st.cor : '#fff';
+      ctx.lineWidth = espessura * (st.ferramenta === 'pen' ? 1 : 4);
+      ctx.beginPath();
+      ctx.moveTo(st.ultimoX, st.ultimoY);
+      ctx.lineTo(p.x, p.y);
+      ctx.stroke();
+      st.ultimoX = p.x; st.ultimoY = p.y;
+    }
+  };
+
+  const _onUp = (ev) => {
+    st.desenhando = false;
+    try { canvas.releasePointerCapture(ev.pointerId); } catch (_) {}
+  };
+
+  canvas.addEventListener('pointerdown', _onDown);
+  canvas.addEventListener('pointermove', _onMove);
+  canvas.addEventListener('pointerup', _onUp);
+  canvas.addEventListener('pointercancel', _onUp);
+  canvas.addEventListener('pointerleave', _onUp);
+
+  // Toolbar handlers
+  $('#_flTPen').onclick = () => {
+    st.ferramenta = 'pen';
+    $('#_flTPen').className = 'btn btn-primary btn-sm';
+    $('#_flTErase').className = 'btn btn-outline btn-sm';
+    $('#_flTPen').style.padding = $('#_flTErase').style.padding = '3px 8px';
+    $('#_flTPen').style.fontSize = $('#_flTErase').style.fontSize = '11px';
+    canvas.style.cursor = 'crosshair';
+  };
+  $('#_flTErase').onclick = () => {
+    st.ferramenta = 'eraser';
+    $('#_flTPen').className = 'btn btn-outline btn-sm';
+    $('#_flTErase').className = 'btn btn-primary btn-sm';
+    $('#_flTPen').style.padding = $('#_flTErase').style.padding = '3px 8px';
+    $('#_flTPen').style.fontSize = $('#_flTErase').style.fontSize = '11px';
+    canvas.style.cursor = 'cell';
+  };
+  backdrop.querySelectorAll('._flCor').forEach(btn => {
+    btn.onclick = () => {
+      st.cor = btn.dataset.cor;
+      backdrop.querySelectorAll('._flCor').forEach(b => b.style.borderColor = 'transparent');
+      btn.style.borderColor = 'var(--uc-gold)';
+      // Cor implica ferramenta = caneta
+      st.ferramenta = 'pen';
+      $('#_flTPen').className = 'btn btn-primary btn-sm';
+      $('#_flTErase').className = 'btn btn-outline btn-sm';
+      $('#_flTPen').style.padding = $('#_flTErase').style.padding = '3px 8px';
+      $('#_flTPen').style.fontSize = $('#_flTErase').style.fontSize = '11px';
+    };
+  });
+  $('#_flEsp').oninput = (e) => { st.espessuraBase = Number(e.target.value) || 2; };
+  $('#_flUndo').onclick = _undo;
+  $('#_flLimpar').onclick = async () => {
+    const ok = await confirmDialog('Limpar tudo?', 'Toda a folha vai sumir. Ação irreversível dentro deste modal.', true);
+    if (!ok) return;
+    _snapshot();
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+  };
+
+  const _dataUrl = () => canvas.toDataURL('image/png');
+  const _temConteudo = () => st.undoStack.length > 0; // qualquer traço já dá snapshot
+
+  $('#_flBaixar').onclick = () => {
+    const a = document.createElement('a');
+    a.href = _dataUrl();
+    a.download = `folha-${new Date().toISOString().slice(0, 19).replace(/[T:]/g, '-')}.png`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  };
+
+  $('#_flSalvar').onclick = async () => {
+    if (!_temConteudo()) {
+      toast('Folha em branco', 'Rabisque alguma coisa antes de salvar', 'info');
+      return;
+    }
+    const descricao = ($('#_flDescricao').value || '').trim();
+    const dataUrl = _dataUrl();
+    const alvo = opts.alvo || {};
+
+    // Tamanho aproximado do payload (base64 é ~4/3 do binário)
+    const bytesAprox = Math.floor(dataUrl.length * 0.75);
+    if (bytesAprox > 900 * 1024) {
+      const ok = await confirmDialog(
+        'Imagem grande',
+        `A folha tem ~${(bytesAprox / 1024).toFixed(0)}KB (limite prático Firestore ~900KB). Pode falhar ao salvar. Baixar em vez de salvar?`,
+        true
+      );
+      if (ok) return; // usuário confirmou — vai baixar mentalmente, nada a fazer
+    }
+
+    const nota = {
+      id: uid(),
+      processId: alvo.tipo === 'processo' ? alvo.id : (alvo.processoId || null),
+      eventId: alvo.tipo === 'compromisso' ? alvo.id : null,
+      text: (descricao || 'Folha manuscrita') + `\n\n[imagem embutida · ${new Date().toLocaleString('pt-BR')} · ~${(bytesAprox / 1024).toFixed(0)}KB]`,
+      imagemBase64: dataUrl,
+      imagemMime: 'image/png',
+      origem: 'folha-manuscrita',
+      createdAt: Date.now()
+    };
+    try {
+      await DB.saveNote(nota);
+      toast('Folha salva como nota', '', 'success');
+      if (typeof opts.onSalvar === 'function') try { opts.onSalvar(nota); } catch (_) {}
+      backdrop.remove();
+    } catch (e) {
+      toast('Erro ao salvar', e.message || String(e), 'error');
+    }
+  };
+
+  $('#_flCancelar').onclick = () => backdrop.remove();
+}
+
+function _folhaProcesso(processoId, processoTitulo) {
+  return _folhaAbrir({
+    titulo: `Folha — ${processoTitulo || 'processo'}`,
+    alvo: { tipo: 'processo', id: processoId }
+  });
+}
+function _folhaCompromisso(compromissoId, compromissoTitulo, processoId) {
+  return _folhaAbrir({
+    titulo: `Folha — ${compromissoTitulo || 'compromisso'}`,
+    alvo: { tipo: 'compromisso', id: compromissoId, processoId: processoId || null }
+  });
+}
+
 // Renderiza banner sticky no topo do app quando há prazos iminentes ou perdidos.
 // Chamado por updateNavBadges() — único ponto de orquestração da UI dos prazos.
 function renderBannerPrazos() {
@@ -14550,6 +14812,7 @@ function _renderCompromissoCard(c, procById, cliById) {
         <div style="display: flex; gap: 2px; flex-shrink: 0;">
           ${c.status !== 'realizado' && c.status !== 'cancelado' ? `<button class="btn btn-ghost btn-sm" onclick="alterarStatusCompromisso('${c.id}')" title="Alterar status" style="padding: 2px 6px;">✓</button>` : ''}
           <button class="btn btn-ghost btn-sm" onclick="_recorderCompromisso('${c.id}', ${JSON.stringify(c.titulo || '')}, ${c.processoId ? "'" + c.processoId + "'" : 'null'})" title="Gravar áudio + transcrição (fica local)" style="padding: 2px 6px;">🎙</button>
+          <button class="btn btn-ghost btn-sm" onclick="_folhaCompromisso('${c.id}', ${JSON.stringify(c.titulo || '')}, ${c.processoId ? "'" + c.processoId + "'" : 'null'})" title="Folha manuscrita (S Pen / toque / mouse)" style="padding: 2px 6px;">🖊</button>
           <button class="btn btn-ghost btn-sm" onclick="editarCompromisso('${c.id}')" title="Editar" style="padding: 2px 6px;">✎</button>
           <button class="btn btn-ghost btn-sm" onclick="removerCompromisso('${c.id}')" title="Remover" style="padding: 2px 6px;">🗑</button>
         </div>
