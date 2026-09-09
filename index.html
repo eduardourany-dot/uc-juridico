@@ -23457,22 +23457,11 @@ Eduardo Urany de Castro
 const DJEN_API_DIRECT = 'https://comunicaapi.pje.jus.br/api/v1/comunicacao';
 // If CORS blocks direct browser calls, set this to a Cloudflare Worker URL
 // that proxies the request. The worker code is in /docs/cloudflare-worker.js
-const DJEN_DEFAULT_OABS = [
-  // Sociedade Advocacia Urany de Castro S/S (OAB-GO 519)
-  { numero: '16539', uf: 'GO', nome: 'Eduardo Urany de Castro' },
-  { numero: '87243', uf: 'DF', nome: 'Eduardo Urany de Castro' },
-  { numero: '2725',  uf: 'GO', nome: 'Terezinha Urany de Castro' },
-  { numero: '51774', uf: 'GO', nome: 'Sara Carolina Urany de Castro Melhem' },
-  // Sociedade Costa Ferreira, Duarte, França e Ribeiro Advogados (OAB-GO 1.653)
-  { numero: '18809', uf: 'GO', nome: 'Juliano da Costa Ferreira' },
-  { numero: '18601', uf: 'GO', nome: 'Marko Antônio Duarte' },
-  { numero: '18222', uf: 'GO', nome: 'Cleber Ribeiro' },
-  { numero: '14301', uf: 'GO', nome: 'Marcelo Mendes França' },
-  // Demais parceiros do escritório (Goiânia/GO)
-  { numero: '26648', uf: 'GO', nome: 'Bruno Naciff da Rocha' },
-  { numero: '24030', uf: 'GO', nome: 'Marcelo Bittar' },
-  { numero: '45212', uf: 'GO', nome: 'Marcos Fernando da Silva' }
-];
+// OABs vivem em settings/djenOabs no Firestore. Cadastro/edição pela UI
+// (Configurações → DJEN). Repo público não carrega nomes de advogados —
+// auditoria 2026-09-07, item S6. Array vazio como default: primeira
+// execução mostra "cadastre suas OABs" em vez de semear com dados fake.
+const DJEN_DEFAULT_OABS = [];
 
 // Try direct call first, fallback to user-configured worker URL
 async function djenFetch(params, _tentativa = 0) {
@@ -26557,10 +26546,12 @@ async function bootApp() {
     await DB.setSetting('defaultPromptId', id);
   }
 
-  // Seed default DJEN OABs on first run
+  // Bootstrap: cria doc vazio se ainda não existir. Admin cadastra as OABs
+  // pela UI (Configurações → DJEN). O array default é vazio de propósito
+  // — nomes de advogados não vivem no repo público (auditoria S6).
   const existingOabs = await DB.getSetting('djenOabs', null);
   if (!existingOabs) {
-    await DB.setSetting('djenOabs', DJEN_DEFAULT_OABS);
+    await DB.setSetting('djenOabs', []);
   }
 
   // Setup nav clicks

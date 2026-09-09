@@ -39,21 +39,24 @@ const messaging = admin.messaging();
 const DJEN_API_URL = 'https://comunicaapi.pje.jus.br/api/v1/comunicacao';
 const DJEN_ESCRITORIO_ID = 'UC';
 
-// OABs varridas — espelho da DJEN_DEFAULT_OABS no app (index.html).
-// Pra editar sem redeploy, mover pra settings/djenCron.oabs no Firestore.
-const DJEN_OABS = [
-  { numero: '16539', uf: 'GO', nome: 'Eduardo Urany de Castro' },
-  { numero: '87243', uf: 'DF', nome: 'Eduardo Urany de Castro' },
-  { numero: '2725',  uf: 'GO', nome: 'Terezinha Urany de Castro' },
-  { numero: '51774', uf: 'GO', nome: 'Sara Carolina Urany de Castro Melhem' },
-  { numero: '18809', uf: 'GO', nome: 'Juliano da Costa Ferreira' },
-  { numero: '18601', uf: 'GO', nome: 'Marko Antônio Duarte' },
-  { numero: '18222', uf: 'GO', nome: 'Cleber Ribeiro' },
-  { numero: '14301', uf: 'GO', nome: 'Marcelo Mendes França' },
-  { numero: '26648', uf: 'GO', nome: 'Bruno Naciff da Rocha' },
-  { numero: '24030', uf: 'GO', nome: 'Marcelo Bittar' },
-  { numero: '45212', uf: 'GO', nome: 'Marcos Fernando da Silva' }
-];
+// OABs varridas — carregadas de settings/djenOabs.value no Firestore
+// (mesma fonte que o app usa, single source of truth). Cadastro/edição
+// pela UI: Configurações → DJEN. Sem hardcoded no repo público (auditoria
+// 2026-09-07, item S6). Se o doc não existir ou vier vazio, o cron pula
+// e loga aviso — admin precisa cadastrar via UI.
+async function _loadOabsFromFirestore() {
+  try {
+    const snap = await db.doc('settings/djenOabs').get();
+    if (!snap.exists) return [];
+    const value = snap.data().value;
+    if (!Array.isArray(value)) return [];
+    // Filtra flag enabled do frontend (default true se ausente).
+    return value.filter(o => o && o.enabled !== false && o.numero && o.uf);
+  } catch (e) {
+    logger.warn('[DJEN] falha ao carregar settings/djenOabs: ' + (e && e.message || e));
+    return [];
+  }
+}
 
 // Headers de browser real — alguns WAFs do CNJ rejeitam UAs de bot
 const BROWSER_HEADERS = {
@@ -146,7 +149,20 @@ async function runDjenAutoCheck(dryRun = false) {
   }
   logger.info(`${logPrefix} janela ${inicio} → ${fim}`);
 
-  // ---- 3. Fetch DJEN pra todas as OABs -------------------------------
+  // ---- 3. Carrega OABs do Firestore + fetch DJEN ---------------------
+  const DJEN_OABS = await _loadOabsFromFirestore();
+  if (DJEN_OABS.length === 0) {
+    logger.warn(`${logPrefix} nenhuma OAB cadastrada em settings/djenOabs.value — cadastre via UI (Configurações → DJEN). Pulando esta rodada.`);
+    if (!dryRun) {
+      await db.doc('settings/djenCron').set({
+        value: { ...cfg, lastRun: tNow, lastDataFim: fim, lastNovas: 0, lastOrfas: 0, skipReason: 'no_oabs' },
+        updatedAt: tNow
+      }, { merge: true });
+    }
+    return { skipped: 'no_oabs' };
+  }
+  logger.info(`${logPrefix} OABs ativas: ${DJEN_OABS.length}`);
+
   const allPubs = [];
   for (let i = 0; i < DJEN_OABS.length; i++) {
     if (i > 0) await _sleep(250);

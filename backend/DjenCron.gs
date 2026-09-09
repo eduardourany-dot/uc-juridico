@@ -42,21 +42,22 @@ function _djenProxyUrl() {
   return PropertiesService.getScriptProperties().getProperty('DJEN_PROXY_URL');
 }
 
-// OABs varridas — espelho da DJEN_DEFAULT_OABS no app.
-// Mover pra settings/djenCron.oabs no futuro se precisar editar sem deploy.
-const DJEN_CRON_OABS = [
-  { numero: '16539', uf: 'GO', nome: 'Eduardo Urany de Castro' },
-  { numero: '87243', uf: 'DF', nome: 'Eduardo Urany de Castro' },
-  { numero: '2725',  uf: 'GO', nome: 'Terezinha Urany de Castro' },
-  { numero: '51774', uf: 'GO', nome: 'Sara Carolina Urany de Castro Melhem' },
-  { numero: '18809', uf: 'GO', nome: 'Juliano da Costa Ferreira' },
-  { numero: '18601', uf: 'GO', nome: 'Marko Antônio Duarte' },
-  { numero: '18222', uf: 'GO', nome: 'Cleber Ribeiro' },
-  { numero: '14301', uf: 'GO', nome: 'Marcelo Mendes França' },
-  { numero: '26648', uf: 'GO', nome: 'Bruno Naciff da Rocha' },
-  { numero: '24030', uf: 'GO', nome: 'Marcelo Bittar' },
-  { numero: '45212', uf: 'GO', nome: 'Marcos Fernando da Silva' }
-];
+// OABs varridas — carregadas de settings/djenOabs.value no Firestore
+// (mesma fonte que o app usa). Cadastro/edição pela UI: Configurações →
+// DJEN. Sem hardcoded no repo público (auditoria 2026-09-07, item S6).
+// Se doc não existir ou vier vazio, o cron pula esta rodada e loga aviso.
+function _loadDjenOabs() {
+  try {
+    const doc = _firestoreGet('settings/djenOabs');
+    if (!doc || !doc.value || !Array.isArray(doc.value)) return [];
+    return doc.value.filter(function (o) {
+      return o && o.enabled !== false && o.numero && o.uf;
+    });
+  } catch (e) {
+    Logger.log('[DJEN] falha ao carregar settings/djenOabs: ' + (e && e.message || e));
+    return [];
+  }
+}
 
 const DJEN_CRON_ESCRITORIO_ID = 'UC';
 
@@ -209,6 +210,14 @@ function djenAutoCheckCron(opts) {
   Logger.log(logPrefix + ' janela: ' + inicio + ' → ' + fim);
 
   // ---- 3. Fetch DJEN pra todas as OABs -----------------------------
+  // Carrega OABs do Firestore. Sem cadastro → pula rodada.
+  const DJEN_CRON_OABS = _loadDjenOabs();
+  if (DJEN_CRON_OABS.length === 0) {
+    Logger.log(logPrefix + ' nenhuma OAB cadastrada em settings/djenOabs.value — cadastre via UI (Configurações → DJEN). Pulando esta rodada.');
+    return { skipped: 'no_oabs' };
+  }
+  Logger.log(logPrefix + ' OABs ativas: ' + DJEN_CRON_OABS.length);
+
   // Sleep 250ms entre OABs pra não bater rate limit do CNJ (já vimos
   // HTTP 403 vindo de Apps Script sem espaçamento + headers de bot).
   const allPubs = [];
