@@ -4880,6 +4880,7 @@ ${/* Card 'Parte adversa (manual)' removido em v6.64.20 — info de partes/advog
       <div class="grid gap-2" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));">
         <button class="btn btn-outline" onclick="importPdfToProcess()">📄 Importar PDF do auto</button>
         <button class="btn btn-outline" onclick="addNoteFlow()">📝 Nova nota</button>
+        <button class="btn btn-outline" onclick="_recorderProcesso(state.currentProcessId, state._processView?.p?.name || '')" title="Grava áudio (áudio local no dispositivo) e transcrição ao vivo — vira nota do processo">🎙 Gravar áudio</button>
         ${/* "Adicionar publicação" removido — publicações entram via busca DJEN (auto-import); prazo agendado direto na publicação. */ ''}
         <button class="btn btn-outline" onclick="copyProcessToClaude()">📋 Copiar contexto p/ Claude</button>
         <button class="btn btn-outline" onclick="generateProcessFiche()">📜 Gerar ficha (Word)</button>
@@ -9896,6 +9897,250 @@ async function _agendaUcImportFlow() {
   input.click();
 }
 
+// =====================================================================
+// GRAVADOR DE ÁUDIO + TRANSCRIÇÃO — F1b (portada da Agenda UC)
+// =====================================================================
+// MVP grátis: MediaRecorder pro áudio + Web Speech API pra transcrição
+// ao vivo em pt-BR. Áudio fica LOCAL no dispositivo (blob) — advogado
+// baixa .webm se quiser guardar. Transcrição vai pra `notas` collection
+// (Firestore) amarrada a processo, compromisso ou avulsa.
+//
+// Zero custo mensal — não usa Firebase Storage nem Google STT.
+// Se um dia quiser áudio persistido, migra pra upload via Apps Script
+// (que já roteia pro Drive do escritório).
+
+const _RECORDER = { mediaRec: null, chunks: [], stream: null, recog: null, running: false, startedAt: 0 };
+
+function _recorderSuportado() {
+  return typeof MediaRecorder !== 'undefined' && !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+}
+function _recorderTemTranscricao() {
+  return typeof window.SpeechRecognition !== 'undefined' || typeof window.webkitSpeechRecognition !== 'undefined';
+}
+
+async function _recorderPararInterno() {
+  _RECORDER.running = false;
+  if (_RECORDER.recog) {
+    try { _RECORDER.recog.stop(); } catch (_) {}
+    _RECORDER.recog = null;
+  }
+  if (_RECORDER.mediaRec && _RECORDER.mediaRec.state !== 'inactive') {
+    await new Promise(r => {
+      _RECORDER.mediaRec.addEventListener('stop', r, { once: true });
+      _RECORDER.mediaRec.stop();
+    });
+  }
+  if (_RECORDER.stream) {
+    _RECORDER.stream.getTracks().forEach(t => t.stop());
+    _RECORDER.stream = null;
+  }
+}
+
+// Abre painel modal de gravação. opts: { titulo, alvo: { tipo, id, processoId? }, onSalvar? }
+async function _recorderAbrir(opts) {
+  opts = opts || {};
+  if (!_recorderSuportado()) {
+    toast('Gravação não suportada', 'Seu navegador não permite gravação de áudio.', 'error');
+    return;
+  }
+  // Impede duas gravações simultâneas
+  if (document.getElementById('_recorderModal')) return;
+
+  const backdrop = document.createElement('div');
+  backdrop.id = '_recorderModal';
+  backdrop.className = 'modal-backdrop';
+  const temSpeech = _recorderTemTranscricao();
+  backdrop.innerHTML = `
+    <div class="modal" style="max-width: 560px;">
+      <h3 class="modal-title">🎙 ${escapeHtml(opts.titulo || 'Gravar áudio')}</h3>
+      <p style="font-size: 12px; color: var(--uc-warm-gray); margin: 0 0 12px;">
+        ${temSpeech
+          ? 'Transcrição ao vivo em pt-BR. Áudio fica local no dispositivo — baixe .webm se quiser guardar.'
+          : 'Seu navegador não suporta transcrição automática. Só grava áudio (baixe pra guardar).'}
+      </p>
+
+      <div style="text-align: center; padding: 18px; background: var(--uc-cream); border-radius: 8px; margin-bottom: 12px;">
+        <div id="_recTimer" style="font-size: 30px; font-weight: 700; color: var(--uc-black); font-family: ui-monospace, monospace;">00:00</div>
+        <div id="_recLive" style="font-size: 11px; color: var(--uc-warm-gray); text-transform: uppercase; letter-spacing: 0.12em; margin-top: 4px;">pronto pra gravar</div>
+      </div>
+
+      <div style="font-size: 11px; color: var(--uc-warm-gray); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 4px;">Transcrição</div>
+      <div id="_recTranscricao" contenteditable="true" style="min-height: 100px; max-height: 220px; overflow-y: auto; padding: 12px; background: #fff; border: 1px solid var(--uc-line); border-radius: 6px; font-size: 13px; line-height: 1.6; color: var(--uc-black); margin-bottom: 12px; white-space: pre-wrap;"></div>
+      <p style="font-size: 10px; color: var(--uc-warm-gray); margin: 0 0 12px;">Você pode editar o texto acima antes de salvar.</p>
+
+      <audio id="_recPreview" controls style="width: 100%; margin-bottom: 12px; display: none;"></audio>
+
+      <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
+        <button class="btn btn-primary" id="_recStart">🎙 Iniciar</button>
+        <button class="btn btn-outline" id="_recStop" style="display: none;">⏹ Parar</button>
+        <button class="btn btn-primary" id="_recSalvar" style="display: none;">💾 Salvar nota</button>
+        <button class="btn btn-outline" id="_recBaixar" style="display: none;">⬇ Baixar .webm</button>
+        <button class="btn btn-ghost" id="_recCancelar" style="margin-left: auto;">Fechar</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(backdrop);
+
+  const $ = (sel) => backdrop.querySelector(sel);
+  const timerEl = $('#_recTimer');
+  const liveEl = $('#_recLive');
+  const textoEl = $('#_recTranscricao');
+  const previewEl = $('#_recPreview');
+  const btnStart = $('#_recStart');
+  const btnStop = $('#_recStop');
+  const btnSalvar = $('#_recSalvar');
+  const btnBaixar = $('#_recBaixar');
+  const btnCancelar = $('#_recCancelar');
+
+  let audioBlob = null;
+  let audioUrl = null;
+  let intervalHandle = null;
+  let textoAncora = '';   // parte "final" da fala (SpeechRecognition isFinal)
+  let textoInterim = '';  // hipótese em curso
+
+  const _pintarTexto = () => {
+    // Preserva a edição manual do usuário se ele mexeu no texto
+    const custom = textoEl.dataset.custom === '1';
+    if (custom) return;
+    textoEl.textContent = textoAncora + (textoInterim ? '  ' + textoInterim : '');
+    textoEl.scrollTop = textoEl.scrollHeight;
+  };
+  textoEl.addEventListener('input', () => { textoEl.dataset.custom = '1'; });
+
+  const _formatarTimer = (ms) => {
+    const s = Math.floor(ms / 1000);
+    return `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
+  };
+
+  const _fechar = async () => {
+    if (_RECORDER.running) await _recorderPararInterno();
+    if (intervalHandle) clearInterval(intervalHandle);
+    if (audioUrl) URL.revokeObjectURL(audioUrl);
+    backdrop.remove();
+  };
+  btnCancelar.onclick = _fechar;
+
+  btnStart.onclick = async () => {
+    try {
+      _RECORDER.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      // Fallback do mimeType — Safari não aceita opus explícito
+      let mime = 'audio/webm;codecs=opus';
+      if (typeof MediaRecorder.isTypeSupported === 'function' && !MediaRecorder.isTypeSupported(mime)) {
+        mime = MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : '';
+      }
+      _RECORDER.mediaRec = mime ? new MediaRecorder(_RECORDER.stream, { mimeType: mime }) : new MediaRecorder(_RECORDER.stream);
+      _RECORDER.chunks = [];
+      _RECORDER.mediaRec.ondataavailable = (e) => { if (e.data && e.data.size) _RECORDER.chunks.push(e.data); };
+      _RECORDER.mediaRec.onstop = () => {
+        const tipo = _RECORDER.chunks[0]?.type || 'audio/webm';
+        audioBlob = new Blob(_RECORDER.chunks, { type: tipo });
+        audioUrl = URL.createObjectURL(audioBlob);
+        previewEl.src = audioUrl;
+        previewEl.style.display = 'block';
+        btnSalvar.style.display = 'inline-block';
+        btnBaixar.style.display = 'inline-block';
+      };
+      _RECORDER.mediaRec.start(1000);
+      _RECORDER.startedAt = Date.now();
+      _RECORDER.running = true;
+      liveEl.textContent = '🔴 gravando…';
+      liveEl.style.color = 'var(--uc-red, #a33)';
+      btnStart.style.display = 'none';
+      btnStop.style.display = 'inline-block';
+
+      intervalHandle = setInterval(() => {
+        timerEl.textContent = _formatarTimer(Date.now() - _RECORDER.startedAt);
+      }, 500);
+
+      if (temSpeech) {
+        const Recog = window.SpeechRecognition || window.webkitSpeechRecognition;
+        _RECORDER.recog = new Recog();
+        _RECORDER.recog.lang = 'pt-BR';
+        _RECORDER.recog.continuous = true;
+        _RECORDER.recog.interimResults = true;
+        _RECORDER.recog.onresult = (ev) => {
+          textoInterim = '';
+          for (let i = ev.resultIndex; i < ev.results.length; i++) {
+            const t = ev.results[i][0].transcript;
+            if (ev.results[i].isFinal) textoAncora += t + ' ';
+            else textoInterim += t;
+          }
+          _pintarTexto();
+        };
+        _RECORDER.recog.onerror = (e) => console.warn('[recorder] speech error:', e.error);
+        // SpeechRecognition tem timeout — reinicia se ainda gravando
+        _RECORDER.recog.onend = () => {
+          if (_RECORDER.running) {
+            try { _RECORDER.recog.start(); } catch (_) {}
+          }
+        };
+        try { _RECORDER.recog.start(); } catch (e) { console.warn('[recorder] speech start:', e); }
+      }
+    } catch (e) {
+      toast('Erro ao acessar microfone', e.message || 'Verifique permissão do navegador', 'error');
+      backdrop.remove();
+    }
+  };
+
+  btnStop.onclick = async () => {
+    liveEl.textContent = 'finalizando…';
+    await _recorderPararInterno();
+    if (intervalHandle) { clearInterval(intervalHandle); intervalHandle = null; }
+    liveEl.textContent = 'gravação finalizada';
+    liveEl.style.color = 'var(--uc-warm-gray, #6b6b68)';
+    btnStop.style.display = 'none';
+  };
+
+  btnBaixar.onclick = () => {
+    if (!audioBlob) return;
+    const a = document.createElement('a');
+    a.href = audioUrl;
+    a.download = `gravacao-${new Date().toISOString().slice(0, 19).replace(/[T:]/g, '-')}.webm`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  };
+
+  btnSalvar.onclick = async () => {
+    const textoFinal = (textoEl.textContent || '').trim();
+    const duracaoSec = Math.floor((Date.now() - _RECORDER.startedAt) / 1000);
+    const meta = `\n\n— gravação de ${_formatarTimer(duracaoSec * 1000)} em ${new Date(_RECORDER.startedAt).toLocaleString('pt-BR')}${audioBlob ? ` · áudio ${(audioBlob.size / 1024).toFixed(0)}KB local (baixe .webm pra guardar)` : ''}`;
+
+    const alvo = opts.alvo || {};
+    const nota = {
+      id: uid(),
+      processId: alvo.tipo === 'processo' ? alvo.id : (alvo.processoId || null),
+      eventId: alvo.tipo === 'compromisso' ? alvo.id : null,
+      text: (textoFinal || '(áudio sem transcrição)') + meta,
+      origem: 'gravacao',
+      duracaoSec,
+      createdAt: Date.now()
+    };
+    try {
+      await DB.saveNote(nota);
+      toast('Nota salva com transcrição', '', 'success');
+      if (typeof opts.onSalvar === 'function') try { opts.onSalvar(nota); } catch (_) {}
+      _fechar();
+    } catch (e) {
+      toast('Erro ao salvar', e.message || String(e), 'error');
+    }
+  };
+}
+
+// Atalhos práticos por contexto
+function _recorderProcesso(processoId, processoTitulo) {
+  return _recorderAbrir({
+    titulo: `Gravar áudio — ${processoTitulo || 'processo'}`,
+    alvo: { tipo: 'processo', id: processoId }
+  });
+}
+function _recorderCompromisso(compromissoId, compromissoTitulo, processoId) {
+  return _recorderAbrir({
+    titulo: `Gravar áudio — ${compromissoTitulo || 'compromisso'}`,
+    alvo: { tipo: 'compromisso', id: compromissoId, processoId: processoId || null }
+  });
+}
+
 // Renderiza banner sticky no topo do app quando há prazos iminentes ou perdidos.
 // Chamado por updateNavBadges() — único ponto de orquestração da UI dos prazos.
 function renderBannerPrazos() {
@@ -14304,6 +14549,7 @@ function _renderCompromissoCard(c, procById, cliById) {
         </div>
         <div style="display: flex; gap: 2px; flex-shrink: 0;">
           ${c.status !== 'realizado' && c.status !== 'cancelado' ? `<button class="btn btn-ghost btn-sm" onclick="alterarStatusCompromisso('${c.id}')" title="Alterar status" style="padding: 2px 6px;">✓</button>` : ''}
+          <button class="btn btn-ghost btn-sm" onclick="_recorderCompromisso('${c.id}', ${JSON.stringify(c.titulo || '')}, ${c.processoId ? "'" + c.processoId + "'" : 'null'})" title="Gravar áudio + transcrição (fica local)" style="padding: 2px 6px;">🎙</button>
           <button class="btn btn-ghost btn-sm" onclick="editarCompromisso('${c.id}')" title="Editar" style="padding: 2px 6px;">✎</button>
           <button class="btn btn-ghost btn-sm" onclick="removerCompromisso('${c.id}')" title="Remover" style="padding: 2px 6px;">🗑</button>
         </div>
