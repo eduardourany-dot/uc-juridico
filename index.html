@@ -9629,6 +9629,259 @@ function _cobrancaConfigHtml(cfg) {
   `;
 }
 
+// =====================================================================
+// IMPORTADOR AGENDA UC — F2 (migração dos advogados que ainda usam
+// o app aparelho-local pra dentro do UC Jurídico multiusuário)
+// =====================================================================
+// Formato de entrada: JSON gerado por AGENDA_UC/agenda-uc (Ajustes →
+// Salvar cópia). Shape: { esquema, usuario, itens[], cfg, folhas,
+// conteudoFolhas, oplog }. Cada `item` tem { id, titulo, tipo, inicio,
+// duracao, local, processo, cliente, prioridade, status, responsavel,
+// visibilidade, cobrar, intervalo, cobrancas, ultimaCobranca,
+// silencioAte, criadoEm, atualizadoEm }.
+//
+// Mapeamento pra coleções UCJ:
+//   audiencia | reuniao | pessoal → compromissos
+//   prazo                          → prazos
+//   tarefa                         → tarefas
+//
+// Itens com visibilidade='privado' são SKIPPADOS (não vazam pra
+// coleção compartilhada). Folhas manuscritas e áudios não migram
+// nesta fase — dependem das features F1b/F1c ainda por vir.
+
+function _agendaUcInferirCompromissoTipo(t) {
+  if (t === 'audiencia') return 'audiencia';
+  if (t === 'reuniao') return 'reuniao_interna';
+  if (t === 'pessoal') return 'outro';
+  return 'outro';
+}
+
+function _agendaUcExtractCnj(texto) {
+  if (!texto) return null;
+  const m = String(texto).match(/\d{7}-?\d{2}\.?\d{4}\.?\d\.?\d{2}\.?\d{4}/);
+  return m ? m[0] : null;
+}
+
+async function _agendaUcInferirProcessoId(campoProcesso, processosDoUcj) {
+  if (!campoProcesso) return null;
+  const cnj = _agendaUcExtractCnj(campoProcesso);
+  if (!cnj) return null;
+  const cnjDigits = cnj.replace(/\D/g, '');
+  const encontrado = processosDoUcj.find(p => String(p.cnj || '').replace(/\D/g, '') === cnjDigits);
+  return encontrado?.id || null;
+}
+
+function _agendaUcMapCompromisso(item, meuNome, processoId) {
+  const inicio = item.inicio ? new Date(item.inicio) : new Date();
+  const fim = new Date(inicio.getTime() + (Number(item.duracao) || 60) * 60000);
+  return {
+    id: 'imp_' + (item.id || crypto.randomUUID().slice(0, 8)),
+    titulo: item.titulo || 'Compromisso importado',
+    tipo: _agendaUcInferirCompromissoTipo(item.tipo),
+    dataHoraInicio: inicio.toISOString(),
+    dataHoraFim: fim.toISOString(),
+    local: item.local || '',
+    responsavel: meuNome || '',
+    participantes: [],
+    processoId: processoId || null,
+    processoLivre: item.processo || null,
+    clienteLivre: item.cliente || null,
+    status: item.status === 'feito' ? 'realizado' : 'agendado',
+    notas: Array.isArray(item.notas) ? item.notas : [],
+    prioridade: item.prioridade || 'media',
+    origem: 'agenda-uc',
+    origemId: item.id || null,
+    cobrar: item.cobrar !== false,
+    cobrancas: Number(item.cobrancas) || 0,
+    ultimaCobrancaAt: item.ultimaCobranca ? new Date(item.ultimaCobranca).getTime() : null,
+    silencioAte: item.silencioAte ? new Date(item.silencioAte).getTime() : null,
+    createdAt: item.criadoEm ? new Date(item.criadoEm).getTime() : Date.now(),
+    updatedAt: Date.now()
+  };
+}
+
+function _agendaUcMapPrazo(item, meuNome, processoId) {
+  const inicio = item.inicio ? new Date(item.inicio) : new Date();
+  const dataFatalIso = inicio.toISOString().slice(0, 10);
+  return {
+    id: 'imp_' + (item.id || crypto.randomUUID().slice(0, 8)),
+    description: item.titulo || 'Prazo importado',
+    type: 'petição',
+    deadlineDate: dataFatalIso,
+    processId: processoId || null,
+    processoLivre: item.processo || null,
+    clienteLivre: item.cliente || null,
+    status: item.status === 'feito' ? 'cumprido' : 'pendente',
+    prioridade: item.prioridade || 'media',
+    notes: item.local ? `Local: ${item.local}` : '',
+    logs: [{ evento: 'importado', payload: { origem: 'agenda-uc' }, ator: meuNome || '', timestamp: Date.now() }],
+    origem: 'agenda-uc',
+    origemId: item.id || null,
+    cobrar: item.cobrar !== false,
+    cobrancas: Number(item.cobrancas) || 0,
+    ultimaCobrancaAt: item.ultimaCobranca ? new Date(item.ultimaCobranca).getTime() : null,
+    silencioAte: item.silencioAte ? new Date(item.silencioAte).getTime() : null,
+    createdAt: item.criadoEm ? new Date(item.criadoEm).getTime() : Date.now(),
+    updatedAt: Date.now()
+  };
+}
+
+function _agendaUcMapTarefa(item, meuNome, processoId) {
+  const inicio = item.inicio ? new Date(item.inicio) : null;
+  return {
+    id: 'imp_' + (item.id || crypto.randomUUID().slice(0, 8)),
+    titulo: item.titulo || 'Tarefa importada',
+    descricao: item.local ? `Local: ${item.local}` : '',
+    responsavel: meuNome || '',
+    prazoData: inicio ? inicio.toISOString().slice(0, 10) : null,
+    processoId: processoId || null,
+    processoLivre: item.processo || null,
+    clienteLivre: item.cliente || null,
+    status: item.status === 'feito' ? 'concluida' : 'aberta',
+    prioridade: item.prioridade || 'media',
+    logs: [{ evento: 'importado', payload: { origem: 'agenda-uc' }, ator: meuNome || '', timestamp: Date.now() }],
+    origem: 'agenda-uc',
+    origemId: item.id || null,
+    cobrar: item.cobrar !== false,
+    cobrancas: Number(item.cobrancas) || 0,
+    ultimaCobrancaAt: item.ultimaCobranca ? new Date(item.ultimaCobranca).getTime() : null,
+    silencioAte: item.silencioAte ? new Date(item.silencioAte).getTime() : null,
+    createdAt: item.criadoEm ? new Date(item.criadoEm).getTime() : Date.now(),
+    updatedAt: Date.now()
+  };
+}
+
+async function _agendaUcAnalisar(json, processosUcj, meuNome) {
+  const itens = Array.isArray(json.itens) ? json.itens : [];
+  const compromissos = [];
+  const prazos = [];
+  const tarefas = [];
+  const skipPrivados = [];
+  const skipInvalidos = [];
+  let comCnjMatch = 0, semCnj = 0;
+
+  for (const item of itens) {
+    if (!item || !item.titulo) { skipInvalidos.push(item); continue; }
+    if (item.visibilidade === 'privado') { skipPrivados.push(item); continue; }
+
+    const processoId = await _agendaUcInferirProcessoId(item.processo, processosUcj);
+    if (item.processo && processoId) comCnjMatch++;
+    else if (item.processo) semCnj++;
+
+    const t = item.tipo;
+    if (t === 'prazo') prazos.push(_agendaUcMapPrazo(item, meuNome, processoId));
+    else if (t === 'tarefa') tarefas.push(_agendaUcMapTarefa(item, meuNome, processoId));
+    else compromissos.push(_agendaUcMapCompromisso(item, meuNome, processoId));
+  }
+
+  return {
+    total: itens.length,
+    compromissos, prazos, tarefas,
+    skipPrivados, skipInvalidos,
+    comCnjMatch, semCnj,
+    folhasIgnoradas: json.folhas ? Object.keys(json.folhas).length : 0
+  };
+}
+
+async function _agendaUcExecutarImport(analise) {
+  const resultado = { compromissos: 0, prazos: 0, tarefas: 0, erros: [] };
+  for (const c of analise.compromissos) {
+    try { await DB.saveCompromisso(c); resultado.compromissos++; }
+    catch (e) { resultado.erros.push({ tipo: 'compromisso', id: c.id, erro: e.message || String(e) }); }
+  }
+  for (const p of analise.prazos) {
+    try { await DB.saveDeadline(p); resultado.prazos++; }
+    catch (e) { resultado.erros.push({ tipo: 'prazo', id: p.id, erro: e.message || String(e) }); }
+  }
+  for (const t of analise.tarefas) {
+    try { await DB.saveTarefa(t); resultado.tarefas++; }
+    catch (e) { resultado.erros.push({ tipo: 'tarefa', id: t.id, erro: e.message || String(e) }); }
+  }
+  return resultado;
+}
+
+async function _agendaUcImportFlow() {
+  const meu = window.UC_Auth?.getUser?.() || {};
+  const meuNome = (typeof defaultAdvogado === 'function' ? defaultAdvogado(meu.email) : '') || '';
+  if (!meuNome) {
+    toast('Impossível importar', 'Advogado logado não encontrado no quadro', 'error');
+    return;
+  }
+
+  // Abre file input
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'application/json,.json';
+  input.style.display = 'none';
+  document.body.appendChild(input);
+
+  input.onchange = async () => {
+    const file = input.files?.[0];
+    input.remove();
+    if (!file) return;
+
+    let json;
+    try {
+      const text = await file.text();
+      json = JSON.parse(text);
+    } catch (e) {
+      toast('JSON inválido', e.message || 'não pôde ler o arquivo', 'error');
+      return;
+    }
+
+    if (!json || !Array.isArray(json.itens)) {
+      toast('Formato inesperado', 'Esperado: exportação da Agenda UC (Ajustes → Salvar cópia)', 'error');
+      return;
+    }
+
+    // Preview
+    let processosUcj = [];
+    try { processosUcj = await DB.getAllProcesses(); } catch (_) { processosUcj = []; }
+
+    toast('Analisando…', `${json.itens.length} itens no arquivo`, 'info');
+    const analise = await _agendaUcAnalisar(json, processosUcj, meuNome);
+
+    const mensagem =
+      `Responsável de todos os itens importados: ${meuNome}\n\n` +
+      `Vai gravar:\n` +
+      `  • ${analise.compromissos.length} compromisso(s)\n` +
+      `  • ${analise.prazos.length} prazo(s)\n` +
+      `  • ${analise.tarefas.length} tarefa(s)\n\n` +
+      `Ignorados:\n` +
+      `  • ${analise.skipPrivados.length} marcado(s) como privado\n` +
+      `  • ${analise.skipInvalidos.length} sem título\n` +
+      `  • ${analise.folhasIgnoradas} folha(s) manuscrita(s) (dependem da F1c)\n\n` +
+      `Vínculo com processos:\n` +
+      `  • ${analise.comCnjMatch} com CNJ que casou\n` +
+      `  • ${analise.semCnj} com texto sem CNJ (mantido como texto livre)\n\n` +
+      `⚠ IDs prefixados com "imp_". Reimportar o mesmo arquivo duplica. ` +
+      `Faça backup do UCJ antes se quiser poder reverter.`;
+    const ok = await confirmDialog(
+      `Importar ${analise.total} itens da Agenda UC?`,
+      mensagem,
+      true
+    );
+
+    if (!ok) return;
+
+    toast('Importando…', '', 'info');
+    const resultado = await _agendaUcExecutarImport(analise);
+
+    const msg = `${resultado.compromissos} compromisso(s) · ${resultado.prazos} prazo(s) · ${resultado.tarefas} tarefa(s)${resultado.erros.length ? ' · ' + resultado.erros.length + ' erro(s)' : ''}`;
+    if (resultado.erros.length) {
+      console.warn('[agenda-uc import] erros:', resultado.erros);
+      toast('Importação parcial', msg, 'error');
+    } else {
+      toast('✅ Importação concluída', msg, 'success');
+    }
+    // Refresh
+    if (typeof loadInitialData === 'function') await loadInitialData();
+    if (state.currentRoute === 'settings') renderSettings();
+  };
+
+  input.click();
+}
+
 // Renderiza banner sticky no topo do app quando há prazos iminentes ou perdidos.
 // Chamado por updateNavBadges() — único ponto de orquestração da UI dos prazos.
 function renderBannerPrazos() {
@@ -20565,6 +20818,20 @@ function renderSettingsTab(tab, prompts, defaultPromptId) {
             <p class="help-text">Mostra um banner discreto no Início quando faz uma semana sem exportar.</p>
           </label>
         </div>
+      </div>
+
+      <!-- Importador Agenda UC (F2 do plano de fusão) -->
+      <div class="card mt-3" style="border-left: 3px solid var(--uc-argila, #c96442);">
+        <h4 class="font-serif font-semibold smallcaps mb-2" style="color: var(--uc-black);">📥 Importar da Agenda UC</h4>
+        <p class="help-text" style="margin-bottom: 10px;">
+          Migração do app <strong>Agenda UC</strong> (aparelho-local) pro UC Jurídico. Cada advogado exporta o JSON pelo próprio aparelho (Ajustes → Salvar cópia) e importa aqui.
+          Faz PREVIEW antes de gravar — nada é escrito sem sua confirmação.
+        </p>
+        <button class="btn btn-primary" onclick="_agendaUcImportFlow()">📥 Importar JSON da Agenda UC</button>
+        <p class="help-text" style="margin-top: 10px; font-size: 11px;">
+          Mapeamento: <code>audiencia/reuniao/pessoal</code> → Compromissos · <code>prazo</code> → Prazos · <code>tarefa</code> → Tarefas.
+          Folhas manuscritas e áudios de gravação ficam pra depois (F1b/F1c). Itens marcados como <em>privado</em> não migram.
+        </p>
       </div>
     `;
   }
